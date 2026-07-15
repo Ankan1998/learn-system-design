@@ -19,6 +19,7 @@ After completing this level you will be able to:
 - Design a data model from **access patterns** for both SQL and NoSQL stores.
 - Explain how **consistent hashing** minimizes key remapping when cluster nodes change.
 - Choose **object storage** for blobs and know why large BLOBs never belong in a relational DB.
+- Stream database changes with **CDC** (log-based capture, Debezium) and fix the dual-write problem with the outbox pattern.
 
 ---
 
@@ -49,6 +50,7 @@ flowchart LR
         T7[07 Data<br/>Modeling]
         T8[08 Consistent<br/>Hashing]
         T9[09 Object<br/>Storage]
+        T10[10 Change Data<br/>Capture]
 
         T1 --> T2
         T2 --> T3
@@ -58,6 +60,7 @@ flowchart LR
         T6 --> T7
         T7 --> T8
         T8 --> T9
+        T9 --> T10
     end
 
     B --> C([Level 04<br/>Distributed Systems])
@@ -73,6 +76,7 @@ flowchart LR
     style T7 fill:#fef9c3,color:#000
     style T8 fill:#fef9c3,color:#000
     style T9 fill:#fef9c3,color:#000
+    style T10 fill:#fef9c3,color:#000
 ```
 
 ---
@@ -90,8 +94,9 @@ flowchart LR
 | 07 | [Data Modeling](./07-Data-Modeling/README.md) | Normalization, access-pattern modeling, embedding vs referencing | 50 min |
 | 08 | [Consistent Hashing](./08-Consistent-Hashing/README.md) | Hash ring, virtual nodes, why only K/N keys move when a node changes | 35 min |
 | 09 | [Object Storage](./09-Object-Storage/README.md) | S3 / GCS / Azure Blob, presigned URLs, lifecycle tiers, the BLOB-in-DB antipattern | 30 min |
+| 10 | [Change Data Capture](./10-Change-Data-Capture/README.md) | Dual-write problem, log-based CDC, Debezium, outbox pattern, cache/search-index sync | 40 min |
 
-**Total estimated time: ~6 hours**
+**Total estimated time: ~6.5 hours**
 
 ---
 

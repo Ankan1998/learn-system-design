@@ -270,5 +270,5 @@ Text pastes are small, but storing them as `TEXT` blobs in Postgres at scale is 
 - [How Facebook Stores Billions of Photos (Haystack)](https://www.usenix.org/legacy/event/osdi10/tech/full_papers/Beaver.pdf) — the original paper.
 - [DDIA Chapter 3](https://dataintensive.net/) — Storage and Retrieval; covers storage engine trade-offs.
 - [The S3 Strong Consistency Announcement](https://aws.amazon.com/blogs/aws/amazon-s3-update-strong-read-after-write-consistency/) — December 2020.
-- Previous: [08 — Consistent Hashing](../08-Consistent-Hashing/README.md) · Back to [Level 02 Overview](../README.md)
+- Previous: [08 — Consistent Hashing](../08-Consistent-Hashing/README.md) · Next: [10 — Change Data Capture](../10-Change-Data-Capture/README.md) · Back to [Level 02 Overview](../README.md)
 - See also: [Bonus — Instagram](../../Bonus-Real-World-Architectures/README.md) · [Bonus — YouTube](../../Bonus-Real-World-Architectures/README.md) · [Bonus — Google Drive](../../Bonus-Real-World-Architectures/README.md) · [Bonus — Pastebin](../../Bonus-Real-World-Architectures/README.md)
