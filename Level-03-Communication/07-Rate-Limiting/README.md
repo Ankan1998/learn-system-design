@@ -371,3 +371,4 @@ Good clients use `Retry-After` to implement **exponential backoff** and avoid ha
 - [Redis INCR Command](https://redis.io/commands/incr/)
 - [System Design — Designing a Rate Limiter (ByteByteGo)](https://bytebytego.com/courses/system-design-interview/design-a-rate-limiter)
 - Previous: [06-WebSockets-and-Realtime](../06-WebSockets-and-Realtime/README.md)
+- Next: [08-Authentication-and-Authorization](../08-Authentication-and-Authorization/README.md)

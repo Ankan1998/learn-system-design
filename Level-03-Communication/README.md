@@ -15,6 +15,7 @@ By the end of this level you will be able to:
 - Contrast message queues (point-to-point) with pub/sub (fan-out) and name real platforms for each
 - Architect real-time features using the right transport (polling → SSE → WebSockets) and scale stateful connections
 - Implement and compare five rate-limiting algorithms and defend your choice in an interview
+- Secure APIs end-to-end: sessions vs JWTs, OAuth 2.0 + PKCE, OIDC, SSO/SAML, API keys, mTLS, and RBAC/ABAC authorization
 
 ---
 
@@ -31,6 +32,7 @@ flowchart LR
         E --> F[05 Pub-Sub]
         B --> G[06 WebSockets & Realtime]
         B --> H[07 Rate Limiting]
+        H --> I[08 Authentication &<br/>Authorization]
     end
 
     L3 --> Z([Level-04<br/>Distributed Systems])
@@ -44,6 +46,7 @@ flowchart LR
     style F fill:#fff3cd,color:#000
     style G fill:#fde8d8,color:#000
     style H fill:#fde8d8,color:#000
+    style I fill:#fde8d8,color:#000
 ```
 
 ---
@@ -59,8 +62,9 @@ flowchart LR
 | 5 | [05-Pub-Sub](./05-Pub-Sub/README.md) | Topics, fan-out, push vs pull, event-driven architecture | 35 min |
 | 6 | [06-WebSockets-and-Realtime](./06-WebSockets-and-Realtime/README.md) | Polling → SSE → WebSockets, handshake, scaling stateful connections | 45 min |
 | 7 | [07-Rate-Limiting](./07-Rate-Limiting/README.md) | Fixed window, sliding window, token bucket, leaky bucket, Redis INCR | 45 min |
+| 8 | [08-Authentication-and-Authorization](./08-Authentication-and-Authorization/README.md) | Sessions vs JWT, OAuth 2.0 + PKCE, OIDC, SSO/SAML, API keys, mTLS, RBAC/ABAC | 50 min |
 
-**Total estimated time: ~5 hours**
+**Total estimated time: ~6 hours**
 
 ---
 
