@@ -24,6 +24,9 @@ flowchart TD
     C --> G[06 · Resilience Patterns]
     C --> H[07 · Saga & Orchestration]
     D --> H
+    B --> I[08 · Serverless Architecture]
+    E --> J[09 · Service Mesh]
+    G --> J
 
     style A fill:#e8f4f8,color:#000
     style B fill:#d4edda,color:#000
@@ -33,6 +36,8 @@ flowchart TD
     style F fill:#d4edda,color:#000
     style G fill:#fff3cd,color:#000
     style H fill:#f8d7da,color:#000
+    style I fill:#fff3cd,color:#000
+    style J fill:#f8d7da,color:#000
 ```
 
 **Color guide:** Green = foundational · Yellow = intermediate · Red = advanced
@@ -50,8 +55,10 @@ flowchart TD
 | 05 | [API Gateway](./05-API-Gateway/README.md) | Single entry point, BFF pattern, routing & auth | 35 min |
 | 06 | [Resilience Patterns](./06-Resilience-Patterns/README.md) | Circuit breakers, retries, bulkheads, graceful degradation | 45 min |
 | 07 | [Saga & Orchestration](./07-Saga-and-Orchestration/README.md) | Long-running transactions without 2PC, Temporal, compensation | 50 min |
+| 08 | [Serverless Architecture](./08-Serverless-Architecture/README.md) | FaaS, cold starts, event triggers, edge functions, when NOT to go serverless | 45 min |
+| 09 | [Service Mesh](./09-Service-Mesh/README.md) | Sidecars, data vs control plane, Istio/Linkerd, mTLS, traffic splitting | 40 min |
 
-**Total estimated time: ~5 hours**
+**Total estimated time: ~6.5 hours**
 
 ---
 
@@ -77,6 +84,8 @@ By the end of this level you will be able to:
 5. **Design** an API Gateway layer with auth, rate limiting, and BFF variants
 6. **Apply** circuit breakers, retries, and bulkheads to make distributed systems fault-tolerant
 7. **Walk through** a Saga pattern with compensating transactions in an interview
+8. **Decide** when serverless/FaaS fits — and when cold starts, costs, or lock-in rule it out
+9. **Explain** how a service mesh moves retries, mTLS, and telemetry out of application code
 
 ---
 

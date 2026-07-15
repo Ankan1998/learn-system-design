@@ -348,4 +348,4 @@ graph TD
 
 ---
 
-*← [Resilience Patterns](../06-Resilience-Patterns/README.md) · [Level 05 Overview](../README.md) · Next: [Level 06 — Observability](../../Level-06-Scale-and-Reliability/01-Observability/README.md) →*
+*← [Resilience Patterns](../06-Resilience-Patterns/README.md) · [Level 05 Overview](../README.md) · Next: [Serverless Architecture](../08-Serverless-Architecture/README.md) →*
