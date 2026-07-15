@@ -12,15 +12,15 @@ Your personal checklist for the whole curriculum. **Tick a box** by changing `- 
 |---|---|---|
 | Level 0 — Foundations | 7 | ⬜⬜⬜⬜⬜⬜⬜ |
 | Level 1 — Building Blocks | 7 | ⬜⬜⬜⬜⬜⬜⬜ |
-| Level 2 — The Data Layer | 9 | ⬜⬜⬜⬜⬜⬜⬜⬜⬜ |
-| Level 3 — Communication | 7 | ⬜⬜⬜⬜⬜⬜⬜ |
+| Level 2 — The Data Layer | 10 | ⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜ |
+| Level 3 — Communication | 8 | ⬜⬜⬜⬜⬜⬜⬜⬜ |
 | Level 4 — Distributed Systems | 8 | ⬜⬜⬜⬜⬜⬜⬜⬜ |
-| Level 5 — Architecture Patterns | 7 | ⬜⬜⬜⬜⬜⬜⬜ |
+| Level 5 — Architecture Patterns | 9 | ⬜⬜⬜⬜⬜⬜⬜⬜⬜ |
 | Level 6 — Scale & Reliability | 7 | ⬜⬜⬜⬜⬜⬜⬜ |
-| Level 7 — Big Data & Specialized | 7 | ⬜⬜⬜⬜⬜⬜⬜ |
-| **Concept topics total** | **59** | |
-| Bonus — Real-World Designs | 34 | |
-| **GRAND TOTAL** | **93** | |
+| Level 7 — Big Data & Specialized | 9 | ⬜⬜⬜⬜⬜⬜⬜⬜⬜ |
+| **Concept topics total** | **65** | |
+| Bonus — Real-World Designs | 38 | |
+| **GRAND TOTAL** | **103** | |
 
 Update the ⬜ blocks to 🟩 as you clear each level — a quick visual of how far you've come.
 
@@ -54,6 +54,7 @@ Update the ⬜ blocks to 🟩 as you clear each level — a quick visual of how 
 - [ ] 2.7 [Data Modeling](./Level-02-Data-Layer/07-Data-Modeling/)
 - [ ] 2.8 [Consistent Hashing](./Level-02-Data-Layer/08-Consistent-Hashing/)
 - [ ] 2.9 [Object & Blob Storage (S3)](./Level-02-Data-Layer/09-Object-Storage/)
+- [ ] 2.10 [Change Data Capture (CDC)](./Level-02-Data-Layer/10-Change-Data-Capture/)
 
 ## 🟧 Level 3 — Communication
 - [ ] 3.1 [API Design & REST](./Level-03-Communication/01-API-Design-REST/)
@@ -63,6 +64,7 @@ Update the ⬜ blocks to 🟩 as you clear each level — a quick visual of how 
 - [ ] 3.5 [Publish-Subscribe (Pub/Sub)](./Level-03-Communication/05-Pub-Sub/)
 - [ ] 3.6 [WebSockets & Real-Time](./Level-03-Communication/06-WebSockets-and-Realtime/)
 - [ ] 3.7 [Rate Limiting](./Level-03-Communication/07-Rate-Limiting/)
+- [ ] 3.8 [Authentication & Authorization](./Level-03-Communication/08-Authentication-and-Authorization/)
 
 ## 🟧 Level 4 — Distributed Systems
 - [ ] 4.1 [The CAP Theorem](./Level-04-Distributed-Systems/01-CAP-Theorem/)
@@ -82,6 +84,8 @@ Update the ⬜ blocks to 🟩 as you clear each level — a quick visual of how 
 - [ ] 5.5 [API Gateway](./Level-05-Architecture-Patterns/05-API-Gateway/)
 - [ ] 5.6 [Resilience Patterns](./Level-05-Architecture-Patterns/06-Resilience-Patterns/)
 - [ ] 5.7 [Saga & Workflow Orchestration](./Level-05-Architecture-Patterns/07-Saga-and-Orchestration/)
+- [ ] 5.8 [Serverless Architecture — FaaS & Beyond](./Level-05-Architecture-Patterns/08-Serverless-Architecture/)
+- [ ] 5.9 [Service Mesh](./Level-05-Architecture-Patterns/09-Service-Mesh/)
 
 ## 🟥 Level 6 — Scale & Reliability
 - [ ] 6.1 [Observability — Logs, Metrics, Traces](./Level-06-Scale-and-Reliability/01-Observability/)
@@ -100,6 +104,8 @@ Update the ⬜ blocks to 🟩 as you clear each level — a quick visual of how 
 - [ ] 7.5 [Recommendation & ML Systems](./Level-07-Big-Data-and-Specialized/05-Recommendation-and-ML-Systems/)
 - [ ] 7.6 [Probabilistic Data Structures](./Level-07-Big-Data-and-Specialized/06-Probabilistic-Data-Structures/)
 - [ ] 7.7 [Geospatial Indexing — Geohash, S2, H3](./Level-07-Big-Data-and-Specialized/07-Geospatial-Indexing/)
+- [ ] 7.8 [Specialized Databases — Time-Series, Graph & NewSQL](./Level-07-Big-Data-and-Specialized/08-Specialized-Databases/)
+- [ ] 7.9 [AI & LLM Infrastructure — Vector Search, RAG & Inference](./Level-07-Big-Data-and-Specialized/09-AI-and-LLM-Infrastructure/)
 
 ---
 
@@ -112,13 +118,15 @@ Update the ⬜ blocks to 🟩 as you clear each level — a quick visual of how 
 - [ ] 04 [Notification Service](./Bonus-Real-World-Architectures/04-Notification-Service/)
 - [ ] 05 [Web Crawler](./Bonus-Real-World-Architectures/05-Web-Crawler/)
 - [ ] 26 [Unique ID Generator (Snowflake)](./Bonus-Real-World-Architectures/26-Unique-ID-Generator/)
+- [ ] 35 [Gaming Leaderboard](./Bonus-Real-World-Architectures/35-Gaming-Leaderboard/)
 
-### 🟡 Social & media (⭐⭐⭐)
+### 🟡 Social, media & platform (⭐⭐⭐)
 - [ ] 06 [News Feed (Twitter/X)](./Bonus-Real-World-Architectures/06-News-Feed-Twitter/)
 - [ ] 07 [Instagram](./Bonus-Real-World-Architectures/07-Instagram/)
 - [ ] 08 [WhatsApp / Chat](./Bonus-Real-World-Architectures/08-WhatsApp-Chat/)
 - [ ] 09 [YouTube / Netflix Streaming](./Bonus-Real-World-Architectures/09-YouTube-Netflix-Streaming/)
 - [ ] 10 [Typeahead / Autocomplete](./Bonus-Real-World-Architectures/10-Typeahead-Autocomplete/)
+- [ ] 36 [Webhook Delivery Service](./Bonus-Real-World-Architectures/36-Webhook-Delivery-Service/)
 
 ### 🟠 Marketplace & geo (⭐⭐⭐⭐)
 - [ ] 11 [Uber / Lyft](./Bonus-Real-World-Architectures/11-Uber-Ride-Sharing/)
@@ -148,6 +156,8 @@ Update the ⬜ blocks to 🟩 as you clear each level — a quick visual of how 
 - [ ] 25 [Live Streaming (Twitch)](./Bonus-Real-World-Architectures/25-Live-Streaming/)
 - [ ] 28 [Google Docs (Collaborative Editing)](./Bonus-Real-World-Architectures/28-Google-Docs-Collaborative-Editing/)
 - [ ] 30 [Video Conferencing (Zoom)](./Bonus-Real-World-Architectures/30-Video-Conferencing/)
+- [ ] 37 [Distributed File System (GFS/HDFS)](./Bonus-Real-World-Architectures/37-Distributed-File-System/)
+- [ ] 38 [LLM Chat Service (ChatGPT)](./Bonus-Real-World-Architectures/38-LLM-Chat-Service/)
 
 ---
 
@@ -158,7 +168,7 @@ Update the ⬜ blocks to 🟩 as you clear each level — a quick visual of how 
 - [ ] 🥇 **Distributed thinker** — finished Levels 4–5 (the hard core; you can reason about consistency and architecture).
 - [ ] 🏅 **Production-grade** — finished Levels 6–7 (you can run it at scale and handle big data).
 - [ ] 🏆 **Interview-ready** — completed 10+ bonus designs.
-- [ ] 👑 **Grandmaster** — completed all 34 bonus designs.
+- [ ] 👑 **Grandmaster** — completed all 38 bonus designs.
 
 ---
 

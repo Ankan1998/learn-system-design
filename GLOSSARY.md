@@ -16,6 +16,8 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 **API Gateway** — A single entry point that sits in front of many backend services, handling auth, routing, rate limiting, etc.
 
+**Authentication (AuthN) / Authorization (AuthZ)** — AuthN verifies *who you are* (login, tokens); AuthZ verifies *what you're allowed to do* (roles, permissions).
+
 ## B
 
 **Backpressure** — When a downstream component is overwhelmed and signals upstream producers to slow down.
@@ -30,7 +32,11 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 **CAP Theorem** — In the presence of a network **P**artition, a distributed system must choose between **C**onsistency and **A**vailability.
 
+**CDC (Change Data Capture)** — Streaming a database's change log (WAL/binlog) to downstream systems — caches, search indexes, warehouses — so they stay in sync without dual writes.
+
 **CDN (Content Delivery Network)** — A globally distributed network of servers that caches content close to users.
+
+**Cold Start** — The extra latency when a serverless function (or new server/connection) must be initialized from scratch before serving its first request.
 
 **Consensus** — The problem of getting multiple distributed nodes to agree on a single value (solved by Paxos, Raft).
 
@@ -50,6 +56,8 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 ## E
 
+**Embedding** — A dense numeric vector representing the *meaning* of text/images, enabling semantic (similarity) search instead of exact keyword match.
+
 **Eventual Consistency** — Given no new updates, all replicas will *eventually* converge to the same value.
 
 **Event Sourcing** — Storing state as an immutable log of events rather than as current values.
@@ -57,6 +65,8 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 **Exactly-Once** — A processing guarantee that each message affects the system's state once and only once (usually achieved via idempotency + dedup).
 
 ## F
+
+**FaaS (Function as a Service)** — Serverless compute where you deploy single functions triggered by events; the platform handles servers and scaling (AWS Lambda, Cloud Functions).
 
 **Fan-out** — Delivering one piece of data to many destinations (e.g., one tweet to all followers' timelines).
 
@@ -68,6 +78,8 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 **Heartbeat** — A periodic "I'm alive" signal used to detect node failures.
 
+**HNSW (Hierarchical Navigable Small World)** — The layered-graph index most vector databases use for fast approximate nearest-neighbor search.
+
 **Horizontal Scaling (Scale-out)** — Adding more machines.
 
 **Hotspot / Hot Key** — A single key or shard receiving a disproportionate share of traffic.
@@ -77,6 +89,10 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 **Idempotency** — An operation that can be applied multiple times without changing the result beyond the first application.
 
 **Index** — A data structure (often a B-Tree) that makes database lookups fast at the cost of extra storage and slower writes.
+
+## J
+
+**JWT (JSON Web Token)** — A signed, self-contained token (`header.payload.signature`) that lets servers verify identity without a session store. Revocation is its weak spot.
 
 ## L
 
@@ -92,9 +108,19 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 **Microservices** — An architecture of small, independently deployable services.
 
+**mTLS (Mutual TLS)** — TLS where *both* client and server present certificates; the standard for service-to-service authentication in zero-trust networks and service meshes.
+
 ## N
 
+**NewSQL / Distributed SQL** — Databases offering SQL + ACID transactions with horizontal scale (Google Spanner, CockroachDB, TiDB).
+
 **NoSQL** — Non-relational databases (key-value, document, column-family, graph) optimized for scale and flexibility.
+
+## O
+
+**OAuth 2.0** — The standard protocol for *delegated authorization* — letting an app act on your behalf without seeing your password. **OIDC** adds an identity (login) layer on top of it.
+
+**Outbox Pattern** — Writing an event to an "outbox" table in the *same transaction* as the business change, then relaying it to a queue — the standard fix for the dual-write problem.
 
 ## P
 
@@ -116,7 +142,11 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 ## R
 
+**RAG (Retrieval-Augmented Generation)** — Retrieving relevant documents (usually via vector search) and inserting them into an LLM's prompt so answers are grounded in your data.
+
 **Rate Limiting** — Capping how many requests a client may make in a time window.
+
+**RBAC / ABAC** — Role-Based vs Attribute-Based Access Control: authorization by assigned roles vs by evaluating attributes of the user, resource, and context.
 
 **Replication** — Keeping copies of data on multiple machines for durability and read scaling.
 
@@ -125,6 +155,10 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 ## S
 
 **Saga** — A sequence of local transactions with compensating actions, used for distributed transactions.
+
+**Serverless** — Running code without managing servers; you pay per use and the platform scales (even to zero). See FaaS.
+
+**Service Mesh** — An infrastructure layer of sidecar proxies plus a control plane that handles mTLS, retries, routing, and telemetry between microservices (Istio, Linkerd).
 
 **Sharding** — See Partition.
 
@@ -140,13 +174,19 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 **Throttling** — Deliberately slowing or rejecting requests to protect a system.
 
+**Time-Series Database (TSDB)** — A database optimized for timestamped, append-only data (metrics, IoT) with heavy compression and time-window queries (InfluxDB, Prometheus).
+
 **TTL (Time To Live)** — How long a cached/stored item remains valid before expiring.
 
 ## V
 
+**Vector Database** — A database that indexes embeddings for fast approximate nearest-neighbor (semantic) search (pgvector, Pinecone, Milvus, Qdrant).
+
 **Vertical Scaling (Scale-up)** — Making a single machine more powerful (more CPU/RAM).
 
 ## W
+
+**Webhook** — An HTTP callback your platform sends to a customer's URL when an event happens — "we call you" instead of you polling us.
 
 **WebSocket** — A protocol for persistent, full-duplex (two-way) communication between client and server.
 

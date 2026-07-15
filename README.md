@@ -4,8 +4,8 @@
 > A free, structured, beginner-to-ultra-advanced path to mastering system design — with diagrams, real-world examples, and analogies you'll actually remember.
 
 [![Levels](https://img.shields.io/badge/Levels-8-blue)]()
-[![Topics](https://img.shields.io/badge/Topics-55+-green)]()
-[![Case Studies](https://img.shields.io/badge/Real--World%20Designs-34-orange)]()
+[![Topics](https://img.shields.io/badge/Topics-65-green)]()
+[![Case Studies](https://img.shields.io/badge/Real--World%20Designs-38-orange)]()
 [![Made for](https://img.shields.io/badge/Made%20for-Beginners%20%E2%86%92%20Pros-purple)]()
 
 ---
@@ -34,7 +34,7 @@ Every single topic includes:
 |---|---|
 | A **student / beginner** who has never built a backend | A gentle, jargon-free on-ramp starting from "what is a client and a server" |
 | A **developer** who can build apps but freezes in design interviews | A structured vocabulary and a repeatable framework |
-| A **senior engineer** prepping for L5/L6/staff interviews | Deep dives on consensus, CQRS, multi-region, and 25 full case studies |
+| A **senior engineer** prepping for L5/L6/staff interviews | Deep dives on consensus, CQRS, multi-region, and 38 full case studies |
 | A **curious mind** who wants to know how Uber/WhatsApp actually work | The Bonus folder — real architectures, demystified |
 
 **Prerequisites:** Basic programming knowledge (you've written a function and called an API). That's it. We explain everything else.
@@ -52,8 +52,8 @@ flowchart TD
     L4["<b>Level 4 — Distributed Systems</b><br/>CAP, consensus, consistency,<br/>clocks, idempotency"]
     L5["<b>Level 5 — Architecture Patterns</b><br/>Microservices, event-driven,<br/>CQRS, resilience"]
     L6["<b>Level 6 — Scale & Reliability</b><br/>Observability, HA/DR,<br/>multi-region, security"]
-    L7["<b>Level 7 — Big Data & Specialized</b><br/>Stream/batch processing,<br/>search, ML systems"]
-    BONUS["<b>🏆 Bonus — 25 Real-World Designs</b><br/>URL shortener → Uber →<br/>Stock exchange"]
+    L7["<b>Level 7 — Big Data & Specialized</b><br/>Stream/batch processing,<br/>search, ML & AI systems"]
+    BONUS["<b>🏆 Bonus — 38 Real-World Designs</b><br/>URL shortener → Uber →<br/>Stock exchange → ChatGPT"]
 
     L0 --> L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7 --> BONUS
 
@@ -103,6 +103,7 @@ flowchart TD
 7. [Data Modeling](./Level-02-Data-Layer/07-Data-Modeling/)
 8. [Consistent Hashing](./Level-02-Data-Layer/08-Consistent-Hashing/)
 9. [Object & Blob Storage (S3)](./Level-02-Data-Layer/09-Object-Storage/)
+10. [Change Data Capture (CDC)](./Level-02-Data-Layer/10-Change-Data-Capture/)
 
 ### 🟧 [Level 3 — Communication](./Level-03-Communication/)
 *How services talk to each other and to clients.*
@@ -113,6 +114,7 @@ flowchart TD
 5. [Publish-Subscribe (Pub/Sub)](./Level-03-Communication/05-Pub-Sub/)
 6. [WebSockets & Real-Time Communication](./Level-03-Communication/06-WebSockets-and-Realtime/)
 7. [Rate Limiting](./Level-03-Communication/07-Rate-Limiting/)
+8. [Authentication & Authorization](./Level-03-Communication/08-Authentication-and-Authorization/)
 
 ### 🟧 [Level 4 — Distributed Systems](./Level-04-Distributed-Systems/)
 *The hard, beautiful core. Where most senior interviews live.*
@@ -134,6 +136,8 @@ flowchart TD
 5. [API Gateway](./Level-05-Architecture-Patterns/05-API-Gateway/)
 6. [Resilience Patterns — Circuit Breakers, Bulkheads, Retries](./Level-05-Architecture-Patterns/06-Resilience-Patterns/)
 7. [Saga & Workflow Orchestration](./Level-05-Architecture-Patterns/07-Saga-and-Orchestration/)
+8. [Serverless Architecture — FaaS & Beyond](./Level-05-Architecture-Patterns/08-Serverless-Architecture/)
+9. [Service Mesh](./Level-05-Architecture-Patterns/09-Service-Mesh/)
 
 ### 🟥 [Level 6 — Scale & Reliability](./Level-06-Scale-and-Reliability/)
 *Making it observable, available, and safe at planet scale.*
@@ -154,8 +158,10 @@ flowchart TD
 5. [Recommendation & ML Systems](./Level-07-Big-Data-and-Specialized/05-Recommendation-and-ML-Systems/)
 6. [Probabilistic Data Structures — Bloom Filters, HyperLogLog](./Level-07-Big-Data-and-Specialized/06-Probabilistic-Data-Structures/)
 7. [Geospatial Indexing — Geohash, S2, H3](./Level-07-Big-Data-and-Specialized/07-Geospatial-Indexing/)
+8. [Specialized Databases — Time-Series, Graph & NewSQL](./Level-07-Big-Data-and-Specialized/08-Specialized-Databases/)
+9. [AI & LLM Infrastructure — Vector Search, RAG & Inference](./Level-07-Big-Data-and-Specialized/09-AI-and-LLM-Infrastructure/)
 
-### 🏆 [Bonus — 34 Real-World System Designs](./Bonus-Real-World-Architectures/)
+### 🏆 [Bonus — 38 Real-World System Designs](./Bonus-Real-World-Architectures/)
 *Apply everything. Ordered from easiest to hardest.*
 
 | # | Design | Difficulty | Key concepts |
@@ -194,6 +200,10 @@ flowchart TD
 | 32 | [Email Service (Gmail)](./Bonus-Real-World-Architectures/32-Email-Service/) | ⭐⭐⭐⭐ | SMTP, object storage, per-user search, spam |
 | 33 | [Content Delivery Network (CDN)](./Bonus-Real-World-Architectures/33-Content-Delivery-Network/) | ⭐⭐⭐⭐ | Edge routing, cache hierarchy, purge |
 | 34 | [Distributed Logging & Monitoring (Datadog)](./Bonus-Real-World-Architectures/34-Distributed-Logging-Monitoring/) | ⭐⭐⭐⭐ | Ingestion, time-series, alerting, cardinality |
+| 35 | [Gaming Leaderboard](./Bonus-Real-World-Architectures/35-Gaming-Leaderboard/) | ⭐⭐ | Redis sorted sets, rank queries, sharded ranking |
+| 36 | [Webhook Delivery Service](./Bonus-Real-World-Architectures/36-Webhook-Delivery-Service/) | ⭐⭐⭐ | At-least-once delivery, retries, HMAC signatures |
+| 37 | [Distributed File System (GFS/HDFS)](./Bonus-Real-World-Architectures/37-Distributed-File-System/) | ⭐⭐⭐⭐⭐ | Chunk servers, master metadata, replication pipeline |
+| 38 | [LLM Chat Service (ChatGPT)](./Bonus-Real-World-Architectures/38-LLM-Chat-Service/) | ⭐⭐⭐⭐⭐ | GPU inference, token streaming, semantic caching |
 
 ---
 
@@ -244,6 +254,7 @@ Keep these in mind through every topic:
 ## 📖 Quick links
 
 - ✅ [Progress tracker](./PROGRESS.md) — check off topics as you go
+- 🎤 [Interview playbook](./INTERVIEW_PLAYBOOK.md) — the 45-minute framework, phrase bank & cheat-sheet numbers
 - 📋 [Glossary of terms](./GLOSSARY.md)
 - ✍️ [Style guide / chapter template](./STYLE_GUIDE.md)
 
