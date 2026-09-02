@@ -181,7 +181,7 @@ flowchart TD
     Redis["⚡ Redis<br/>Realtime agg cache<br/>+ dedup bloom filter"]
     QueryAPI["Query API<br/>Service"]
     Alert["Alert<br/>Service"]
-    S3[("☁️ S3<br/>raw-clicks/year=.../month=.../"))]
+    S3[("☁️ S3<br/>raw-clicks/year=.../month=.../")]
     Spark["🔥 Spark Batch<br/>(nightly reconciliation)"]
     Dashboard(["📊 Advertiser<br/>Dashboard"])
 

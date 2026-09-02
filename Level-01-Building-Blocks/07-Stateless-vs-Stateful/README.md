@@ -97,7 +97,7 @@ flowchart LR
     LB -->|Any request| S2[Server 2<br/>Stateless]
     LB -->|Any request| S3[Server 3<br/>Stateless]
 
-    S1 & S2 & S3 -->|Session lookup| Redis[(Redis<br/>Shared Session Store<br/>Session: alice_xyz → {...})]
+    S1 & S2 & S3 -->|Session lookup| Redis[("Redis<br/>Shared Session Store<br/>Session: alice_xyz → {...}")]
     S1 & S2 & S3 -->|Data queries| DB[(Database)]
 
     style S1 fill:#c8e6c9,color:#000

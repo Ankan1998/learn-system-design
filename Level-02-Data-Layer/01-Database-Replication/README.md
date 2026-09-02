@@ -88,9 +88,6 @@ sequenceDiagram
     Note over Follower: Lag: follower hasn't replicated yet
     User->>Follower: GET /profile
     Follower-->>User: (old bio — write not visible yet!)
-
-    style Leader fill:#fde68a,color:#000
-    style Follower fill:#bbf7d0,color:#000
 ```
 
 *Caption: A user updates their bio but immediately reads from a lagging follower — the update is invisible.*

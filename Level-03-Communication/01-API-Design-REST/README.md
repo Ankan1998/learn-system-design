@@ -62,11 +62,6 @@ sequenceDiagram
     DB-->>S: Row data
     S-->>LB: 200 OK<br/>Content-Type: application/json<br/>{"id":42,"name":"Alice",...}
     LB-->>C: 200 OK + JSON body
-
-    style C fill:#d4edda,color:#000
-    style LB fill:#fff3cd,color:#000
-    style S fill:#d1ecf1,color:#000
-    style DB fill:#fde8d8,color:#000
 ```
 
 ---

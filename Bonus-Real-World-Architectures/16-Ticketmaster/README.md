@@ -264,11 +264,11 @@ sequenceDiagram
     participant U2 as User 2
     participant DB as PostgreSQL<br/>(event shard)
 
-    U1->>DB: BEGIN; SELECT ... FOR UPDATE (seat A1)
+    U1->>DB: BEGIN → SELECT ... FOR UPDATE (seat A1)
     Note over DB: U1 holds row lock on A1
-    U2->>DB: BEGIN; SELECT ... FOR UPDATE (seat A1)
+    U2->>DB: BEGIN → SELECT ... FOR UPDATE (seat A1)
     Note over DB: U2 BLOCKS (waiting for lock)
-    U1->>DB: UPDATE seat SET status='HELD'; COMMIT
+    U1->>DB: UPDATE seat SET status='HELD' → COMMIT
     Note over DB: U1 commits — lock released
     DB-->>U2: Unblocked — sees status='HELD'
     U2->>DB: ROLLBACK (seat unavailable)

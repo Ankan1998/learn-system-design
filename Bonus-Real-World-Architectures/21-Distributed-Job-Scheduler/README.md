@@ -269,7 +269,7 @@ sequenceDiagram
     participant K as Kafka
     participant W as Worker
 
-    S->>DB: BEGIN; UPDATE schedule_bucket SET claimed=true<br/>WHERE NOT claimed RETURNING job_ids; COMMIT
+    S->>DB: BEGIN → UPDATE schedule_bucket SET claimed=true<br/>WHERE NOT claimed RETURNING job_ids → COMMIT
     S->>K: produce(job_id, execution_id, scheduled_at)
     Note over K: Kafka offset committed only after publish succeeds
     W->>K: consume(job_id, execution_id)

@@ -126,9 +126,6 @@ sequenceDiagram
     ES->>PR: MoneyTransferred event streamed
     PR->>RM: UPDATE account_summary SET balance=850
     PR->>RM: INSERT transaction_history record
-
-    style ES fill:#fff3cd,color:#000
-    style RM fill:#d4edda,color:#000
 ```
 
 *Caption: The command handler replays events to get current state, validates the business rule, then appends a new event. The projection builder asynchronously updates the read model.*

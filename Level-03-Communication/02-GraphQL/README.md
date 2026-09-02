@@ -72,12 +72,6 @@ sequenceDiagram
     DB-->>PR: [{title:...}, ...]
     PR-->>G: [{title:...}, ...]
     G-->>C: { "data": { "user": { "name":"Alice", "posts":[...], "followerCount": 1042 } } }
-
-    style C fill:#d4edda,color:#000
-    style G fill:#d1ecf1,color:#000
-    style UR fill:#fff3cd,color:#000
-    style PR fill:#fff3cd,color:#000
-    style DB fill:#fde8d8,color:#000
 ```
 
 ### Schema Definition Language (SDL)

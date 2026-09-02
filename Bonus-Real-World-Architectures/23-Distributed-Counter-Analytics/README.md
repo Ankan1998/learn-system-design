@@ -225,10 +225,10 @@ flowchart LR
 
     ReadPath["Read: GET all 4 shards<br/>SUM = 44,442"]
 
-    Event -->|hash(event_id) % 4| S0
-    Event -->|hash(event_id) % 4| S1
-    Event -->|hash(event_id) % 4| S2
-    Event -->|hash(event_id) % 4| S3
+    Event -->|"hash(event_id) % 4"| S0
+    Event -->|"hash(event_id) % 4"| S1
+    Event -->|"hash(event_id) % 4"| S2
+    Event -->|"hash(event_id) % 4"| S3
     S0 --> ReadPath
     S1 --> ReadPath
     S2 --> ReadPath

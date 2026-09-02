@@ -78,7 +78,7 @@ sequenceDiagram
     B->>S: POST /login (email + password)
     S->>S: Verify with bcrypt/argon2
     S->>DB: Create session sid=x7f3... → user 42, expiry
-    S-->>B: Set-Cookie: sid=x7f3...;<br/>HttpOnly; Secure; SameSite=Lax
+    S-->>B: Set-Cookie sid=x7f3...<br/>HttpOnly · Secure · SameSite=Lax
     B->>S: GET /account (cookie sent automatically)
     S->>DB: Look up sid=x7f3...
     DB-->>S: user 42, still valid

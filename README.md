@@ -260,4 +260,40 @@ Keep these in mind through every topic:
 
 ---
 
+## 🌐 Read it as a website
+
+The whole curriculum is also published as a searchable site with rendered diagrams,
+a sidebar, and light/dark mode: **<https://ankan1998.github.io/learn-system-design/>**
+
+Run it locally with Docker:
+
+```bash
+docker compose up site
+```
+
+Then open <http://localhost:8080>. For live-reloading while writing:
+
+```bash
+docker compose --profile dev up dev
+```
+
+<details>
+<summary>How the site is built (no Docker required)</summary>
+
+```bash
+pip install -r requirements-docs.txt
+python scripts/build_docs.py   # stages markdown into docs/, rewriting links
+mkdocs serve                   # http://127.0.0.1:8000
+```
+
+`scripts/build_docs.py` flattens each `Level-XX/NN-Topic/README.md` into
+`docs/Level-XX/NN-Topic.md` so the sidebar lists topics directly, and rewrites
+every internal link to match. `docs/` and `site/` are generated — the markdown
+in the level folders stays the single source of truth. Pushing to `master`
+publishes automatically via GitHub Actions.
+
+</details>
+
+---
+
 *Happy learning. By the end of this, "design Twitter" won't scare you — it'll excite you.* 🚀

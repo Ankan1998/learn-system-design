@@ -58,9 +58,6 @@ sequenceDiagram
     Note over C: wait 5s
     C->>S: GET /messages (t=10s)
     S-->>C: [{msg: "Hello!"}]
-
-    style C fill:#d4edda,color:#000
-    style S fill:#d1ecf1,color:#000
 ```
 
 - Simple to implement — just `setInterval(() => fetch('/messages'), 5000)`
@@ -78,9 +75,6 @@ sequenceDiagram
     Note over S: Message arrives at t=12s
     S-->>C: [{msg: "Hello!"}]
     C->>S: GET /messages?wait=30s (immediately reconnects)
-
-    style C fill:#d4edda,color:#000
-    style S fill:#d1ecf1,color:#000
 ```
 
 - Lower latency than polling
@@ -130,9 +124,6 @@ sequenceDiagram
     S-->>C: {"type":"pong"}
 
     Note over C,S: Either side can send at any time
-
-    style C fill:#d4edda,color:#000
-    style S fill:#d1ecf1,color:#000
 ```
 
 - **Both sides can send at any time** without the other initiating

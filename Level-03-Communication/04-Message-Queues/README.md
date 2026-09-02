@@ -69,12 +69,6 @@ sequenceDiagram
 
     C2->>Q: poll() → receives order 790
     C2->>C2: process payment...
-
-    style P fill:#d4edda,color:#000
-    style Q fill:#d1ecf1,color:#000
-    style C1 fill:#fff3cd,color:#000
-    style C2 fill:#fff3cd,color:#000
-    style DLQ fill:#f8d7da,color:#000
 ```
 
 ### Visibility Timeout

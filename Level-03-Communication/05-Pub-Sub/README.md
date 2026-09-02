@@ -90,11 +90,6 @@ sequenceDiagram
     Broker->>Sub2: deliver event
     Sub2->>Sub2: send confirmation email
     Sub2-->>Broker: ACK
-
-    style Pub fill:#d4edda,color:#000
-    style Broker fill:#d1ecf1,color:#000
-    style Sub1 fill:#fff3cd,color:#000
-    style Sub2 fill:#fff3cd,color:#000
 ```
 
 ---

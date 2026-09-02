@@ -1,0 +1,106 @@
+site_name: The Complete System Design Curriculum
+site_description: >-
+  From "What is a server?" to "Design a global, multi-region, exactly-once payment
+  system." 65 topics and 38 real-world architectures, with diagrams and analogies.
+site_author: Ankan
+site_url: https://ankan1998.github.io/learn-system-design/
+
+repo_url: https://github.com/Ankan1998/learn-system-design
+repo_name: Ankan1998/learn-system-design
+edit_uri: ""
+
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.tracking         # URL follows the scrolled heading
+    - navigation.top              # back-to-top button
+    - navigation.indexes          # section landing pages
+    - navigation.footer           # prev/next links
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.tooltips
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+
+plugins:
+  - search:
+      separator: '[\s​\-_,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+  - awesome-pages
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html               # lets markdown render inside <details> blocks
+  - tables
+  - toc:
+      permalink: true
+      permalink_title: Link to this section
+      toc_depth: 3
+  - pymdownx.details
+  - pymdownx.caret
+  - pymdownx.mark
+  - pymdownx.tilde
+  - pymdownx.smartsymbols
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        # Emit ```mermaid blocks as plain divs holding the diagram source.
+        # stylesheets/mermaid-init.js renders them eagerly (see note below).
+        - name: mermaid
+          class: mermaid-diagram
+          format: !!python/name:pymdownx.superfences.fence_div_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+extra_css:
+  - stylesheets/extra.css
+
+# Rendered eagerly rather than via Material's built-in lazy (viewport-triggered)
+# Mermaid mount, so diagrams also appear in background tabs and when printing.
+extra_javascript:
+  - path: javascripts/mermaid-init.js
+    type: module
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Ankan1998/learn-system-design
+      name: This curriculum on GitHub
+
+copyright: Built as a one-stop path from beginner to ultra-advanced system design.

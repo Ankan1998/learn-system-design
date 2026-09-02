@@ -88,8 +88,6 @@ sequenceDiagram
     T2->>DB: WRITE balance_A = 300 (withdrew 200 based on old read!)
     T2->>DB: COMMIT
     Note over DB: balance_A = 300<br>Expected: 200 (two withdrawals)<br>Lost $100!
-
-    style DB fill:#fde68a,color:#000
 ```
 
 *Caption: The "lost update" anomaly — both transactions read the same value, then both write back, and T1's write is silently overwritten by T2.*
@@ -169,8 +167,6 @@ sequenceDiagram
     T2->>DB: COMMIT
     T1->>DB: READ balance again → 500 (still sees txid=90, T2's write has txid=105 > 100)
     Note over DB: T1 gets consistent snapshot.<br>No locking. No blocking.
-
-    style DB fill:#fde68a,color:#000
 ```
 
 *Caption: MVCC allows T1 to see a consistent snapshot even though T2 committed a new value in between. No locks needed for reads.*

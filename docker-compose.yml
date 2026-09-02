@@ -1,0 +1,31 @@
+services:
+  # Production-like: build the static site and serve it via nginx.
+  #   docker compose up site   ->  http://localhost:8080
+  site:
+    build:
+      context: .
+      target: runtime
+    image: system-design-site:latest
+    container_name: system-design-site
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+  # Authoring mode: live-reloading dev server.
+  #   docker compose --profile dev up dev   ->  http://localhost:8000
+  dev:
+    build:
+      context: .
+      target: builder
+    image: system-design-docs-builder:latest
+    container_name: system-design-dev
+    working_dir: /build
+    command: >
+      sh -c "python scripts/build_docs.py &&
+             mkdocs serve --dev-addr 0.0.0.0:8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/build
+    profiles:
+      - dev

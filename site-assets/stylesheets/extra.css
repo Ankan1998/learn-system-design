@@ -1,0 +1,91 @@
+/* ---------------------------------------------------------------
+   Custom polish for the System Design curriculum site.
+   Loaded on top of the Material theme.
+   --------------------------------------------------------------- */
+
+:root {
+  --md-primary-fg-color: #4053b5;
+  --md-accent-fg-color: #5c6bc0;
+}
+
+/* Give Mermaid diagrams room to breathe and let wide ones scroll
+   instead of forcing the whole page to scroll sideways. */
+.mermaid-diagram {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  margin: 1.4rem 0;
+  padding: 0.6rem 0;
+}
+
+/* Before the renderer runs, hide the raw diagram source so readers never
+   see a flash of "flowchart TD ..." text. */
+.mermaid-diagram:not(.mermaid-rendered):not(.mermaid-failed) {
+  visibility: hidden;
+  min-height: 2rem;
+}
+
+.mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-diagram.mermaid-failed {
+  display: block;
+  border-left: 0.15rem solid var(--md-typeset-del-color, #f66);
+  background-color: var(--md-default-fg-color--lightest);
+  padding: 0.8rem 1rem;
+  border-radius: 0.15rem;
+  font-size: 0.75rem;
+}
+
+/* Wide tables (trade-off matrices, cheat sheets) scroll on their own. */
+.md-typeset table:not([class]) {
+  display: block;
+  overflow-x: auto;
+  white-space: normal;
+  font-size: 0.76rem;
+}
+
+.md-typeset table:not([class]) th {
+  background-color: var(--md-default-fg-color--lightest);
+  font-weight: 600;
+}
+
+/* The quote directly under each H1 acts as the page's subtitle. */
+.md-typeset h1 + blockquote {
+  border-left: 0.2rem solid var(--md-accent-fg-color);
+  background-color: var(--md-default-fg-color--lightest);
+  border-radius: 0.15rem;
+  padding: 0.7rem 1rem;
+  font-size: 0.85rem;
+}
+
+/* Practice questions use <details>; make them look clickable. */
+.md-typeset details {
+  border-radius: 0.2rem;
+  border-left: 0.15rem solid var(--md-accent-fg-color);
+}
+
+.md-typeset summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* Difficulty stars and emoji headings shouldn't wrap awkwardly. */
+.md-typeset h2,
+.md-typeset h3 {
+  scroll-margin-top: 4rem;
+}
+
+/* Slightly wider content column — these pages are diagram-heavy. */
+@media screen and (min-width: 76.25em) {
+  .md-grid {
+    max-width: 68rem;
+  }
+}
+
+/* Progress-tracker checkboxes read better a touch larger. */
+.md-typeset .task-list-indicator::before {
+  transform: scale(1.1);
+}

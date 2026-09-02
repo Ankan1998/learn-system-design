@@ -1,0 +1,19 @@
+.git
+.gitignore
+.github
+
+# Generated at build time inside the image.
+docs/
+site/
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+*.log

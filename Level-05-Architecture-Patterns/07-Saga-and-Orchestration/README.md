@@ -143,7 +143,7 @@ sequenceDiagram
     Orch->>OS: CancelOrder {orderId, reason: "out_of_stock"}
     OS-->>Orch: OrderCancelled
 
-    Orch-->>C: Saga failed: out of stock; payment refunded
+    Orch-->>C: Saga failed — out of stock, payment refunded
 ```
 
 *Caption: Orchestration saga. The orchestrator controls every step. When InventoryService fails, the orchestrator explicitly calls RefundCustomer and CancelOrder as compensating steps. The saga's state and logic live in one place.*

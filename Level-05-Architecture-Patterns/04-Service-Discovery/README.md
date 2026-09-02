@@ -58,8 +58,6 @@ sequenceDiagram
     OS->>OS: Client-side load balance: pick instance
     OS->>PSI: POST /payments (to 10.0.1.42:8080)
     PSI-->>OS: 200 OK
-
-    style SR fill:#fff3cd,color:#000
 ```
 
 *Caption: In client-side discovery, the service client queries the registry and chooses an instance itself. Netflix's Ribbon library is the classic example. Your Order Service contains the load-balancing logic.*
@@ -81,9 +79,6 @@ sequenceDiagram
     LB->>PSI: Forward request to 10.0.1.42:8080
     PSI-->>LB: 200 OK
     LB-->>OS: 200 OK
-
-    style LB fill:#d4edda,color:#000
-    style SR fill:#fff3cd,color:#000
 ```
 
 *Caption: In server-side discovery, the client just calls a well-known endpoint. The load balancer or service mesh handles registry lookups and routing. Clients stay simple; the infrastructure does the work.*
@@ -144,7 +139,7 @@ graph LR
 graph TD
     POD[Service Client Pod] -->|"DNS lookup:<br/>payment-svc.default.svc.cluster.local"| DNS[CoreDNS]
     DNS -->|"returns ClusterIP:<br/>10.96.0.42"| POD
-    POD -->|"TCP to 10.96.0.42:8080"| KS[Kubernetes Service<br/>(virtual IP)]
+    POD -->|"TCP to 10.96.0.42:8080"| KS["Kubernetes Service<br/>(virtual IP)"]
     KS -->|"round-robin"| P1[Pod 10.0.1.10]
     KS -->|"round-robin"| P2[Pod 10.0.1.11]
     KS -->|"round-robin"| P3[Pod 10.0.1.12]

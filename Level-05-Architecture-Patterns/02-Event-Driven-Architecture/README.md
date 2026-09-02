@@ -93,8 +93,6 @@ sequenceDiagram
 
     Kafka->>NS: OrderPlaced event
     NS->>NS: Send confirmation email
-
-    style Kafka fill:#fff3cd,color:#000
 ```
 
 *Caption: The Order Service publishes one event. Multiple consumers react independently. No service directly calls another — they all communicate through the broker.*

@@ -202,11 +202,11 @@ Simple but limited to ~1 000 IDs/s and still needs a load balancer in front.
 ```mermaid
 block-beta
   columns 16
-  block:sign["0<br/>(sign)"]:1
-  block:ts["41 bits — millisecond timestamp<br/>(since custom epoch 2010-11-04)"]:8
-  block:dc["5 bits<br/>datacenter"]:3
-  block:wk["5 bits<br/>worker"]:2
-  block:seq["12 bits<br/>sequence"]:2
+  sign["0<br/>(sign)"]:1
+  ts["41 bits — millisecond timestamp<br/>(since custom epoch 2010-11-04)"]:8
+  dc["5 bits<br/>datacenter"]:3
+  wk["5 bits<br/>worker"]:2
+  seq["12 bits<br/>sequence"]:2
 
   style sign fill:#f8d7da,color:#000
   style ts   fill:#d4edda,color:#000

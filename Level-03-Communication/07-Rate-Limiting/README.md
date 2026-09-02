@@ -225,10 +225,6 @@ sequenceDiagram
     R-->>S1: 100 (= limit → allow, last one)
     S2->>R: INCR rate:user_42:bucket_1735
     R-->>S2: 101 (> limit → reject 429)
-
-    style S1 fill:#d4edda,color:#000
-    style S2 fill:#d4edda,color:#000
-    style R fill:#d1ecf1,color:#000
 ```
 
 ---
@@ -240,7 +236,7 @@ graph LR
     C[Client] --> GW[API Gateway<br/>← enforce here]
     GW --> S1[Service A]
     GW --> S2[Service B]
-    S1 --> S3[Service C<br/>(internal RL optional)]
+    S1 --> S3["Service C<br/>(internal RL optional)"]
 
     style GW fill:#fff3cd,color:#000
     style C fill:#d4edda,color:#000

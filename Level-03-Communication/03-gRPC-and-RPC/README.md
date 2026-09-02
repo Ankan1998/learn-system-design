@@ -87,10 +87,6 @@ sequenceDiagram
     Note over PB: Serialize response to binary
     PB-->>C: HTTP/2 response [binary]
     Note over C: Deserialize → typed ShippingQuote struct
-
-    style C fill:#d4edda,color:#000
-    style S fill:#d1ecf1,color:#000
-    style PB fill:#fff3cd,color:#000
 ```
 
 ### The Four Streaming Modes

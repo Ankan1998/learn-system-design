@@ -72,10 +72,6 @@ sequenceDiagram
     CA->>RS: GET /api/data (Authorization: Bearer <access_token>)
     RS->>RS: Verify JWT signature & expiry
     RS->>CA: 200 OK — protected data
-
-    style CA fill:#dbeafe,color:#000
-    style AS fill:#fef9c3,color:#000
-    style RS fill:#dcfce7,color:#000
 ```
 
 ### Key Concepts
