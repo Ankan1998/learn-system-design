@@ -234,7 +234,7 @@ Level-XX-Name/
     └── README.md   ← everything: explanation, diagrams, examples, trade-offs, interview tips
 ```
 
-Every topic README follows the same structure so you always know where to find things — see [STYLE_GUIDE.md](./STYLE_GUIDE.md) for the template. A shared [GLOSSARY.md](./GLOSSARY.md) defines every term in one place.
+Every topic README follows the same structure so you always know where to find things. A shared [GLOSSARY.md](./GLOSSARY.md) defines every term in one place.
 
 ---
 
@@ -256,7 +256,6 @@ Keep these in mind through every topic:
 - ✅ [Progress tracker](./PROGRESS.md) — check off topics as you go
 - 🎤 [Interview playbook](./INTERVIEW_PLAYBOOK.md) — the 45-minute framework, phrase bank & cheat-sheet numbers
 - 📋 [Glossary of terms](./GLOSSARY.md)
-- ✍️ [Style guide / chapter template](./STYLE_GUIDE.md)
 
 ---
 

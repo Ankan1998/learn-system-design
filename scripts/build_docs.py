@@ -26,7 +26,6 @@ ROOT_PAGES = {
     "INTERVIEW_PLAYBOOK.md": "INTERVIEW_PLAYBOOK.md",
     "GLOSSARY.md": "GLOSSARY.md",
     "PROGRESS.md": "PROGRESS.md",
-    "STYLE_GUIDE.md": "STYLE_GUIDE.md",
 }
 
 # Order of the top-level sections in the sidebar.
@@ -155,7 +154,7 @@ def main() -> int:
     write_pages_file(
         DOCS / ".pages",
         title=None,
-        nav=["index.md", "INTERVIEW_PLAYBOOK.md", *SECTION_ORDER, "GLOSSARY.md", "PROGRESS.md", "STYLE_GUIDE.md"],
+        nav=["index.md", "INTERVIEW_PLAYBOOK.md", *SECTION_ORDER, "GLOSSARY.md", "PROGRESS.md"],
     )
 
     for section in SECTION_ORDER:
