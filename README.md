@@ -253,7 +253,6 @@ Keep these in mind through every topic:
 
 ## 📖 Quick links
 
-- ✅ [Progress tracker](./PROGRESS.md) — check off topics as you go
 - 🎤 [Interview playbook](./INTERVIEW_PLAYBOOK.md) — the 45-minute framework, phrase bank & cheat-sheet numbers
 - 📋 [Glossary of terms](./GLOSSARY.md)
 

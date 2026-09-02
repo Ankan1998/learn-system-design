@@ -281,7 +281,7 @@ The classic warm-up, compressed phase-by-phase. Full treatment: [URL Shortener d
 - **Record yourself** (screen + voice). Watching it back is brutal and worth 5 mocks: you'll catch silent drawing, filler words, and skipped trade-offs instantly.
 - **Speak while drawing, always.** Practice until narration is automatic.
 - **Do at least 5 full mocks** with a friend or out loud to a wall — the framework must be muscle memory before the real thing.
-- Track your reps in the [progress tracker](./PROGRESS.md), and keep the [glossary](./GLOSSARY.md) open while you review recordings — every term you fumbled goes on a flash card.
+- Keep the [glossary](./GLOSSARY.md) open while you review recordings — every term you fumbled goes on a flash card.
 
 ---
 

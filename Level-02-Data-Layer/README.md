@@ -1,4 +1,4 @@
-# Level 02 — The Data Layer
+# Level 2 — The Data Layer
 
 > **Theme:** Where your data actually lives — and why it's almost always the bottleneck.
 

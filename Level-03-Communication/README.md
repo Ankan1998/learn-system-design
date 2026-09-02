@@ -1,4 +1,4 @@
-# Level 03 · Communication
+# Level 3 — Communication
 
 > **Theme:** How services talk to clients and each other — the protocols, patterns, and trade-offs that move data across process boundaries.
 

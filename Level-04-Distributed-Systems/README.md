@@ -1,4 +1,4 @@
-# Level 04 — Distributed Systems
+# Level 4 — Distributed Systems
 
 > **Theme:** The hard, beautiful core where senior interviews live.
 

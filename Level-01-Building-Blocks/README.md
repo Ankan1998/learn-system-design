@@ -1,4 +1,4 @@
-# Level 01 — Building Blocks
+# Level 1 — Building Blocks
 
 > **Theme:** The core LEGO bricks. Every large-scale system is assembled from these seven primitives. Master them here and every advanced topic clicks into place.
 

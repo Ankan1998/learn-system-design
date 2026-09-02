@@ -1,4 +1,4 @@
-# Level 6: Scale & Reliability
+# Level 6 — Scale & Reliability
 
 By this point you have built a solid foundation in distributed systems, data management, and architectural patterns. Level 6 is where you learn to keep those systems running — at any scale, under any conditions. You will explore the tools and techniques that separate a hobby project from a production-grade service: how to observe what is actually happening inside your system, how to plan for growth before it hits you, and how to stay online when things inevitably go wrong.
 

@@ -1,4 +1,4 @@
-# Level 05 — Architecture Patterns
+# Level 5 — Architecture Patterns
 
 > Proven blueprints for organizing large systems. Once you understand the building blocks (databases, caches, load balancers), you need to know **how to wire them together** at scale. That's what architecture patterns give you.
 

@@ -1,4 +1,4 @@
-# Level 0 — Foundations: How the Internet Actually Works
+# Level 0 — Foundations
 
 Welcome to the starting line. Before you can design systems that serve millions of users, you need a solid mental model of the infrastructure those systems run on. This level strips away the magic and shows you what actually happens when a user types a URL and hits Enter — from electrons on a wire to a rendered webpage. No prior experience required.
 
