@@ -4,8 +4,8 @@
 > A free, structured, beginner-to-ultra-advanced path to mastering system design — with diagrams, real-world examples, and analogies you'll actually remember.
 
 [![Levels](https://img.shields.io/badge/Levels-8-blue)]()
-[![Topics](https://img.shields.io/badge/Topics-65-green)]()
-[![Case Studies](https://img.shields.io/badge/Real--World%20Designs-38-orange)]()
+[![Topics](https://img.shields.io/badge/Topics-71-green)]()
+[![Case Studies](https://img.shields.io/badge/Real--World%20Designs-43-orange)]()
 [![Made for](https://img.shields.io/badge/Made%20for-Beginners%20%E2%86%92%20Pros-purple)]()
 
 ---
@@ -34,7 +34,7 @@ Every single topic includes:
 |---|---|
 | A **student / beginner** who has never built a backend | A gentle, jargon-free on-ramp starting from "what is a client and a server" |
 | A **developer** who can build apps but freezes in design interviews | A structured vocabulary and a repeatable framework |
-| A **senior engineer** prepping for L5/L6/staff interviews | Deep dives on consensus, CQRS, multi-region, and 38 full case studies |
+| A **senior engineer** prepping for L5/L6/staff interviews | Deep dives on consensus, CQRS, multi-region, and 43 full case studies |
 | A **curious mind** who wants to know how Uber/WhatsApp actually work | The Bonus folder — real architectures, demystified |
 
 **Prerequisites:** Basic programming knowledge (you've written a function and called an API). That's it. We explain everything else.
@@ -53,7 +53,7 @@ flowchart TD
     L5["<b>Level 5 — Architecture Patterns</b><br/>Microservices, event-driven,<br/>CQRS, resilience"]
     L6["<b>Level 6 — Scale & Reliability</b><br/>Observability, HA/DR,<br/>multi-region, security"]
     L7["<b>Level 7 — Big Data & Specialized</b><br/>Stream/batch processing,<br/>search, ML & AI systems"]
-    BONUS["<b>🏆 Bonus — 38 Real-World Designs</b><br/>URL shortener → Uber →<br/>Stock exchange → ChatGPT"]
+    BONUS["<b>🏆 Bonus — 43 Real-World Designs</b><br/>URL shortener → Uber →<br/>Stock exchange → ChatGPT"]
 
     L0 --> L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7 --> BONUS
 
@@ -91,6 +91,7 @@ flowchart TD
 5. [Proxies — Forward & Reverse](./Level-01-Building-Blocks/05-Proxies/)
 6. [Content Delivery Networks (CDN)](./Level-01-Building-Blocks/06-CDN/)
 7. [Stateless vs Stateful Systems](./Level-01-Building-Blocks/07-Stateless-vs-Stateful/)
+8. [Concurrency Models & Async I/O](./Level-01-Building-Blocks/08-Concurrency-and-Async-IO/)
 
 ### 🟩 [Level 2 — The Data Layer](./Level-02-Data-Layer/)
 *Where your data lives, and how to keep it fast and safe.*
@@ -104,6 +105,7 @@ flowchart TD
 8. [Consistent Hashing](./Level-02-Data-Layer/08-Consistent-Hashing/)
 9. [Object & Blob Storage (S3)](./Level-02-Data-Layer/09-Object-Storage/)
 10. [Change Data Capture (CDC)](./Level-02-Data-Layer/10-Change-Data-Capture/)
+11. [Schema Migrations & Zero-Downtime Changes](./Level-02-Data-Layer/11-Schema-Migrations/)
 
 ### 🟧 [Level 3 — Communication](./Level-03-Communication/)
 *How services talk to each other and to clients.*
@@ -115,6 +117,7 @@ flowchart TD
 6. [WebSockets & Real-Time Communication](./Level-03-Communication/06-WebSockets-and-Realtime/)
 7. [Rate Limiting](./Level-03-Communication/07-Rate-Limiting/)
 8. [Authentication & Authorization](./Level-03-Communication/08-Authentication-and-Authorization/)
+9. [Data Serialization & Schema Evolution](./Level-03-Communication/09-Data-Serialization-and-Schema-Evolution/)
 
 ### 🟧 [Level 4 — Distributed Systems](./Level-04-Distributed-Systems/)
 *The hard, beautiful core. Where most senior interviews live.*
@@ -138,6 +141,7 @@ flowchart TD
 7. [Saga & Workflow Orchestration](./Level-05-Architecture-Patterns/07-Saga-and-Orchestration/)
 8. [Serverless Architecture — FaaS & Beyond](./Level-05-Architecture-Patterns/08-Serverless-Architecture/)
 9. [Service Mesh](./Level-05-Architecture-Patterns/09-Service-Mesh/)
+10. [Multi-Tenancy & SaaS Architecture](./Level-05-Architecture-Patterns/10-Multi-Tenancy/)
 
 ### 🟥 [Level 6 — Scale & Reliability](./Level-06-Scale-and-Reliability/)
 *Making it observable, available, and safe at planet scale.*
@@ -148,6 +152,8 @@ flowchart TD
 5. [Security at Scale](./Level-06-Scale-and-Reliability/05-Security-at-Scale/)
 6. [Multi-Region & Geo-Distribution](./Level-06-Scale-and-Reliability/06-Multi-Region-and-Geo-Distribution/)
 7. [Containers & Orchestration — Docker & Kubernetes](./Level-06-Scale-and-Reliability/07-Containers-and-Orchestration/)
+8. [Testing Distributed Systems — Load, Chaos & Canary](./Level-06-Scale-and-Reliability/08-Testing-Distributed-Systems/)
+9. [Data Privacy, Encryption & Compliance](./Level-06-Scale-and-Reliability/09-Data-Privacy-and-Encryption/)
 
 ### 🟪 [Level 7 — Big Data & Specialized Systems](./Level-07-Big-Data-and-Specialized/)
 *The pro tier: data-intensive and specialized architectures.*
@@ -161,7 +167,7 @@ flowchart TD
 8. [Specialized Databases — Time-Series, Graph & NewSQL](./Level-07-Big-Data-and-Specialized/08-Specialized-Databases/)
 9. [AI & LLM Infrastructure — Vector Search, RAG & Inference](./Level-07-Big-Data-and-Specialized/09-AI-and-LLM-Infrastructure/)
 
-### 🏆 [Bonus — 38 Real-World System Designs](./Bonus-Real-World-Architectures/)
+### 🏆 [Bonus — 43 Real-World System Designs](./Bonus-Real-World-Architectures/)
 *Apply everything. Ordered from easiest to hardest.*
 
 | # | Design | Difficulty | Key concepts |
@@ -204,6 +210,11 @@ flowchart TD
 | 36 | [Webhook Delivery Service](./Bonus-Real-World-Architectures/36-Webhook-Delivery-Service/) | ⭐⭐⭐ | At-least-once delivery, retries, HMAC signatures |
 | 37 | [Distributed File System (GFS/HDFS)](./Bonus-Real-World-Architectures/37-Distributed-File-System/) | ⭐⭐⭐⭐⭐ | Chunk servers, master metadata, replication pipeline |
 | 38 | [LLM Chat Service (ChatGPT)](./Bonus-Real-World-Architectures/38-LLM-Chat-Service/) | ⭐⭐⭐⭐⭐ | GPU inference, token streaming, semantic caching |
+| 39 | [Distributed Coordination Service (ZooKeeper/etcd)](./Bonus-Real-World-Architectures/39-Distributed-Coordination-Service/) | ⭐⭐⭐⭐⭐ | Consensus, sessions, watches, locks & leader election |
+| 40 | [A/B Testing Platform](./Bonus-Real-World-Architectures/40-Experimentation-Platform/) | ⭐⭐⭐⭐ | Hash bucketing, layers, exposure logging, stats engine |
+| 41 | [Online Code Judge (LeetCode)](./Bonus-Real-World-Architectures/41-Online-Code-Judge/) | ⭐⭐⭐ | Sandboxing, cgroups/seccomp, priority queues, fair limits |
+| 42 | [Social Graph Store (Facebook TAO)](./Bonus-Real-World-Architectures/42-Social-Graph-Store/) | ⭐⭐⭐⭐⭐ | Objects & associations, leader/follower cache, read-after-write |
+| 43 | [Calendar & Scheduling (Google Calendar)](./Bonus-Real-World-Architectures/43-Calendar-and-Scheduling/) | ⭐⭐⭐ | Recurrence rules, time zones/DST, free/busy, reminders at scale |
 
 ---
 

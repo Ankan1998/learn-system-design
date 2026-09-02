@@ -309,4 +309,4 @@ The [12-Factor App methodology](https://12factor.net/) defines the industry stan
 - [Redis as a Session Store](https://redis.io/docs/manual/patterns/session-store/)
 - [JWT.io — JSON Web Tokens](https://jwt.io/introduction)
 - [The Stateless Service Pattern (Microsoft Azure Architecture)](https://learn.microsoft.com/en-us/azure/architecture/patterns/static-content-hosting)
-- Previous: [CDN](../06-CDN/README.md) · Next Level: [Level 02 — Data Layer](../../Level-02-Data-Layer/README.md)
+- Previous: [CDN](../06-CDN/README.md) · Next: [08 — Concurrency Models & Async I/O](../08-Concurrency-and-Async-IO/README.md) · Back to [Level 01 Overview](../README.md)

@@ -1,4 +1,4 @@
-# 🏆 Bonus — 38 Real-World System Designs
+# 🏆 Bonus — 43 Real-World System Designs
 
 > Theory is the grammar; these are the conversations. Here you apply everything from Levels 0–7 to design the systems you use every day.
 
@@ -39,7 +39,7 @@ flowchart LR
 
 ---
 
-## 📚 The 38 designs
+## 📚 The 43 designs
 
 ### 🟢 Warm-up tier (⭐–⭐⭐) — core patterns
 | # | Design | What's genuinely hard about it |
@@ -61,6 +61,8 @@ flowchart LR
 | 9 | [YouTube / Netflix](./09-YouTube-Netflix-Streaming/) | Transcoding pipeline + adaptive bitrate + CDN economics |
 | 10 | [Typeahead / Autocomplete](./10-Typeahead-Autocomplete/) | Sub-100ms suggestions via precomputed tries |
 | 36 | [Webhook Delivery Service](./36-Webhook-Delivery-Service/) | Millions of flaky customer endpoints; retries without head-of-line blocking |
+| 41 | [Online Code Judge (LeetCode)](./41-Online-Code-Judge/) | Running strangers' code safely: sandboxes, fair limits, contest spikes |
+| 43 | [Calendar & Scheduling (Google Calendar)](./43-Calendar-and-Scheduling/) | Recurrence rules across time zones and DST; free/busy; reminders that all fire at :00 |
 
 ### 🟠 Marketplace & geo tier (⭐⭐⭐⭐)
 | # | Design | What's genuinely hard about it |
@@ -85,6 +87,7 @@ flowchart LR
 | 27 | [Distributed Key-Value Store (Dynamo)](./27-Key-Value-Store/) | Consistent hashing, quorums, vector clocks, anti-entropy |
 | 33 | [Content Delivery Network](./33-Content-Delivery-Network/) | Edge routing, cache hierarchy, global purge |
 | 34 | [Distributed Logging & Monitoring](./34-Distributed-Logging-Monitoring/) | Firehose ingestion, time-series storage, alerting |
+| 40 | [A/B Testing Platform](./40-Experimentation-Platform/) | Stateless hash bucketing across thousands of experiments; statistics you can trust |
 
 ### ⚫ Grandmaster tier (⭐⭐⭐⭐⭐)
 | # | Design | What's genuinely hard about it |
@@ -98,8 +101,10 @@ flowchart LR
 | 30 | [Video Conferencing (Zoom)](./30-Video-Conferencing/) | WebRTC, SFU vs MCU, NAT traversal, low latency |
 | 37 | [Distributed File System (GFS/HDFS)](./37-Distributed-File-System/) | Petabytes on failing commodity disks; single-master metadata at scale |
 | 38 | [LLM Chat Service (ChatGPT)](./38-LLM-Chat-Service/) | Streaming tokens from a scarce GPU fleet; quotas, caching, moderation |
+| 39 | [Distributed Coordination Service (ZooKeeper/etcd)](./39-Distributed-Coordination-Service/) | The consensus-backed brain behind locks, elections, and config — must never be wrong |
+| 42 | [Social Graph Store (Facebook TAO)](./42-Social-Graph-Store/) | A billion graph reads per second from a two-tier cache with read-after-write |
 
-> 📦 Designs **26–38** were added as expansions and are slotted into the tier matching their difficulty — that's why numbers aren't contiguous within a tier. Follow the tiers top-to-bottom for the smoothest difficulty ramp.
+> 📦 Designs **26–43** were added as expansions and are slotted into the tier matching their difficulty — that's why numbers aren't contiguous within a tier. Follow the tiers top-to-bottom for the smoothest difficulty ramp.
 
 ---
 
@@ -120,6 +125,6 @@ Print this. Use it on every design question:
 
 ---
 
-*Finished all 38? You can now look at almost any product and reverse-engineer how it probably works. That's the whole goal.* 🚀
+*Finished all 43? You can now look at almost any product and reverse-engineer how it probably works. That's the whole goal.* 🚀
 
 ⬅️ Back to the [main curriculum](../README.md)

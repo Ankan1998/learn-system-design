@@ -20,6 +20,7 @@ After completing this level you will be able to:
 - Explain how **consistent hashing** minimizes key remapping when cluster nodes change.
 - Choose **object storage** for blobs and know why large BLOBs never belong in a relational DB.
 - Stream database changes with **CDC** (log-based capture, Debezium) and fix the dual-write problem with the outbox pattern.
+- Change a live schema with **zero downtime** — expand → migrate → contract, throttled backfills, `lock_timeout`, and online tools like gh-ost.
 
 ---
 
@@ -51,6 +52,7 @@ flowchart LR
         T8[08 Consistent<br/>Hashing]
         T9[09 Object<br/>Storage]
         T10[10 Change Data<br/>Capture]
+        T11[11 Schema<br/>Migrations]
 
         T1 --> T2
         T2 --> T3
@@ -61,6 +63,7 @@ flowchart LR
         T7 --> T8
         T8 --> T9
         T9 --> T10
+        T10 --> T11
     end
 
     B --> C([Level 04<br/>Distributed Systems])
@@ -77,6 +80,7 @@ flowchart LR
     style T8 fill:#fef9c3,color:#000
     style T9 fill:#fef9c3,color:#000
     style T10 fill:#fef9c3,color:#000
+    style T11 fill:#fef9c3,color:#000
 ```
 
 ---
@@ -95,8 +99,9 @@ flowchart LR
 | 08 | [Consistent Hashing](./08-Consistent-Hashing/README.md) | Hash ring, virtual nodes, why only K/N keys move when a node changes | 35 min |
 | 09 | [Object Storage](./09-Object-Storage/README.md) | S3 / GCS / Azure Blob, presigned URLs, lifecycle tiers, the BLOB-in-DB antipattern | 30 min |
 | 10 | [Change Data Capture](./10-Change-Data-Capture/README.md) | Dual-write problem, log-based CDC, Debezium, outbox pattern, cache/search-index sync | 40 min |
+| 11 | [Schema Migrations](./11-Schema-Migrations/README.md) | Expand/migrate/contract, safe vs unsafe DDL, batched backfills, lock_timeout, gh-ost | 45 min |
 
-**Total estimated time: ~6.5 hours**
+**Total estimated time: ~7 hours**
 
 ---
 

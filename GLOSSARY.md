@@ -36,6 +36,8 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 **CDN (Content Delivery Network)** — A globally distributed network of servers that caches content close to users.
 
+**Chaos Engineering** — Deliberately injecting failures (killed instances, added latency, network partitions) under a stated hypothesis and a bounded blast radius, to prove a system degrades gracefully before real failures test it.
+
 **Cold Start** — The extra latency when a serverless function (or new server/connection) must be initialized from scratch before serving its first request.
 
 **Consensus** — The problem of getting multiple distributed nodes to agree on a single value (solved by Paxos, Raft).
@@ -45,6 +47,8 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 **Consistent Hashing** — A hashing technique that minimizes data movement when nodes are added/removed. Core to distributed caches and databases.
 
 **CQRS** — Command Query Responsibility Segregation. Separate the write model from the read model.
+
+**Crypto-shredding** — Deleting data everywhere at once by destroying the per-user or per-tenant encryption key that protects it; the standard way to honor erasure requests in immutable logs and backups.
 
 ## D
 
@@ -58,11 +62,17 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 **Embedding** — A dense numeric vector representing the *meaning* of text/images, enabling semantic (similarity) search instead of exact keyword match.
 
+**Envelope Encryption** — Encrypting data with a local data key (DEK), then encrypting that key with a master key (KEK) that never leaves the KMS; rotation and deletion become cheap key operations instead of data rewrites.
+
+**Event Loop** — A single thread that waits on thousands of sockets at once (epoll/kqueue) and runs a small handler only when one is ready; the concurrency model behind Nginx, Node.js, and Redis. Rule: never block it.
+
 **Eventual Consistency** — Given no new updates, all replicas will *eventually* converge to the same value.
 
 **Event Sourcing** — Storing state as an immutable log of events rather than as current values.
 
 **Exactly-Once** — A processing guarantee that each message affects the system's state once and only once (usually achieved via idempotency + dedup).
+
+**Expand / Contract** — The zero-downtime schema-change pattern: add the new shape alongside the old, dual-write and backfill, switch reads, then remove the old shape in a later release — so old and new code always coexist safely.
 
 ## F
 
@@ -71,6 +81,12 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 **Fan-out** — Delivering one piece of data to many destinations (e.g., one tweet to all followers' timelines).
 
 **Failover** — Automatically switching to a standby component when the primary fails.
+
+**Fencing Token** — A monotonically increasing number issued with a lock or lease; the protected resource rejects any request carrying an older token, so a client that lost its lock without noticing cannot corrupt data.
+
+## G
+
+**Green Threads (Goroutines, Virtual Threads)** — Lightweight threads scheduled by the language runtime rather than the OS, costing a few KB each, so millions can exist; they park cheaply on I/O while a handful of OS threads do the actual work.
 
 ## H
 
@@ -98,6 +114,8 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 **Latency** — Time to handle a single request (e.g., 50ms). Often discussed as percentiles: p50, p99.
 
+**Little's Law** — Work in flight = throughput × latency. The one formula for sizing thread pools, connection pools, and queue depth: 10K requests/s at 200 ms means 2,000 requests in progress at all times.
+
 **Load Balancer** — Distributes incoming requests across multiple servers.
 
 **LSM Tree (Log-Structured Merge Tree)** — A write-optimized storage structure used by Cassandra, RocksDB, etc.
@@ -108,11 +126,15 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 **Microservices** — An architecture of small, independently deployable services.
 
+**Multi-Tenancy** — One deployment serving many customers (tenants) whose data and traffic must stay isolated. Models range from *pool* (shared rows tagged by tenant) to *bridge* (a database per tenant) to *silo* (a full stack per tenant).
+
 **mTLS (Mutual TLS)** — TLS where *both* client and server present certificates; the standard for service-to-service authentication in zero-trust networks and service meshes.
 
 ## N
 
 **NewSQL / Distributed SQL** — Databases offering SQL + ACID transactions with horizontal scale (Google Spanner, CockroachDB, TiDB).
+
+**Noisy Neighbor** — One tenant's heavy workload degrading everyone else on shared infrastructure; contained with per-tenant limits, fair queuing, bulkheads, and shuffle sharding.
 
 **NoSQL** — Non-relational databases (key-value, document, column-family, graph) optimized for scale and flexibility.
 
@@ -156,11 +178,15 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 **Saga** — A sequence of local transactions with compensating actions, used for distributed transactions.
 
+**Schema Registry** — A service that stores versioned schemas for event streams, hands producers a compact schema ID to embed in each message, and rejects incompatible schema changes at registration time.
+
 **Serverless** — Running code without managing servers; you pay per use and the platform scales (even to zero). See FaaS.
 
 **Service Mesh** — An infrastructure layer of sidecar proxies plus a control plane that handles mTLS, retries, routing, and telemetry between microservices (Istio, Linkerd).
 
 **Sharding** — See Partition.
+
+**Shuffle Sharding** — Assigning each tenant to a small random subset of nodes so that a misbehaving tenant overloads only its own subset — and shares that exact subset with almost no one else.
 
 **Sidecar** — A helper process deployed alongside a service (common in service meshes).
 
@@ -175,6 +201,8 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 **Throttling** — Deliberately slowing or rejecting requests to protect a system.
 
 **Time-Series Database (TSDB)** — A database optimized for timestamped, append-only data (metrics, IoT) with heavy compression and time-window queries (InfluxDB, Prometheus).
+
+**Tokenization** — Replacing a sensitive value (such as a card number) with a random token and keeping the real value only in a tightly controlled vault; the main tool for shrinking compliance scope.
 
 **TTL (Time To Live)** — How long a cached/stored item remains valid before expiring.
 

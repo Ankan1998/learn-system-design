@@ -1,6 +1,6 @@
 # Level 1 — Building Blocks
 
-> **Theme:** The core LEGO bricks. Every large-scale system is assembled from these seven primitives. Master them here and every advanced topic clicks into place.
+> **Theme:** The core LEGO bricks. Every large-scale system is assembled from these eight primitives. Master them here and every advanced topic clicks into place.
 
 ---
 
@@ -13,6 +13,7 @@
 - Distinguish a forward proxy from a reverse proxy without hesitation
 - Describe how a CDN serves a file from the edge and what happens on a cache miss
 - Recognize stateful bottlenecks in a design and know how to remove them
+- Choose the right concurrency model — threads, event loop, or green threads — for I/O-bound vs CPU-bound work, and size it with Little's Law
 
 ---
 
@@ -40,6 +41,7 @@ flowchart LR
         S4 --> S5[05 Proxies]
         S5 --> S6[06 CDN]
         S6 --> S7[07 Stateless<br/>vs Stateful]
+        S7 --> S8[08 Concurrency &<br/>Async I/O]
     end
 
     B --> C([Level 02<br/>Data Layer])
@@ -53,6 +55,7 @@ flowchart LR
     style S5 fill:#ffe0b2,color:#000
     style S6 fill:#ffe0b2,color:#000
     style S7 fill:#ffe0b2,color:#000
+    style S8 fill:#ffe0b2,color:#000
 ```
 
 ---
@@ -68,6 +71,7 @@ flowchart LR
 | 05 | [Proxies](./05-Proxies/README.md) | Middlemen that stand between clients and servers — and why that's powerful |
 | 06 | [CDN](./06-CDN/README.md) | Putting your content on servers closer to your users, worldwide |
 | 07 | [Stateless vs Stateful](./07-Stateless-vs-Stateful/README.md) | Why services that remember nothing are easier to scale |
+| 08 | [Concurrency Models & Async I/O](./08-Concurrency-and-Async-IO/README.md) | Threads vs event loops vs goroutines — how one server holds 100K connections |
 
 ---
 

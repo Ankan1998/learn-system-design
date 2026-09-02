@@ -329,4 +329,4 @@ A logical replication slot (probably a dead or stalled CDC connector) hasn't ack
 
 ---
 
-⬅️ Previous: [09 — Object Storage](../09-Object-Storage/README.md) · ➡️ Next: [Level 3 — Communication](../../Level-03-Communication/README.md) · 🏠 [Level 2 index](../README.md)
+⬅️ Previous: [09 — Object Storage](../09-Object-Storage/README.md) · ➡️ Next: [11 — Schema Migrations & Zero-Downtime Changes](../11-Schema-Migrations/README.md) · 🏠 [Level 2 index](../README.md)

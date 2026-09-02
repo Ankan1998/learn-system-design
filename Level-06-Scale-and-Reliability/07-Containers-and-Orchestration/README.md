@@ -342,4 +342,4 @@ Nearly all modern CI/CD pipelines (GitHub Actions, GitLab CI, CircleCI) run jobs
 - [Envoy Proxy Docs](https://www.envoyproxy.io/docs) — the sidecar underlying most service meshes.
 - [Docker Getting Started](https://docs.docker.com/get-started/) — official beginner tutorial.
 - [Google SRE Book — Chapter 7: The Evolution of Automation at Google](https://sre.google/sre-book/the-evolution-of-automation-at-google/) — context on why automation matters.
-- Previous: [06 — Multi-Region and Geo-Distribution](../06-Multi-Region-and-Geo-Distribution/README.md) · Back to [Level 06 Overview](../README.md)
+- Previous: [06 — Multi-Region and Geo-Distribution](../06-Multi-Region-and-Geo-Distribution/README.md) · Next: [08 — Testing Distributed Systems](../08-Testing-Distributed-Systems/README.md) · Back to [Level 06 Overview](../README.md)

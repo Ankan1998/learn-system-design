@@ -15,6 +15,8 @@ After completing this level you will be able to:
 - Apply security controls that hold up under real-world attack surface at scale
 - Architect multi-region topologies and reason about latency, consistency, and failover across geographies
 - Explain containers vs VMs and use Kubernetes to achieve self-healing and autoscaling at scale
+- Verify a system survives real conditions with load tests, chaos experiments, Jepsen-style consistency checks, canary analysis, and DR drills
+- Engineer privacy in: envelope encryption with a KMS, per-tenant keys and crypto-shredding, tokenization, orchestrated deletion, and data residency
 
 ---
 
@@ -29,6 +31,8 @@ Work through these in order — each one builds on the concepts introduced befor
 5. [Security at Scale](./05-Security-at-Scale/README.md)
 6. [Multi-Region and Geo-Distribution](./06-Multi-Region-and-Geo-Distribution/README.md)
 7. [Containers and Orchestration](./07-Containers-and-Orchestration/README.md)
+8. [Testing Distributed Systems — Load, Chaos & Canary](./08-Testing-Distributed-Systems/README.md)
+9. [Data Privacy, Encryption & Compliance](./09-Data-Privacy-and-Encryption/README.md)
 
 ---
 
@@ -42,6 +46,8 @@ flowchart TD
     D --> E([05 · Security at Scale]):::pastel5
     E --> F([06 · Multi-Region & Geo-Distribution]):::pastel6
     F --> G([07 · Containers & Orchestration]):::pastel7
+    G --> H([08 · Testing Distributed Systems]):::pastel8
+    H --> I([09 · Data Privacy & Encryption]):::pastel9
 
     classDef pastel1 fill:#fde8e8,stroke:#e8a0a0,color:#000
     classDef pastel2 fill:#fef3e2,stroke:#e8c47a,color:#000
@@ -50,6 +56,8 @@ flowchart TD
     classDef pastel5 fill:#ede8fd,stroke:#a890e8,color:#000
     classDef pastel6 fill:#fde8f6,stroke:#e890cc,color:#000
     classDef pastel7 fill:#e8f4fd,stroke:#70b8e8,color:#000
+    classDef pastel8 fill:#fff4e0,stroke:#e8b070,color:#000
+    classDef pastel9 fill:#e8fdf4,stroke:#70d8a8,color:#000
 ```
 
 ---
@@ -69,4 +77,4 @@ If any of those topics feel shaky, revisit them first — the concepts here assu
 
 ## Estimated Time
 
-**8 – 10 hours** across all seven topics, depending on how deeply you explore the hands-on exercises and external references in each section.
+**10 – 12 hours** across all nine topics, depending on how deeply you explore the hands-on exercises and external references in each section.

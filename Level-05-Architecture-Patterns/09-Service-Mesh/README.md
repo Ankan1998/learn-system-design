@@ -365,4 +365,4 @@ Don't. With one language and 12 services, a small shared Go library (retries, ti
 
 ---
 
-⬅️ Previous: [08 — Serverless Architecture](../08-Serverless-Architecture/README.md) · ➡️ Next: [Level 6 — Scale & Reliability](../../Level-06-Scale-and-Reliability/README.md) · 🏠 [Level 5 Index](../README.md)
+⬅️ Previous: [08 — Serverless Architecture](../08-Serverless-Architecture/README.md) · ➡️ Next: [10 — Multi-Tenancy & SaaS Architecture](../10-Multi-Tenancy/README.md) · 🏠 [Level 5 Index](../README.md)

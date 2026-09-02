@@ -16,6 +16,7 @@ By the end of this level you will be able to:
 - Architect real-time features using the right transport (polling → SSE → WebSockets) and scale stateful connections
 - Implement and compare five rate-limiting algorithms and defend your choice in an interview
 - Secure APIs end-to-end: sessions vs JWTs, OAuth 2.0 + PKCE, OIDC, SSO/SAML, API keys, mTLS, and RBAC/ABAC authorization
+- Pick a serialization format (JSON, Protobuf, Avro, Parquet) and evolve schemas safely with backward/forward compatibility and a schema registry
 
 ---
 
@@ -33,6 +34,8 @@ flowchart LR
         B --> G[06 WebSockets & Realtime]
         B --> H[07 Rate Limiting]
         H --> I[08 Authentication &<br/>Authorization]
+        D --> J[09 Serialization &<br/>Schema Evolution]
+        E --> J
     end
 
     L3 --> Z([Level-04<br/>Distributed Systems])
@@ -47,6 +50,7 @@ flowchart LR
     style G fill:#fde8d8,color:#000
     style H fill:#fde8d8,color:#000
     style I fill:#fde8d8,color:#000
+    style J fill:#fff3cd,color:#000
 ```
 
 ---
@@ -63,8 +67,9 @@ flowchart LR
 | 6 | [06-WebSockets-and-Realtime](./06-WebSockets-and-Realtime/README.md) | Polling → SSE → WebSockets, handshake, scaling stateful connections | 45 min |
 | 7 | [07-Rate-Limiting](./07-Rate-Limiting/README.md) | Fixed window, sliding window, token bucket, leaky bucket, Redis INCR | 45 min |
 | 8 | [08-Authentication-and-Authorization](./08-Authentication-and-Authorization/README.md) | Sessions vs JWT, OAuth 2.0 + PKCE, OIDC, SSO/SAML, API keys, mTLS, RBAC/ABAC | 50 min |
+| 9 | [09-Data-Serialization-and-Schema-Evolution](./09-Data-Serialization-and-Schema-Evolution/README.md) | JSON vs Protobuf vs Avro, backward/forward compatibility, schema registry, tolerant readers | 45 min |
 
-**Total estimated time: ~6 hours**
+**Total estimated time: ~6.75 hours**
 
 ---
 
@@ -87,4 +92,4 @@ Before starting this level, you should be comfortable with:
 
 ## 💡 How to Navigate
 
-Work through topics **1 → 3** first (synchronous communication), then **4 → 5** (async), then **6 → 7** (real-time + control). Each topic README is self-contained with diagrams, trade-off tables, interview tips, and quiz questions.
+Work through topics **1 → 3** first (synchronous communication), then **4 → 5** (async), then **6 → 9** (real-time, control, security, and the data formats that cross every boundary). Each topic README is self-contained with diagrams, trade-off tables, interview tips, and quiz questions.
