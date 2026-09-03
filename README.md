@@ -4,8 +4,8 @@
 > A free, structured, beginner-to-ultra-advanced path to mastering system design — with diagrams, real-world examples, and analogies you'll actually remember.
 
 [![Levels](https://img.shields.io/badge/Levels-8-blue)]()
-[![Topics](https://img.shields.io/badge/Topics-71-green)]()
-[![Case Studies](https://img.shields.io/badge/Real--World%20Designs-43-orange)]()
+[![Topics](https://img.shields.io/badge/Topics-73-green)]()
+[![Case Studies](https://img.shields.io/badge/Real--World%20Designs-46-orange)]()
 [![Made for](https://img.shields.io/badge/Made%20for-Beginners%20%E2%86%92%20Pros-purple)]()
 
 ---
@@ -34,7 +34,7 @@ Every single topic includes:
 |---|---|
 | A **student / beginner** who has never built a backend | A gentle, jargon-free on-ramp starting from "what is a client and a server" |
 | A **developer** who can build apps but freezes in design interviews | A structured vocabulary and a repeatable framework |
-| A **senior engineer** prepping for L5/L6/staff interviews | Deep dives on consensus, CQRS, multi-region, and 43 full case studies |
+| A **senior engineer** prepping for L5/L6/staff interviews | Deep dives on consensus, CQRS, multi-region, and 46 full case studies |
 | A **curious mind** who wants to know how Uber/WhatsApp actually work | The Bonus folder — real architectures, demystified |
 
 **Prerequisites:** Basic programming knowledge (you've written a function and called an API). That's it. We explain everything else.
@@ -53,7 +53,7 @@ flowchart TD
     L5["<b>Level 5 — Architecture Patterns</b><br/>Microservices, event-driven,<br/>CQRS, resilience"]
     L6["<b>Level 6 — Scale & Reliability</b><br/>Observability, HA/DR,<br/>multi-region, security"]
     L7["<b>Level 7 — Big Data & Specialized</b><br/>Stream/batch processing,<br/>search, ML & AI systems"]
-    BONUS["<b>🏆 Bonus — 43 Real-World Designs</b><br/>URL shortener → Uber →<br/>Stock exchange → ChatGPT"]
+    BONUS["<b>🏆 Bonus — 46 Real-World Designs</b><br/>URL shortener → Uber →<br/>Stock exchange → ChatGPT"]
 
     L0 --> L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7 --> BONUS
 
@@ -129,6 +129,8 @@ flowchart TD
 6. [Clocks & Event Ordering](./Level-04-Distributed-Systems/06-Clocks-and-Ordering/)
 7. [Idempotency & Exactly-Once](./Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/)
 8. [Distributed Locking](./Level-04-Distributed-Systems/08-Distributed-Locking/)
+9. [CRDTs & Conflict Resolution](./Level-04-Distributed-Systems/09-CRDTs-and-Conflict-Resolution/)
+10. [Gossip Protocols, Membership & Failure Detection](./Level-04-Distributed-Systems/10-Gossip-and-Failure-Detection/)
 
 ### 🟥 [Level 5 — Architecture Patterns](./Level-05-Architecture-Patterns/)
 *Proven blueprints for organizing large systems.*
@@ -167,7 +169,7 @@ flowchart TD
 8. [Specialized Databases — Time-Series, Graph & NewSQL](./Level-07-Big-Data-and-Specialized/08-Specialized-Databases/)
 9. [AI & LLM Infrastructure — Vector Search, RAG & Inference](./Level-07-Big-Data-and-Specialized/09-AI-and-LLM-Infrastructure/)
 
-### 🏆 [Bonus — 43 Real-World System Designs](./Bonus-Real-World-Architectures/)
+### 🏆 [Bonus — 46 Real-World System Designs](./Bonus-Real-World-Architectures/)
 *Apply everything. Ordered from easiest to hardest.*
 
 | # | Design | Difficulty | Key concepts |
@@ -215,6 +217,9 @@ flowchart TD
 | 41 | [Online Code Judge (LeetCode)](./Bonus-Real-World-Architectures/41-Online-Code-Judge/) | ⭐⭐⭐ | Sandboxing, cgroups/seccomp, priority queues, fair limits |
 | 42 | [Social Graph Store (Facebook TAO)](./Bonus-Real-World-Architectures/42-Social-Graph-Store/) | ⭐⭐⭐⭐⭐ | Objects & associations, leader/follower cache, read-after-write |
 | 43 | [Calendar & Scheduling (Google Calendar)](./Bonus-Real-World-Architectures/43-Calendar-and-Scheduling/) | ⭐⭐⭐ | Recurrence rules, time zones/DST, free/busy, reminders at scale |
+| 44 | [Identity & Access Service (Auth0/Okta)](./Bonus-Real-World-Architectures/44-Identity-and-Access-Service/) | ⭐⭐⭐⭐ | OIDC/PKCE, JWKS rotation, refresh-token families, revocation, passkeys |
+| 45 | [Fraud Detection System (Stripe Radar)](./Bonus-Real-World-Architectures/45-Fraud-Detection-System/) | ⭐⭐⭐⭐ | 100 ms scoring, feature store, velocity counters, graph features, delayed labels |
+| 46 | [Distributed SQL Database (Spanner/CockroachDB)](./Bonus-Real-World-Architectures/46-Distributed-SQL-Database/) | ⭐⭐⭐⭐⭐ | Ranges, Raft per range, write intents, parallel commits, TrueTime vs HLC |
 
 ---
 

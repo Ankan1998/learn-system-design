@@ -100,6 +100,31 @@ Where:
 
 **Example:** If your web server receives 1,000 RPS (λ = 1,000) and average latency is 100ms (W = 0.1s), then L = 1,000 × 0.1 = 100 requests are in-flight at any moment. If latency spikes to 500ms, you need 500 in-flight slots to maintain the same throughput — or your queue grows, latency increases further, and you enter a death spiral.
 
+*Little's Law as a picture. The same arrival rate needs five times the capacity when latency goes up five times — and if that capacity isn't there, the queue itself adds latency.*
+
+```mermaid
+flowchart LR
+    IN["Arrivals<br/>λ = 1,000 requests per second"]
+    SYS["Requests in flight<br/>L = λ × W"]
+    OUT["Completions"]
+    A["W = 100 ms<br/>L = 1,000 × 0.1 = 100 in flight<br/>100 threads or slots needed"]
+    B["W = 500 ms after a slow dependency<br/>L = 1,000 × 0.5 = 500 in flight<br/>with only 100 slots, a queue forms"]
+    SPIRAL["Queueing adds latency,<br/>more latency means more in flight:<br/>the death spiral"]
+
+    IN --> SYS --> OUT
+    SYS --> A
+    SYS --> B --> SPIRAL
+
+    style IN fill:#dbeafe,color:#000
+    style SYS fill:#fef9c3,color:#000
+    style OUT fill:#dbeafe,color:#000
+    style A fill:#bbf7d0,color:#000
+    style B fill:#fde68a,color:#000
+    style SPIRAL fill:#fecaca,color:#000
+```
+
+*Caption: This is why timeouts and load shedding exist — they cap W so that L stays bounded when a dependency slows down.*
+
 ### Latency Numbers Every Programmer Should Know
 
 Originally compiled by Jeff Dean (Google), these numbers give you a mental ruler for system design. Memorize the orders of magnitude.
@@ -232,6 +257,31 @@ SLA (external contract, least strict)
 ```
 
 **Error budgets** are the innovation from Google SRE: if your SLO is 99.9% availability, you have a 0.1% error budget. If you have consumed it, you slow down feature releases and focus on reliability. If you have plenty left, you can move fast.
+
+*How the three fit together, and how the error budget turns a number into a decision.*
+
+```mermaid
+flowchart TD
+    SLI["SLI — what you measure<br/>share of requests under 200 ms<br/>this month: 99.93%"]
+    SLO["SLO — internal target<br/>99.9% over 28 days<br/>error budget = 0.1% = 43.8 min per month"]
+    SLA["SLA — customer contract<br/>99.5%, credits if breached<br/>looser than the SLO on purpose"]
+    BUDGET{"Error budget left?"}
+    FAST["Plenty left:<br/>ship features, run experiments"]
+    FREEZE["Budget burned:<br/>freeze risky releases,<br/>work on reliability"]
+
+    SLI --> SLO --> SLA
+    SLO --> BUDGET
+    BUDGET -->|"yes"| FAST
+    BUDGET -->|"no"| FREEZE
+
+    style SLI fill:#dbeafe,color:#000
+    style SLO fill:#fef9c3,color:#000
+    style SLA fill:#e5e7eb,color:#000
+    style FAST fill:#bbf7d0,color:#000
+    style FREEZE fill:#fecaca,color:#000
+```
+
+*Caption: The SLA is deliberately looser than the SLO so that missing the internal target is a warning, not a breach of contract.*
 
 ---
 

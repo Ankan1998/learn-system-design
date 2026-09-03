@@ -263,6 +263,42 @@ This is the hardest part of Snowflake-style generation. System clocks drift and 
 
 **Instagram IDs** use a similar layout but embed the shard ID rather than a machine ID, which lets them later migrate data between shards while keeping IDs stable.
 
+*The generator's decision path on every call, with the clock-rollback and sequence-overflow branches that the naive version forgets.*
+
+```mermaid
+flowchart TD
+    START["Request an id"]
+    NOW["now = current time in ms"]
+    CMP{"compare now with last_ts"}
+    BACK{"how big is the rollback?"}
+    WAIT["stall until now reaches last_ts"]
+    REFUSE["refuse, alert on-call,<br/>restart with a new machine id"]
+    SAME["same millisecond:<br/>sequence = sequence + 1"]
+    OVER{"sequence reached 4096?"}
+    SPIN["spin until the next millisecond,<br/>sequence = 0"]
+    NEWMS["new millisecond:<br/>sequence = 0"]
+    BUILD["id = timestamp bits, then datacenter,<br/>then worker, then sequence<br/>last_ts = now"]
+    OUT["return the 64-bit id"]
+
+    START --> NOW --> CMP
+    CMP -->|"now is earlier: the clock went backwards"| BACK
+    BACK -->|"under 10 ms"| WAIT --> NOW
+    BACK -->|"10 ms or more"| REFUSE
+    CMP -->|"equal"| SAME --> OVER
+    OVER -->|"yes"| SPIN --> BUILD
+    OVER -->|"no"| BUILD
+    CMP -->|"later"| NEWMS --> BUILD
+    BUILD --> OUT
+
+    style REFUSE fill:#fecaca,color:#000
+    style WAIT fill:#fef9c3,color:#000
+    style SPIN fill:#fef9c3,color:#000
+    style BUILD fill:#dbeafe,color:#000
+    style OUT fill:#bbf7d0,color:#000
+```
+
+*Caption: Only two things can produce a duplicate — a clock that goes backwards and a sequence that wraps within one millisecond. Both branches exist purely to make that impossible.*
+
 ### 7.4 Machine ID Assignment
 
 Two safe strategies:
@@ -274,6 +310,26 @@ Renew heartbeat every 30 s
 On death TTL expires; another node may reuse the id ONLY after
   the original node's last_ts is safely in the past (wait ≥ 1 s)
 ```
+
+```mermaid
+sequenceDiagram
+    participant N as Generator node 7
+    participant E as etcd
+    participant M as Replacement node
+
+    N->>E: PUT /machines/42 only if absent, attach a 30 s lease
+    E-->>N: OK, machine id 42 is yours
+    loop every 10 s
+        N->>E: keepalive for the lease
+    end
+    Note over N: node 7 crashes and the keepalives stop
+    Note over E: 30 s later the lease expires and /machines/42 is deleted
+    M->>E: PUT /machines/42 only if absent, attach a 30 s lease
+    E-->>M: OK, id 42 reassigned
+    Note over M: wait at least 1 s before issuing ids so node 7's last timestamp is safely in the past
+```
+
+*Caption: The lease turns "is node 7 still alive?" into something etcd decides, and the compare-and-set on `absent` guarantees two nodes can never hold the same machine ID at once.*
 
 **Strategy 2 — Embed in deployment config:**
 Each pod/VM has `MACHINE_ID=42` set by the orchestrator. Kubernetes StatefulSets give stable ordinal indices (pod-0, pod-1, …) which map directly to machine IDs. Simple, no runtime coordination needed.

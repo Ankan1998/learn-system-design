@@ -172,6 +172,32 @@ Cache memory needed = total_working_set × 0.20
 
 Where `total_working_set` is the data that's likely to be requested in a given day.
 
+*The whole chain with real numbers, from users to servers and disks. Memorize the shape, not the values.*
+
+```mermaid
+flowchart TD
+    DAU["10M DAU × 20 actions per day<br/>= 200M requests per day"]
+    QPS["÷ 86,400 s<br/>≈ 2,300 QPS average"]
+    PEAK["× 3 peak factor<br/>≈ 7,000 QPS at peak"]
+    PER["÷ 1,000 QPS one server handles<br/>= 7 servers at peak"]
+    HEAD["× 1.5 headroom, plus N+1 for failure<br/>≈ 12 servers provisioned"]
+    W["Writes are 10% of traffic ≈ 230 QPS<br/>× 1 KB × 86,400 × 365<br/>≈ 7.3 TB per year raw"]
+    REP["× 3 replicas × 1.5 for indexes<br/>≈ 33 TB provisioned per year"]
+
+    DAU --> QPS --> PEAK --> PER --> HEAD
+    QPS --> W --> REP
+
+    style DAU fill:#e5e7eb,color:#000
+    style QPS fill:#dbeafe,color:#000
+    style PEAK fill:#fef9c3,color:#000
+    style PER fill:#fef9c3,color:#000
+    style HEAD fill:#bbf7d0,color:#000
+    style W fill:#dbeafe,color:#000
+    style REP fill:#bbf7d0,color:#000
+```
+
+*Caption: Two branches from one QPS number — compute follows peak reads, storage follows average writes. Interviewers care that you separate the two.*
+
 ---
 
 ### Replication and Safety Margins
@@ -186,6 +212,25 @@ Raw storage estimates need multipliers for production reality:
 | **Combined** | **~5–10×** |
 
 So if your math says 1 TB/year, plan for 5–10 TB of actual disk provisioning.
+
+```mermaid
+flowchart LR
+    RAW["Raw estimate<br/>1 TB per year"]
+    REP["× 3 replicas<br/>3 TB"]
+    IDX["× 1.5 indexes and metadata<br/>4.5 TB"]
+    BUF["× 1.5 to 2 safety buffer<br/>7 to 9 TB"]
+    PLAN["Provision 5 to 10× the raw number"]
+
+    RAW --> REP --> IDX --> BUF --> PLAN
+
+    style RAW fill:#dbeafe,color:#000
+    style REP fill:#fef9c3,color:#000
+    style IDX fill:#fef9c3,color:#000
+    style BUF fill:#fde68a,color:#000
+    style PLAN fill:#bbf7d0,color:#000
+```
+
+*Caption: The multipliers compound. Forgetting replication alone leaves you a factor of three short — the single most common estimation mistake.*
 
 ---
 

@@ -72,6 +72,36 @@ When you load a webpage, your request travels: your device → Tier 3 ISP → Ti
 - Famous IXPs: DE-CIX in Frankfurt (one of the world's largest), AMS-IX in Amsterdam, LINX in London.
 - When Netflix peers directly with Comcast at an IXP, Netflix traffic no longer needs to travel through a Tier 1 backbone — it goes directly from Netflix's servers to Comcast's network, faster and cheaper.
 
+*The ISP hierarchy, and the shortcut an IXP provides. Follow the solid path for an ordinary request; the dashed path is what Netflix traffic would take without direct peering.*
+
+```mermaid
+flowchart LR
+    HOME["Your laptop"]
+    T3["Tier 3 ISP<br/>local broadband<br/>buys transit"]
+    T2["Tier 2 ISP<br/>regional, e.g. Comcast<br/>buys transit, peers with other Tier 2s"]
+    T1A["Tier 1 backbone<br/>e.g. NTT, Lumen<br/>settlement-free peering"]
+    T1B["Tier 1 backbone<br/>e.g. Telia"]
+    DC["Destination data center"]
+    IXP["IXP<br/>e.g. DE-CIX Frankfurt<br/>direct peering, no transit fee"]
+    NFLX["Netflix servers"]
+
+    HOME --> T3 --> T2 --> T1A --> T1B --> DC
+    T2 <-->|"peer directly"| IXP
+    IXP <-->|"peer directly"| NFLX
+    NFLX -.->|"without an IXP: the long way<br/>through Tier 1 transit"| T1A
+
+    style HOME fill:#e5e7eb,color:#000
+    style T3 fill:#dbeafe,color:#000
+    style T2 fill:#dbeafe,color:#000
+    style T1A fill:#fef9c3,color:#000
+    style T1B fill:#fef9c3,color:#000
+    style IXP fill:#bbf7d0,color:#000
+    style NFLX fill:#bbf7d0,color:#000
+    style DC fill:#e5e7eb,color:#000
+```
+
+*Caption: Every hop up the hierarchy costs money and milliseconds. IXPs let two networks that exchange a lot of traffic skip the backbone entirely — which is why content providers put servers inside them.*
+
 ### Submarine Fiber Cables
 
 Most intercontinental internet traffic travels through **submarine fiber-optic cables** on the ocean floor. These cables are about the thickness of a garden hose, protected by steel armor near shores.

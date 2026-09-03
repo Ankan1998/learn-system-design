@@ -109,6 +109,27 @@ Instead of geo-routing at DNS, anycast lets multiple servers share the same IP a
 - **Active-active**: all regions serve traffic simultaneously. Better for latency and load distribution. Harder to implement because you need conflict resolution.
 - **Active-passive**: one region handles all writes; others are warm standbys that take over on failure. Simpler, but the passive regions add cost without helping latency for writes.
 
+```mermaid
+flowchart TB
+    subgraph AP["Active-passive"]
+        direction LR
+        U1["All users"] --> USE["US-East: reads + writes"]
+        USE -->|"async replication"| EUP["EU-West: warm standby<br/>promoted only on failure"]
+    end
+
+    subgraph AA["Active-active"]
+        direction LR
+        EUU["EU users"] --> EUA["EU-West: reads + writes"]
+        USU["US users"] --> USA["US-East: reads + writes"]
+        EUA <-->|"bidirectional async replication<br/>plus conflict resolution"| USA
+    end
+
+    style AP fill:#fef9c3,color:#000
+    style AA fill:#bbf7d0,color:#000
+```
+
+*Caption: Active-passive pays for a region that does nothing until the worst day. Active-active uses both — and inherits the write-conflict problem described below.*
+
 **Cross-Region Replication Latency**
 Real-world numbers to memorize:
 - US-East to EU-West: ~80–100ms
@@ -116,6 +137,30 @@ Real-world numbers to memorize:
 - EU-West to AP-Southeast: ~120–140ms
 
 This is why async replication is the default — making every write wait for cross-continental confirmation would add 100–180ms to every write operation.
+
+*What a region failover actually looks like from one user's point of view, and why the DNS TTL sets the floor on recovery time.*
+
+```mermaid
+sequenceDiagram
+    participant U as User in Berlin
+    participant DNS as Geo-DNS
+    participant EU as EU-West load balancer
+    participant US as US-East load balancer
+
+    U->>DNS: resolve api.yourapp.com
+    DNS-->>U: EU-West IP, TTL 60 s
+    U->>EU: request served locally in 20 ms
+    Note over EU: EU-West region fails and health checks go red
+    Note over DNS: EU-West IP removed from answers
+    U->>EU: requests fail until the cached answer expires
+    Note over U: up to 60 s later the TTL expires
+    U->>DNS: resolve api.yourapp.com
+    DNS-->>U: US-East IP
+    U->>US: request served from the other region in 110 ms
+    Note over US: the data is there thanks to async replication, minus the last seconds of writes
+```
+
+*Caption: Two costs of the failover are visible here: up to one TTL of errors, and the writes that were still in the replication pipe when EU-West died. Anycast avoids the first; only synchronous replication avoids the second.*
 
 **Conflict Resolution**
 When two users in different regions write to the same record simultaneously, you get a conflict. Common resolution strategies:

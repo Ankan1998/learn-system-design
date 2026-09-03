@@ -95,6 +95,29 @@ end
 
 Why the token check? Without it, a process whose lock expired could delete the lock now held by a *different* process.
 
+*The full lifecycle, including the failure the token check prevents — and the one it doesn't.*
+
+```mermaid
+sequenceDiagram
+    participant A as Client A
+    participant R as Redis
+    participant B as Client B
+
+    A->>R: SET lock:job42 token-A NX PX 30000
+    R-->>A: OK, A holds the lock for 30 s
+    Note over A: A starts the work
+    Note over A: A stalls for 40 s (GC pause or slow network)
+    Note over R: 30 s pass and the key expires
+    B->>R: SET lock:job42 token-B NX PX 30000
+    R-->>B: OK, B now holds the lock
+    Note over A: A wakes up, finishes the work, tries to release
+    A->>R: EVAL release script, DEL only if GET equals token-A
+    R-->>A: 0, token mismatch, B's lock is untouched
+    Note over A,B: the token check stops A from deleting B's lock, but both clients did the work: only a fencing token fixes that
+```
+
+*Caption: The unique token makes release safe. It does not make the lock safe — A still believed it held the lock while B was working. That gap is the subject of the GC-pause section below.*
+
 ---
 
 ### Approach 3 — Redlock (and Its Controversy)
@@ -129,6 +152,33 @@ ZooKeeper and etcd use a consensus protocol (ZAB / Raft respectively), making th
 3. The client with the **lowest sequence number** holds the lock.
 4. Other clients watch the node just below theirs. When it's deleted, they re-check.
 5. If the lock holder's ZK session dies (crash or network partition), ZK automatically deletes the ephemeral node — the next client inherits.
+
+*The recipe as a picture. Each waiter watches only the node just ahead of it, so a release wakes exactly one client.*
+
+```mermaid
+flowchart TD
+    ROOT["/locks/resource"]
+    N1["lock-000001<br/>client A, ephemeral<br/>lowest number: HOLDS the lock"]
+    N2["lock-000002<br/>client B<br/>watches lock-000001"]
+    N3["lock-000003<br/>client C<br/>watches lock-000002"]
+    DIE["client A's session dies<br/>ZooKeeper deletes lock-000001"]
+    NEXT["watch fires for B only<br/>B re-checks: now lowest, holds the lock<br/>C is not woken: no herd effect"]
+
+    ROOT --> N1
+    ROOT --> N2
+    ROOT --> N3
+    N2 -.->|"watch"| N1
+    N3 -.->|"watch"| N2
+    N1 --> DIE --> NEXT
+
+    style N1 fill:#bbf7d0,color:#000
+    style N2 fill:#fef9c3,color:#000
+    style N3 fill:#fef9c3,color:#000
+    style DIE fill:#fecaca,color:#000
+    style NEXT fill:#bbf7d0,color:#000
+```
+
+*Caption: Ephemeral nodes tie the lock to the holder's session, so a crashed holder releases automatically. The sequence number doubles as a fencing token — it only ever increases.*
 
 **etcd** approach: use `PUT` with a lease, watch for key deletion. `etcd`'s `Grant` + `Lease` + `TxN` provides the same guarantee.
 
@@ -321,5 +371,5 @@ Seat selection must be locked briefly while a user completes payment. A distribu
 - [ZooKeeper Recipes — Distributed Lock](https://zookeeper.apache.org/doc/current/recipes.html#sc_recipes_Locks) — official ZK lock recipe.
 - [etcd — Distributed Locking](https://etcd.io/docs/v3.5/dev-guide/api_concurrency_reference_v3/) — concurrency primitives in etcd.
 - [DDIA Chapter 8 & 9](https://dataintensive.net/) — The Trouble with Distributed Systems; Consistency and Consensus.
-- Previous: [07 — Idempotency and Exactly-Once](../07-Idempotency-and-Exactly-Once/README.md) · Back to [Level 04 Overview](../README.md)
+- Previous: [07 — Idempotency and Exactly-Once](../07-Idempotency-and-Exactly-Once/README.md) · Next: [09 — CRDTs & Conflict Resolution](../09-CRDTs-and-Conflict-Resolution/README.md) · Back to [Level 04 Overview](../README.md)
 - See also: [Bonus — Job Scheduler](../../Bonus-Real-World-Architectures/README.md) · [Bonus — Ticketmaster](../../Bonus-Real-World-Architectures/README.md)

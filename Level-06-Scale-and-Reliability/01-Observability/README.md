@@ -50,6 +50,25 @@ Your production system deserves the same treatment. **Logs are the flight record
 
 All three pillars work together. A metric alert fires → you open a trace to find the slow span → you read the logs for that specific service instance. Without all three, you are missing a dimension.
 
+*A real debugging path across the three pillars. Each one answers a different question, and the trace ID is the thread that ties them together.*
+
+```mermaid
+flowchart LR
+    ALERT["Metrics: alert fires<br/>checkout p99 latency 1.8 s<br/>answers WHAT is wrong"]
+    TRACE["Traces: open a slow request by trace_id<br/>span payment-service took 1.6 s<br/>answers WHERE it is wrong"]
+    LOGS["Logs: filter by that trace_id and instance<br/>connection pool exhausted, waited 1.5 s<br/>answers WHY it is wrong"]
+    FIX["Root cause: pool size 10, traffic doubled<br/>fix and watch the metric recover"]
+
+    ALERT --> TRACE --> LOGS --> FIX
+
+    style ALERT fill:#fef9c3,color:#000
+    style TRACE fill:#dbeafe,color:#000
+    style LOGS fill:#e5e7eb,color:#000
+    style FIX fill:#bbf7d0,color:#000
+```
+
+*Caption: Without the trace, you'd be grepping logs across fifty services. Without metrics, you wouldn't know to look. Without logs, you'd know which service was slow but not why.*
+
 ### SLI / SLO / SLA and Error Budgets
 
 Before you can observe a system meaningfully, you need to define what "working" means.
@@ -154,6 +173,32 @@ With structured logs, you can filter `trace_id = abc123` to find every log line 
 - **E**rrors — error events
 
 A typical Grafana dashboard for a checkout service shows RED metrics on the top row, infrastructure USE metrics below, and SLO burn-rate gauges showing how fast you are consuming your error budget in real time.
+
+*The pull-based metrics pipeline. Services don't send metrics anywhere — they expose them, and Prometheus comes to collect.*
+
+```mermaid
+flowchart LR
+    S1["checkout-service<br/>exposes /metrics"]
+    S2["payment-service<br/>exposes /metrics"]
+    S3["node exporter<br/>CPU, disk, memory"]
+    PROM["Prometheus<br/>scrapes every 15 s<br/>stores time series"]
+    PQL["PromQL queries<br/>rate of http_requests_total over 5 min"]
+    GRAF["Grafana dashboards<br/>RED per service, USE per resource,<br/>SLO burn-rate gauges"]
+    AM["Alertmanager<br/>alert rules evaluated continuously"]
+    PAGE["PagerDuty / Slack"]
+
+    S1 -->|"pull"| PROM
+    S2 -->|"pull"| PROM
+    S3 -->|"pull"| PROM
+    PROM --> PQL --> GRAF
+    PROM --> AM --> PAGE
+
+    style PROM fill:#fef9c3,color:#000
+    style GRAF fill:#bbf7d0,color:#000
+    style AM fill:#fecaca,color:#000
+```
+
+*Caption: Pulling means a broken service simply stops being scraped — which is itself a signal (`up == 0`) — and no service can flood the metrics system by pushing too much.*
 
 ---
 

@@ -48,6 +48,8 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 **CQRS** — Command Query Responsibility Segregation. Separate the write model from the read model.
 
+**CRDT (Conflict-free Replicated Data Type)** — A data structure (counter, set, register, sequence) whose replicas can be updated concurrently without coordination and are guaranteed to converge when merged, because the merge is commutative, associative, and idempotent. Gives *strong eventual consistency*; cannot enforce cross-object invariants.
+
 **Crypto-shredding** — Deleting data everywhere at once by destroying the per-user or per-tenant encryption key that protects it; the standard way to honor erasure requests in immutable logs and backups.
 
 ## D
@@ -82,9 +84,13 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 **Failover** — Automatically switching to a standby component when the primary fails.
 
+**Feature Store** — A system that keeps ML features in two synchronized forms: an *online* low-latency store for serving and an *offline* historical store for training, with point-in-time correctness so models never train on data from the future.
+
 **Fencing Token** — A monotonically increasing number issued with a lock or lease; the protected resource rejects any request carrying an older token, so a client that lost its lock without noticing cannot corrupt data.
 
 ## G
+
+**Gossip Protocol** — An epidemic-style protocol where each node periodically shares what it knows with a few random peers, so cluster-wide state (membership, liveness, metadata) converges in O(log N) rounds with no coordinator (Cassandra, Consul, Redis Cluster).
 
 **Green Threads (Goroutines, Virtual Threads)** — Lightweight threads scheduled by the language runtime rather than the OS, costing a few KB each, so millions can exist; they park cheaply on I/O while a handful of OS threads do the actual work.
 
@@ -148,6 +154,10 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 **Partition (Sharding)** — Splitting one dataset across multiple machines.
 
+**Passkey (WebAuthn)** — A phishing-resistant login credential: the server stores only a public key and the device signs a per-login challenge, so there is no shared secret to steal or stuff.
+
+**Phi-Accrual Failure Detector** — A failure detector that outputs a continuous suspicion level (φ) calibrated to a peer's observed heartbeat history instead of a fixed timeout; used by Cassandra and Akka.
+
 **Partition Tolerance** — The system keeps working despite network failures between nodes.
 
 **Percentile (p50, p95, p99)** — p99 latency = the value below which 99% of requests fall. Tail latency matters at scale.
@@ -194,6 +204,8 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 
 **Stateless** — A server that keeps no client session data between requests, making it easy to scale and replace.
 
+**SWIM** — Scalable Weakly-consistent Infection-style Membership: a gossip-based protocol that detects failures with random direct pings, indirect pings through other members, and a suspicion period the accused node can refute (Consul/Serf, Ringpop).
+
 ## T
 
 **Throughput** — How much work per unit time the system handles (e.g., requests/sec, MB/sec).
@@ -201,6 +213,8 @@ A single place to look up every term used in this curriculum. Skim it now; retur
 **Throttling** — Deliberately slowing or rejecting requests to protect a system.
 
 **Time-Series Database (TSDB)** — A database optimized for timestamped, append-only data (metrics, IoT) with heavy compression and time-window queries (InfluxDB, Prometheus).
+
+**Tombstone** — A marker recording that something was deleted, kept so that replicas and late-arriving updates learn about the deletion instead of resurrecting the data; used in LSM trees, Kafka compaction, CRDTs, and gossip membership.
 
 **Tokenization** — Replacing a sensitive value (such as a card number) with a random token and keeping the real value only in a tightly controlled vault; the main tool for shrinking compliance scope.
 

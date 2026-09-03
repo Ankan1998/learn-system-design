@@ -109,6 +109,34 @@ An IP address identifies a machine, but a single machine runs dozens of programs
 | 5432 | TCP | PostgreSQL database |
 | 27017 | TCP | MongoDB |
 
+*One machine, one IP address, many programs. The operating system uses the destination port to hand each arriving packet to the right one.*
+
+```mermaid
+flowchart LR
+    PKT["Incoming packet<br/>destination 192.168.1.5, port 443"]
+    NIC["Network card<br/>IP 192.168.1.5"]
+    OS["Operating system<br/>reads the destination port"]
+    P443["port 443 → nginx (HTTPS)"]
+    P5432["port 5432 → PostgreSQL"]
+    P22["port 22 → sshd"]
+    P53["port 53 → DNS resolver"]
+
+    PKT --> NIC --> OS
+    OS -->|"443"| P443
+    OS -->|"5432"| P5432
+    OS -->|"22"| P22
+    OS -->|"53"| P53
+
+    style PKT fill:#fef9c3,color:#000
+    style OS fill:#dbeafe,color:#000
+    style P443 fill:#bbf7d0,color:#000
+    style P5432 fill:#e5e7eb,color:#000
+    style P22 fill:#e5e7eb,color:#000
+    style P53 fill:#e5e7eb,color:#000
+```
+
+*Caption: The IP address gets the packet to the machine; the port gets it to the program. Together they form a socket — `192.168.1.5:443` — which is the actual endpoint of every connection.*
+
 ---
 
 ## 📊 How It Works
@@ -153,6 +181,28 @@ Unlike TCP, UDP has no setup or teardown phase. A message is simply fired and th
 | 4 | Sender is already sending the next datagram |
 
 For a DNS query, this entire exchange takes one round-trip (query + response), compared to TCP's minimum of 1.5 RTT before data can even start.
+
+*Compare this with the TCP diagram above: no handshake, no acknowledgments, no teardown — and when a datagram is lost, nothing happens.*
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    Note over C,S: No handshake and no connection state
+    C->>S: DNS query datagram (who is example.com)
+    S-->>C: DNS response datagram (93.184.216.34)
+    Note over C,S: one round trip, done
+
+    Note over C,S: Video call, fire and forget
+    C->>S: audio frame 1
+    C->>S: audio frame 2
+    Note over C,S: frame 2 is lost in the network and nobody retransmits it
+    C->>S: audio frame 3
+    Note over S: receiver plays 1 and 3, a 20 ms gap nobody hears
+```
+
+*Caption: For a DNS lookup the missing handshake saves a full round trip. For a call, retransmitting frame 2 would arrive too late to be useful anyway — so UDP's "lost is lost" is exactly the right behavior.*
 
 ---
 

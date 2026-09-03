@@ -126,6 +126,27 @@ HTTP is **stateless**: each request is completely independent. The server has no
 
 The solution: **cookies**. On login, the server sends `Set-Cookie: session_id=abc123`. Your browser stores it and automatically attaches `Cookie: session_id=abc123` to every subsequent request. The server looks up `abc123` in its session store and knows who you are.
 
+*The cookie round-trip. Notice that the server keeps no memory of you between requests — the cookie is what re-introduces you every time.*
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant S as Web server
+    participant ST as Session store
+
+    B->>S: POST /login (username, password)
+    S->>ST: create session abc123 for user 42
+    S-->>B: 200 OK plus Set-Cookie session_id=abc123
+    Note over B: browser stores the cookie for this domain
+    B->>S: GET /account with Cookie session_id=abc123
+    S->>ST: look up abc123
+    ST-->>S: user 42
+    S-->>B: 200 OK, personalized page
+    Note over B,S: every later request carries the cookie automatically
+```
+
+*Caption: Because the identity lives in the cookie plus a shared session store, any server can handle any request — which is what makes stateless web tiers easy to scale (see Stateless vs Stateful in Level 1).*
+
 ### HTTPS = HTTP + TLS
 
 **TLS** (Transport Layer Security) wraps the HTTP conversation in an encrypted tunnel. From the outside, the requests and responses look like scrambled noise. Only the client and server — who negotiated a shared secret key — can read them.
@@ -223,6 +244,36 @@ sequenceDiagram
 | TLS | Optional | Effectively required | Required |
 | Adoption (2025) | ~5% new sites | ~60%+ | ~30%+ |
 | Best for | Legacy systems | Most modern web traffic | High-latency, mobile, video |
+
+*What "head-of-line blocking" means in each version, and why HTTP/3 had to leave TCP behind to fix it.*
+
+```mermaid
+flowchart TB
+    subgraph H1["HTTP/1.1 — one request at a time per connection"]
+        direction LR
+        C1["Browser opens up to 6 TCP connections"] --> R1["conn 1: request, wait, response"]
+        C1 --> R2["conn 2: request, wait, response"]
+        C1 --> R3["conn 3: a slow response blocks<br/>the next request on that connection"]
+    end
+
+    subgraph H2["HTTP/2 — many streams on one TCP connection"]
+        direction LR
+        C2["One TCP connection"] --> S2["streams 1, 2, 3 interleaved<br/>headers compressed with HPACK"]
+        S2 --> L2["one lost TCP packet stalls ALL streams<br/>transport-level head-of-line blocking"]
+    end
+
+    subgraph H3["HTTP/3 — QUIC over UDP"]
+        direction LR
+        C3["One QUIC connection<br/>TLS built in, 1-RTT or 0-RTT setup"] --> S3["independent streams"]
+        S3 --> L3["a lost packet stalls only its own stream"]
+    end
+
+    style H1 fill:#fecaca,color:#000
+    style H2 fill:#fef9c3,color:#000
+    style H3 fill:#bbf7d0,color:#000
+```
+
+*Caption: HTTP/2 solved the application-level problem (one request at a time) but inherited TCP's rule that bytes are delivered in order. QUIC gives each stream its own ordering, so a dropped packet on a lossy mobile link hurts one image instead of the whole page.*
 
 ### Common Status Codes by Scenario
 

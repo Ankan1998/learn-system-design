@@ -49,6 +49,32 @@ You cannot authorize a user you have not authenticated. But authentication alone
 
 **Zero-trust architecture** — "never trust, always verify." Every request — even from inside the VPC — must carry a valid, short-lived credential. There is no trusted network perimeter. Google's BeyondCorp model (2011 paper, production since ~2014) pioneered this: Googlers access internal apps from coffee shops the same way they access them from the office.
 
+*Defense in depth as a request path. Each layer assumes the one before it has already been breached.*
+
+```mermaid
+flowchart LR
+    NET["Internet"]
+    EDGE["Edge: CDN + WAF<br/>absorbs DDoS, blocks SQLi and XSS patterns,<br/>rate limits per IP"]
+    GW["API gateway<br/>TLS termination, authentication,<br/>per-user rate limits, authorization"]
+    MESH["Services on a mesh<br/>mTLS between services,<br/>least-privilege service identities"]
+    DATA["Data layer<br/>encryption at rest, KMS-held keys,<br/>row-level security, no raw card numbers"]
+    AUDIT["Audit and detection<br/>immutable logs, anomaly alerts,<br/>break-glass access reviews"]
+
+    NET --> EDGE --> GW --> MESH --> DATA
+    EDGE -.-> AUDIT
+    GW -.-> AUDIT
+    MESH -.-> AUDIT
+    DATA -.-> AUDIT
+
+    style EDGE fill:#fef9c3,color:#000
+    style GW fill:#dbeafe,color:#000
+    style MESH fill:#dbeafe,color:#000
+    style DATA fill:#bbf7d0,color:#000
+    style AUDIT fill:#e5e7eb,color:#000
+```
+
+*Caption: Zero trust means the mesh and data layers don't relax just because a request came through the gateway. Every layer verifies; every layer logs.*
+
 ---
 
 ## 📊 How It Works
@@ -105,6 +131,44 @@ The rule: a secret that has never touched a `.env` file checked into git is a se
 | **XSS (Cross-Site Scripting)** | Inject JavaScript into a page that other users view | Content-Security-Policy header; output encoding; framework escaping (React, Angular do this by default) |
 | **CSRF (Cross-Site Request Forgery)** | Trick a logged-in user's browser into making a request they did not intend | CSRF tokens (double-submit cookie pattern); `SameSite=Strict` cookies |
 | **Credential Stuffing** | Replay billions of leaked username/password pairs from data breaches | MFA; breached-password detection (HaveIBeenPwned API); account lockout + CAPTCHA |
+
+*Where each defense lives. Attacks are caught at the layer that can see them — floods at the edge, malformed input in the app, weak credentials at the identity provider.*
+
+```mermaid
+flowchart TD
+    REQ["Incoming request"]
+    E{"Edge and WAF"}
+    G{"Gateway and identity provider"}
+    A{"Application code"}
+    D{"Database"}
+    OK["Request served"]
+
+    REQ --> E
+    E -->|"volumetric flood"| DDOS["DDoS: absorbed by CDN capacity,<br/>anycast, rate limits"]
+    E -->|"known attack signature"| WAFB["SQLi or XSS payload: blocked by WAF rules"]
+    E -->|"clean"| G
+    G -->|"millions of login attempts"| STUFF["Credential stuffing: throttling,<br/>breached-password checks, MFA step-up"]
+    G -->|"authenticated"| A
+    A -->|"untrusted input"| SQLI["SQL injection: parameterized queries"]
+    A -->|"rendering user content"| XSS["XSS: output encoding, CSP header"]
+    A -->|"state-changing form"| CSRF["CSRF: SameSite cookies, CSRF tokens"]
+    A -->|"validated"| D
+    D -->|"least privilege, encrypted"| OK
+
+    style E fill:#fef9c3,color:#000
+    style G fill:#dbeafe,color:#000
+    style A fill:#dbeafe,color:#000
+    style D fill:#bbf7d0,color:#000
+    style DDOS fill:#fecaca,color:#000
+    style WAFB fill:#fecaca,color:#000
+    style STUFF fill:#fecaca,color:#000
+    style SQLI fill:#fecaca,color:#000
+    style XSS fill:#fecaca,color:#000
+    style CSRF fill:#fecaca,color:#000
+    style OK fill:#bbf7d0,color:#000
+```
+
+*Caption: A WAF catches the obvious payloads, but parameterized queries and output encoding in the application are the real fix — the WAF is a net under the net.*
 
 ### Auth Methods
 

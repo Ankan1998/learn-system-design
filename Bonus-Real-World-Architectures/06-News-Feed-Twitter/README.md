@@ -373,6 +373,32 @@ Operations:
 - If a user has been inactive > 7 days, their timeline is evicted. On next login, the Feed Service **cold-starts** the timeline: fetches followees from the graph, pulls recent tweets from Tweet DB, and pre-populates Redis.
 - Redis Cluster is sharded by `user_id % num_shards`. A user's timeline always lives on one shard (no cross-shard sorted set operations needed).
 
+*The hybrid read path in action: pre-computed entries from fan-out on write, merged at read time with the celebrity tweets that were never fanned out.*
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant F as Feed service
+    participant R as Redis timeline cache
+    participant CEL as Celebrity tweets service
+    participant T as Tweet cache and DB
+    participant RK as Ranking service
+
+    C->>F: GET /home_timeline
+    F->>R: ZRANGE timeline:42 0 799 REV
+    R-->>F: 800 tweet ids, pre-computed by fan-out on write
+    F->>CEL: latest tweets of the celebrities user 42 follows
+    CEL-->>F: 50 tweet ids, fan-out on read
+    Note over F: merge both lists by tweet id, newest first
+    F->>T: hydrate the top 500 ids into tweet objects
+    T-->>F: tweets with author, media, counts
+    F->>RK: score candidates for the For You mode
+    RK-->>F: top 20 ranked
+    F-->>C: page 1 of the timeline, about 45 ms server-side
+```
+
+*Caption: Two sources, one merge. Regular users' tweets were pushed into the cache when posted; celebrity tweets are pulled at read time so that one tweet from a 100M-follower account doesn't trigger 100M cache writes.*
+
 ---
 
 ### 7.3 Follower Graph at Scale
@@ -414,6 +440,32 @@ Twitter ships two modes:
 The Ranking Service sits **between** the Feed Service and the client. It's stateless, horizontally scalable, and operates on a candidate set (top 500 from cache) to produce a final ranked list (top 20 to return).
 
 Latency budget: cache read ~5 ms + ranking inference ~30 ms + hydration ~10 ms = ~45 ms server-side, well within 200 ms SLA.
+
+```mermaid
+flowchart LR
+    SRC1["In-network candidates<br/>800 from the timeline cache"]
+    SRC2["Celebrity candidates<br/>fan-out on read"]
+    SRC3["Out-of-network candidates<br/>topics and embeddings"]
+    FEAT["Feature extraction<br/>author affinity, engagement velocity,<br/>recency decay, topic embedding"]
+    MODEL["ML scorer<br/>probability of like, reply, dwell<br/>about 30 ms for 500 candidates"]
+    FILT["Filters<br/>blocked authors, already seen,<br/>diversity: not 5 in a row from one author"]
+    OUT["Top 20 returned<br/>next page served from the same ranked list"]
+
+    SRC1 --> FEAT
+    SRC2 --> FEAT
+    SRC3 --> FEAT
+    FEAT --> MODEL --> FILT --> OUT
+
+    style SRC1 fill:#dbeafe,color:#000
+    style SRC2 fill:#dbeafe,color:#000
+    style SRC3 fill:#dbeafe,color:#000
+    style FEAT fill:#fef9c3,color:#000
+    style MODEL fill:#fde68a,color:#000
+    style FILT fill:#fef9c3,color:#000
+    style OUT fill:#bbf7d0,color:#000
+```
+
+*Caption: Ranking is a funnel — cheap candidate generation from caches, then an expensive model on a few hundred items, then filters. The model never sees the whole corpus; that's what keeps it inside the latency budget.*
 
 ---
 

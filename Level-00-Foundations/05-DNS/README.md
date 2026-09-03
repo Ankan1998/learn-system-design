@@ -61,6 +61,32 @@ There are four levels you need to know:
 
 4. **Your Domain** — The actual record, like `A google.com → 142.250.80.46`.
 
+*The same hierarchy as a diagram, with who operates each level. A lookup walks top to bottom; each level only knows how to find the next one.*
+
+```mermaid
+flowchart TD
+    ROOT["Root nameservers (.)<br/>13 sets, operated by ICANN, Verisign, NASA and others<br/>know where every TLD server is"]
+    COM["TLD nameserver: .com<br/>run by Verisign<br/>knows the authoritative servers for google.com"]
+    ORG["TLD nameserver: .org"]
+    IO["TLD nameserver: .io"]
+    AUTH["Authoritative nameserver for google.com<br/>ns1.google.com<br/>the source of truth"]
+    REC["Record<br/>A google.com → 142.250.80.46"]
+
+    ROOT --> COM
+    ROOT --> ORG
+    ROOT --> IO
+    COM --> AUTH --> REC
+
+    style ROOT fill:#fef9c3,color:#000
+    style COM fill:#dbeafe,color:#000
+    style ORG fill:#e5e7eb,color:#000
+    style IO fill:#e5e7eb,color:#000
+    style AUTH fill:#bbf7d0,color:#000
+    style REC fill:#bbf7d0,color:#000
+```
+
+*Caption: Nobody at the top knows Google's IP address. The root points to `.com`, `.com` points to Google's own nameservers, and only they hold the answer — which is what lets the system scale to hundreds of millions of domains.*
+
 ### Recursive Resolver vs Authoritative Resolver
 
 There are two key types of DNS resolvers:
@@ -92,6 +118,38 @@ After the TTL expires, the cached answer is discarded, and the next request trig
 - **Cache Miss:** No cached answer exists (or TTL expired). The resolver must do the full hierarchy lookup — querying root → TLD → authoritative nameserver. This takes **20–120ms** depending on network conditions.
 
 Most DNS lookups you experience day-to-day are cache hits, because popular domains like `google.com` are cached by recursive resolvers constantly.
+
+*Every lookup tries the caches first. Only when all of them miss does the resolver walk the full hierarchy — and it caches the result for next time.*
+
+```mermaid
+flowchart TD
+    Q["Browser asks: where is google.com?"]
+    OSC{"OS or browser cache<br/>has it and TTL not expired?"}
+    RR{"Recursive resolver cache<br/>e.g. 1.1.1.1<br/>has it?"}
+    HIT1["Answer in microseconds"]
+    HIT2["Answer in under 1 ms<br/>cache hit"]
+    ROOT["Ask a root server<br/>who handles .com?"]
+    TLD["Ask the .com TLD server<br/>who is authoritative for google.com?"]
+    AUTH["Ask ns1.google.com<br/>what is the A record?"]
+    STORE["Cache the answer with its TTL<br/>e.g. 300 s"]
+    MISS["Answer in 20 to 120 ms<br/>cache miss, full walk"]
+
+    Q --> OSC
+    OSC -->|"yes"| HIT1
+    OSC -->|"no"| RR
+    RR -->|"yes"| HIT2
+    RR -->|"no"| ROOT --> TLD --> AUTH --> STORE --> MISS
+
+    style Q fill:#e5e7eb,color:#000
+    style OSC fill:#fef9c3,color:#000
+    style RR fill:#fef9c3,color:#000
+    style HIT1 fill:#bbf7d0,color:#000
+    style HIT2 fill:#bbf7d0,color:#000
+    style MISS fill:#fecaca,color:#000
+    style STORE fill:#dbeafe,color:#000
+```
+
+*Caption: The TTL set by the domain owner decides how long the green paths stay green. A short TTL means fast propagation of changes but more full walks; a long TTL means the opposite.*
 
 ### DNS Record Types
 

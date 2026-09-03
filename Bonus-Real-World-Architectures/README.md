@@ -1,4 +1,4 @@
-# 🏆 Bonus — 43 Real-World System Designs
+# 🏆 Bonus — 46 Real-World System Designs
 
 > Theory is the grammar; these are the conversations. Here you apply everything from Levels 0–7 to design the systems you use every day.
 
@@ -39,7 +39,7 @@ flowchart LR
 
 ---
 
-## 📚 The 43 designs
+## 📚 The 46 designs
 
 ### 🟢 Warm-up tier (⭐–⭐⭐) — core patterns
 | # | Design | What's genuinely hard about it |
@@ -88,6 +88,8 @@ flowchart LR
 | 33 | [Content Delivery Network](./33-Content-Delivery-Network/) | Edge routing, cache hierarchy, global purge |
 | 34 | [Distributed Logging & Monitoring](./34-Distributed-Logging-Monitoring/) | Firehose ingestion, time-series storage, alerting |
 | 40 | [A/B Testing Platform](./40-Experimentation-Platform/) | Stateless hash bucketing across thousands of experiments; statistics you can trust |
+| 44 | [Identity & Access Service (Auth0/Okta)](./44-Identity-and-Access-Service/) | The service everything depends on: stateless tokens, stateful refresh, revocation in seconds |
+| 45 | [Fraud Detection (Stripe Radar)](./45-Fraud-Detection-System/) | Scoring inside a payment's latency budget with features that must be fresh and point-in-time correct |
 
 ### ⚫ Grandmaster tier (⭐⭐⭐⭐⭐)
 | # | Design | What's genuinely hard about it |
@@ -103,8 +105,9 @@ flowchart LR
 | 38 | [LLM Chat Service (ChatGPT)](./38-LLM-Chat-Service/) | Streaming tokens from a scarce GPU fleet; quotas, caching, moderation |
 | 39 | [Distributed Coordination Service (ZooKeeper/etcd)](./39-Distributed-Coordination-Service/) | The consensus-backed brain behind locks, elections, and config — must never be wrong |
 | 42 | [Social Graph Store (Facebook TAO)](./42-Social-Graph-Store/) | A billion graph reads per second from a two-tier cache with read-after-write |
+| 46 | [Distributed SQL Database (Spanner/CockroachDB)](./46-Distributed-SQL-Database/) | SQL and ACID across regions: Raft per range, write intents, and clocks that admit uncertainty |
 
-> 📦 Designs **26–43** were added as expansions and are slotted into the tier matching their difficulty — that's why numbers aren't contiguous within a tier. Follow the tiers top-to-bottom for the smoothest difficulty ramp.
+> 📦 Designs **26–46** were added as expansions and are slotted into the tier matching their difficulty — that's why numbers aren't contiguous within a tier. Follow the tiers top-to-bottom for the smoothest difficulty ramp.
 
 ---
 
@@ -125,6 +128,6 @@ Print this. Use it on every design question:
 
 ---
 
-*Finished all 43? You can now look at almost any product and reverse-engineer how it probably works. That's the whole goal.* 🚀
+*Finished all 46? You can now look at almost any product and reverse-engineer how it probably works. That's the whole goal.* 🚀
 
 ⬅️ Back to the [main curriculum](../README.md)

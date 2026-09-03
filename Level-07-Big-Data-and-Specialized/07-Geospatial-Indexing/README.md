@@ -120,6 +120,30 @@ Uber open-sourced **H3** in 2018: a hexagonal hierarchical grid over the globe.
 
 **Used by:** Uber (driver dispatch, surge pricing, trip analysis), DoorDash, Grab, Lyft.
 
+*Putting a technique to work: the end-to-end pipeline for "what's within 1 km of me?", using geohash as the example index.*
+
+```mermaid
+flowchart LR
+    IN["User location<br/>lat 37.7749, lng -122.4194<br/>radius 1 km"]
+    GH["Encode to geohash<br/>precision 6: 9q8yyk<br/>cell about 1.2 km × 0.6 km"]
+    NB["Add the 8 neighbor cells<br/>a user near a cell edge<br/>would otherwise miss results"]
+    IDX["Index lookup<br/>WHERE geohash IN the 9 cells<br/>or a prefix scan on a sorted key"]
+    CAND["Candidates<br/>a few hundred points"]
+    DIST["Exact haversine distance<br/>filter to 1 km, sort by distance"]
+    OUT["Top-k results"]
+
+    IN --> GH --> NB --> IDX --> CAND --> DIST --> OUT
+
+    style IN fill:#e5e7eb,color:#000
+    style GH fill:#dbeafe,color:#000
+    style NB fill:#fef9c3,color:#000
+    style IDX fill:#dbeafe,color:#000
+    style DIST fill:#fef9c3,color:#000
+    style OUT fill:#bbf7d0,color:#000
+```
+
+*Caption: The index does the coarse work (turn a 2D radius into a handful of key lookups); exact distance math runs only on the few hundred survivors. Every technique in this topic follows the same coarse-then-exact shape.*
+
 ---
 
 ## 📊 How It Works
@@ -202,6 +226,38 @@ flowchart TD
 | **Elasticsearch** | Geohash + R-Tree hybrid | `geo_point` type; aggregations on geohash tiles |
 | **MongoDB** | 2dsphere index (geohash-based) | `$near`, `$geoWithin` operators |
 | **Google BigQuery** | S2 cells | `ST_GEOGPOINT`, `ST_DISTANCE` on S2 geometry |
+
+*Choosing among them in an interview: four questions in order.*
+
+```mermaid
+flowchart TD
+    Q1{"Complex shapes:<br/>polygons, routes, projections?"}
+    Q2{"Simple radius search<br/>in Redis or a key-value store?"}
+    Q3{"Highly uneven density,<br/>in-memory tree?"}
+    Q4{"Analytics or dispatch that needs<br/>equidistant neighbors?"}
+    RT["R-tree via PostGIS or MySQL spatial"]
+    GHS["Geohash, e.g. Redis GEO or a sorted key prefix"]
+    QT["Quadtree with adaptive depth"]
+    H3["Uber H3 hexagons"]
+    S2["Google S2 cells for spherical precision at planet scale"]
+
+    Q1 -->|"yes"| RT
+    Q1 -->|"no"| Q2
+    Q2 -->|"yes"| GHS
+    Q2 -->|"no"| Q3
+    Q3 -->|"yes"| QT
+    Q3 -->|"no"| Q4
+    Q4 -->|"yes"| H3
+    Q4 -->|"no"| S2
+
+    style RT fill:#bbf7d0,color:#000
+    style GHS fill:#bbf7d0,color:#000
+    style QT fill:#bbf7d0,color:#000
+    style H3 fill:#bbf7d0,color:#000
+    style S2 fill:#bbf7d0,color:#000
+```
+
+*Caption: For most interview questions the answer is geohash (simple, available in Redis and every database). Reach for H3 or S2 when the question is about Uber-scale dispatch or planet-scale precision.*
 
 ---
 

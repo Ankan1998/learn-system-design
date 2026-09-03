@@ -25,6 +25,33 @@ Three requests, slow on mobile, and the first response dumps fields you'll never
 
 GraphQL solves both with a single, precise query.
 
+*The same profile screen, two ways. Count the round trips.*
+
+```mermaid
+flowchart LR
+    subgraph REST["REST: three round trips, extra fields"]
+        direction TB
+        M["Mobile app"]
+        E1["GET /users/42<br/>returns 20 fields, you use 2"]
+        E2["GET /users/42/posts?limit=3"]
+        E3["GET /users/42/followers/count"]
+        M --> E1 --> E2 --> E3
+    end
+
+    subgraph GQL["GraphQL: one request, exact shape"]
+        direction TB
+        M2["Mobile app"]
+        Q["POST /graphql<br/>user(id: 42) with name, avatar,<br/>posts(limit: 3) titles, followerCount"]
+        R["One response with exactly<br/>name, avatar, 3 titles, count"]
+        M2 --> Q --> R
+    end
+
+    style REST fill:#fecaca,color:#000
+    style GQL fill:#bbf7d0,color:#000
+```
+
+*Caption: On a mobile network each round trip can cost 100 ms or more, so three sequential calls are the difference between "instant" and "loading…". The price GraphQL pays for this is on the server side — see the N+1 problem below.*
+
 ---
 
 ## 🌍 Real-World Analogy
@@ -205,6 +232,30 @@ Tick 2: SELECT name FROM users WHERE id IN (1,2,...,10)  → 1 query
 ```
 
 Total queries: **2** instead of 11. DataLoader is a must-know for GraphQL interviews.
+
+*The mechanism step by step: resolvers ask for authors one at a time, DataLoader quietly collects the requests, and one batched query answers them all.*
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant G as GraphQL server
+    participant DL as DataLoader
+    participant DB as Database
+
+    C->>G: query posts(limit 10) with author name
+    G->>DB: SELECT * FROM posts LIMIT 10
+    DB-->>G: 10 posts
+    loop the author resolver runs once per post, all in the same tick
+        G->>DL: load(author_id) returns a promise, the id is queued
+    end
+    Note over DL: end of the tick: 10 ids collected, duplicates removed
+    DL->>DB: SELECT id, name FROM users WHERE id IN (the collected ids)
+    DB-->>DL: all authors in one round trip
+    DL-->>G: every pending promise resolved with its author
+    G-->>C: response, 2 queries total instead of 11
+```
+
+*Caption: DataLoader also caches within the request, so if five posts share an author, that author is fetched once. Both behaviors come for free from batching at the end of the event-loop tick.*
 
 ```mermaid
 graph LR

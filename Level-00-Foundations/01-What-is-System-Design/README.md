@@ -56,6 +56,45 @@ Examples:
 
 Non-functional requirements are where most systems fail at scale. It is easy to build a feature that works for 100 users. It is hard to build one that works for 100 million users.
 
+*Functional requirements tell you which features to build; non-functional requirements tell you which building blocks you need. Almost every box in a system design diagram exists because of a non-functional requirement.*
+
+```mermaid
+flowchart LR
+    subgraph FR["Functional — what it does"]
+        F1["Upload a photo"]
+        F2["Send a message"]
+        F3["Search products"]
+    end
+
+    subgraph NFR["Non-functional — how well it does it"]
+        N1["Availability 99.99%"]
+        N2["Latency under 200 ms"]
+        N3["Scale to 10M users"]
+        N4["Durability: never lose a file"]
+        N5["Consistency: never double-charge"]
+    end
+
+    subgraph ARCH["Building blocks you reach for"]
+        A1["Replication + failover"]
+        A2["Caching + CDN"]
+        A3["Load balancing + sharding"]
+        A4["Replicated object storage + backups"]
+        A5["Transactions + idempotency"]
+    end
+
+    N1 --> A1
+    N2 --> A2
+    N3 --> A3
+    N4 --> A4
+    N5 --> A5
+
+    style FR fill:#dbeafe,color:#000
+    style NFR fill:#fef9c3,color:#000
+    style ARCH fill:#bbf7d0,color:#000
+```
+
+*Caption: The features on the left would work on a laptop. The requirements in the middle are why the system needs everything on the right — and why this curriculum spends most of its time there.*
+
 ### The 5-Step Design Interview Framework
 
 Whether you are in a job interview or designing a real production system, the same five-step process keeps you structured and thorough:

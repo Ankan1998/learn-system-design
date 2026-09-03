@@ -20,6 +20,8 @@ By the end of this level you will be able to:
 - Order events in a distributed system using Lamport and vector clocks
 - Design an idempotent API that achieves effectively-once processing
 - Implement distributed locking safely using Redis, ZooKeeper, or etcd — and explain fencing tokens
+- Merge concurrent writes with no coordination using CRDTs (counters, OR-Sets, sequence CRDTs) — and state exactly which invariants they cannot enforce
+- Explain how thousands of nodes track membership and detect failures with gossip, SWIM, and phi-accrual detectors, and where consensus takes over
 
 ---
 
@@ -72,7 +74,13 @@ flowchart TD
     H --> J
 
     J["08 · Distributed Locking<br/>Redis · ZooKeeper · Fencing Tokens"]:::topic
-    J --> I([✅ Level Complete]):::done
+    J --> K
+
+    K["09 · CRDTs & Conflict Resolution<br/>G-Counter · OR-Set · Sequence CRDTs"]:::topic
+    K --> L
+
+    L["10 · Gossip & Failure Detection<br/>SWIM · Phi Accrual · Membership"]:::topic
+    L --> I([✅ Level Complete]):::done
 
     classDef start fill:#d4edda,stroke:#28a745,color:#000
     classDef topic fill:#dbeafe,stroke:#3b82f6,color:#000
@@ -94,6 +102,8 @@ flowchart TD
 | 06 | [Clocks and Ordering](./06-Clocks-and-Ordering/README.md) | Why wall clocks lie and how Lamport/vector clocks fix ordering | ⭐⭐⭐⭐ |
 | 07 | [Idempotency and Exactly-Once](./07-Idempotency-and-Exactly-Once/README.md) | Retries cause duplicates — here's how to make them safe | ⭐⭐⭐ |
 | 08 | [Distributed Locking](./08-Distributed-Locking/README.md) | Mutual exclusion across machines: Redis SET NX, Redlock, ZooKeeper, fencing tokens | ⭐⭐⭐⭐ |
+| 09 | [CRDTs and Conflict Resolution](./09-CRDTs-and-Conflict-Resolution/README.md) | Data types that merge concurrent writes automatically: counters, OR-Sets, collaborative text | ⭐⭐⭐⭐ |
+| 10 | [Gossip and Failure Detection](./10-Gossip-and-Failure-Detection/README.md) | How 1,000 nodes learn who's alive without a coordinator: epidemic spread, SWIM, phi accrual | ⭐⭐⭐⭐ |
 
 ---
 
@@ -116,6 +126,8 @@ flowchart LR
     L4c["L4 · Consensus"] -->|"elect leader"| L4e["L4 · Leader Election"]
     L4d -->|"saga pattern"| L5["L5 · Saga & Orchestration"]
     L4g["L4 · Idempotency"] -->|"payment safety"| Bonus["Bonus · Payment System"]
+    L4h["L4 · CRDTs"] -->|"collaborative editing"| Docs["Bonus · Google Docs"]
+    L4i["L4 · Gossip"] -->|"membership"| KV["Bonus · Key-Value Store"]
 
     style L2a fill:#fef9c3,stroke:#ca8a04,color:#000
     style L2b fill:#fef9c3,stroke:#ca8a04,color:#000
@@ -126,6 +138,10 @@ flowchart LR
     style L4g fill:#dbeafe,stroke:#3b82f6,color:#000
     style L5 fill:#fce7f3,stroke:#ec4899,color:#000
     style Bonus fill:#d1fae5,stroke:#059669,color:#000
+    style L4h fill:#dbeafe,stroke:#3b82f6,color:#000
+    style L4i fill:#dbeafe,stroke:#3b82f6,color:#000
+    style Docs fill:#d1fae5,stroke:#059669,color:#000
+    style KV fill:#d1fae5,stroke:#059669,color:#000
 ```
 
 ---
