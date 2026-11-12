@@ -2,7 +2,7 @@
 
 > A photo and video sharing social platform where users upload media, follow others, and consume algorithmically-ranked feeds and ephemeral Stories.
 
-**Difficulty:** ⭐⭐⭐⭐ · **Builds on:** [Level 02 – Data Layer](../../Level-02-Data-Layer/README.md) · [Level 03 – Caching](../../Level-01-Building-Blocks/03-Caching/README.md) · [06 – News Feed / Twitter](../06-News-Feed-Twitter/README.md)
+**Difficulty:** ⭐⭐⭐⭐ · **Builds on:** [Level 2 – Data Layer](../../Level-02-Data-Layer/README.md) · [Level 1 – Caching](../../Level-01-Building-Blocks/03-Caching/README.md) · [06 – News Feed / Twitter](../06-News-Feed-Twitter/README.md)
 
 ---
 
@@ -93,7 +93,7 @@ Posts table size/year ≈ 36.5 TB   (sharded across PostgreSQL clusters)
 
 ## 4. 🔌 API Design
 
-All endpoints require OAuth 2.0 bearer token. Media is multipart/form-data; reads are JSON.
+All endpoints require [OAuth 2.0](../../Level-03-Communication/08-Authentication-and-Authorization/README.md) bearer token. Media is multipart/form-data; reads are JSON.
 
 ```
 # Upload a photo
@@ -217,6 +217,8 @@ erDiagram
     USER ||--o{ STORY : "posts"
 ```
 
+*Caption: Notice that media files are not stored in rows — POST and STORY only hold S3 keys and CDN URLs, with each post owning several resolution variants.*
+
 ### Storage Technology Choices
 
 | Data | Store | Why |
@@ -225,7 +227,7 @@ erDiagram
 | Social graph (followers) | **PostgreSQL** or **Cassandra** | Graph is wide but reads are key-value (`followees of X`); Cassandra excels at wide-row fan-out |
 | Feed cache | **Redis** sorted sets | O(log N) ranked push/pop; TTL eviction |
 | Likes (hot counters) | **Redis** + async flush | In-memory increments handle celebrity bursts |
-| Photo / video files | **Amazon S3** (or equivalent object store) | Infinite scale, 11-nine durability, lifecycle policies |
+| Photo / video files | **Amazon S3** (or equivalent [object store](../../Level-02-Data-Layer/09-Object-Storage/README.md)) | Infinite scale, 11-nine durability, lifecycle policies |
 | Stories | **Redis** (metadata + TTL) + S3 (media) | Automatic key expiry; no DB sweep needed |
 | CDN | **CloudFront / Akamai** | Edge caching near users; >98 % cache hit ratio for photos |
 
@@ -305,6 +307,8 @@ flowchart TD
     SOCIAL --> NOTIF
 ```
 
+*Caption: Notice that uploads are asynchronous — the raw file lands in S3, and only after processing emits a variants-ready event does the Feed Service fan the post out.*
+
 **Walk-through: what happens when you post a photo**
 
 1. **Client → Upload Service** — your app sends the photo as multipart/form-data over HTTPS. Upload Service writes the raw file to S3 and immediately returns `upload_id` (202 Accepted).
@@ -345,11 +349,13 @@ flowchart LR
     S3OUT --> DB
 ```
 
+*Caption: Notice that EXIF is stripped once up front, then the three resizes run in parallel before all variants land in the CDN-origin bucket.*
+
 Key decisions:
 - **WebP output** — ~30 % smaller than JPEG at the same quality; supported by all modern clients.
 - **EXIF stripping** — mandatory for user privacy; done before any CDN distribution.
 - **Parallel resizes** — thumbnail, medium, and HD are generated concurrently inside the worker (goroutine / thread pool), keeping per-photo processing under 2 seconds on average.
-- **Idempotent workers** — if the worker crashes mid-flight, Kafka re-delivers the event. Writing variants to S3 with a deterministic key (`{user_id}/{post_id}/{resolution}.webp`) makes re-processing safe.
+- **[Idempotent](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md) workers** — if the worker crashes mid-flight, Kafka re-delivers the event. Writing variants to S3 with a deterministic key (`{user_id}/{post_id}/{resolution}.webp`) makes re-processing safe.
 - **Lambda vs. ECS** — Lambda handles bursty traffic cheaply; ECS (containers) is preferred for large video frames where Lambda's 15-min timeout and 10 GB memory could be limiting.
 
 ### 7.2 Feed Generation – Fan-Out on Write (Push Model)
@@ -400,7 +406,7 @@ Background job (every 5 s):
 
 This batches potentially thousands of individual updates into a handful of DB writes per flush cycle. Like counts displayed to users are read from Redis (fast, approximate), while PostgreSQL holds the durable total.
 
-**Deduplication** — store `{post_id, user_id}` in a Redis set or Bloom filter to prevent double-likes before the async DB write.
+**Deduplication** — store `{post_id, user_id}` in a Redis set to prevent double-likes before the async DB write, with a unique `(post_id, user_id)` key in the database as the final guard. (Not a Bloom filter: a false positive would silently reject a genuine like.)
 
 ### 7.4 Stories – 24-Hour TTL Storage
 
@@ -434,11 +440,11 @@ Media is still stored on S3 + CDN. The Redis TTL handles **metadata expiry** so 
 
 **Problem:** Major events (concerts, New Year) can triple upload rates within minutes.
 
-**Solution:** Upload Service is stateless and auto-scales horizontally behind a load balancer. S3's multipart upload API handles large files in parallel chunks. Kafka buffers the processing queue, decoupling ingestion from processing speed.
+**Solution:** Upload Service is [stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md) and auto-scales horizontally behind a [load balancer](../../Level-01-Building-Blocks/02-Load-Balancing/README.md). S3's multipart upload API handles large files in parallel chunks. Kafka buffers the processing queue, decoupling ingestion from processing speed.
 
 ### Social Graph Reads During Feed Generation
 
-**Problem:** Fan-out for a user with 500 K followers requires reading all 500 K follower IDs and writing 500 K Redis keys — in microseconds to meet the 5-second SLA.
+**Problem:** Fan-out for a user with 500 K followers requires reading all 500 K follower IDs and writing 500 K Redis keys — within seconds to meet the 5-second SLA.
 
 **Solution:**
 - Store follower lists in Cassandra using `user_id` as partition key — a single partition scan fetches all followers.
@@ -465,7 +471,7 @@ Instagram sharded PostgreSQL by `user_id` early. Each shard holds all posts, com
 
 **Solution:**
 - Redis Cluster with 3 replicas per shard; automatic failover via Redis Sentinel / Cluster promotion.
-- **Fallback:** Feed Service falls back to a direct PostgreSQL pull (slower, but functional). Circuit breaker pattern controls the fallback to avoid DB overload.
+- **Fallback:** Feed Service falls back to a direct PostgreSQL pull (slower, but functional). [Circuit breaker](../../Level-05-Architecture-Patterns/06-Resilience-Patterns/README.md) pattern controls the fallback to avoid DB overload.
 
 ---
 
@@ -487,29 +493,29 @@ Instagram sharded PostgreSQL by `user_id` early. Each shard holds all posts, com
 
 Instagram's engineering blog reveals several real decisions:
 
-**Django Monolith → Services (2012–2016)**
-Instagram started as a Python/Django monolith talking to a single PostgreSQL instance. As they scaled past 100 M users they moved to a service-oriented architecture while keeping Django for much of the application logic. The transition was gradual — they extracted read-heavy features (feed, search) first, keeping writes in the monolith until sharding was stable.
+**A Django Monolith That Stayed a Monolith**
+Instagram started as a Python/Django app talking to a single PostgreSQL instance, and its core web tier is still one very large Django codebase serving billions of users. Instead of splitting it into [microservices](../../Level-05-Architecture-Patterns/01-Monolith-vs-Microservices/README.md), they scaled the monolith: sharded PostgreSQL underneath it, moved the hottest paths into dedicated backends (feed, search, ML ranking), migrated to Python 3 without downtime, and built Cinder, their own performance-oriented fork of CPython.
 
-**PostgreSQL Sharding (django-sharding)**
-Rather than migrating to a distributed DB, Instagram built `django-sharding`, a library that routes queries to the correct PostgreSQL shard based on `user_id`. This let them keep SQL semantics while distributing data. They described running thousands of PostgreSQL instances across shards.
+**PostgreSQL Sharding (logical shards)**
+Rather than migrating to a distributed DB, Instagram split data into thousands of logical shards (PostgreSQL schemas) mapped onto far fewer physical servers, with the application routing queries by `user_id`. This let them keep SQL semantics while distributing data. IDs are generated inside PostgreSQL (41-bit time, 13-bit logical shard ID, 10-bit sequence), per their 2012 "Sharding & IDs at Instagram" post.
 
-**Cassandra for Social Graph**
-The follower/following relationship graph moved to Cassandra. A row in Cassandra stores all follower IDs for a given user as a wide column — ideal for the "get all followers of user X" fan-out pattern.
+**Cassandra for Feeds and Inboxes, TAO for the Graph**
+Instagram adopted Cassandra early for write-heavy data such as activity feeds, direct-message inboxes, and fraud signals, and later built Rocksandra (Cassandra with a RocksDB storage engine) to cut the tail latency caused by JVM garbage collection. After moving into Facebook's data centers (2013–2014), its follow graph became a natural fit for TAO, Facebook's graph store. The wide-row layout in this design ("all follower IDs of user X in one partition") is the same idea in open-source form.
 
-**Memcached (not Redis) for Feed Cache**
-Early Instagram used Memcached extensively for caching post data and user sessions. Redis sorted sets came later as feed ranking became more complex. Both are still used in the modern stack.
+**Memcached and Redis**
+Early Instagram used Memcached extensively for caching post data, and Redis for the main feed, activity feed, and sessions (per their 2011 "What Powers Instagram" post). Both are still used in the modern stack.
 
-**Direct S3 Uploads (Presigned URLs)**
-Clients receive a presigned S3 URL and upload directly to S3, bypassing application servers entirely. This eliminates a bottleneck: the Upload Service only handles the pre-auth step and the post-upload callback, not the actual byte transfer. This pattern offloads the majority of ingress bandwidth directly to AWS.
+**Direct-to-Storage Uploads (Presigned URLs)**
+The design above routes bytes through the Upload Service to keep the walk-through simple. Most production systems go one step further: the client asks for a presigned object-store URL and uploads straight to storage, so the Upload Service handles only the pre-auth step and the upload-complete callback. That takes ~10 GB/s of ingress off your application servers. (Instagram itself left AWS for Facebook's data centers in 2013–2014, so its media now lands in Facebook's own blob storage.)
 
 **IGTV / Reels Media Pipeline**
 Video uses a separate transcoding pipeline (similar to the image pipeline but with ffmpeg-based workers) producing HLS (`.m3u8`) playlists at multiple bitrates — adaptive streaming without a dedicated media server.
 
 **Vacuum / EXIF Scrubbing**
-Instagram confirmed they strip EXIF on all uploads server-side, even if the client already did it — defense-in-depth against metadata leakage.
+Instagram strips EXIF metadata such as GPS coordinates from the photos it serves. Do this server-side even if the client already did — defense-in-depth against metadata leakage.
 
-**Stories on Cassandra**
-Stories metadata moved to Cassandra with a TTL column — Cassandra natively supports `DEFAULT TTL` at the column or row level, making it a natural fit for time-bounded content.
+**Stories and TTLs**
+Stories expire after 24 hours, which maps directly onto store-level TTLs: Cassandra supports them per write (`USING TTL`) or per table (`default_time_to_live`), and Redis supports them per key. Whichever store holds the metadata, expiry becomes a storage feature instead of a cleanup job.
 
 ---
 
@@ -517,13 +523,13 @@ Stories metadata moved to Cassandra with a TTL column — Cassandra natively sup
 
 | Layer | Key Insight |
 |---|---|
-| **Upload** | Multipart → S3 via presigned URL; decoupled from processing via Kafka |
+| **Upload** | Upload Service (or a presigned URL) → S3; decoupled from processing via Kafka |
 | **Processing** | Parallel resize workers; WebP output; EXIF stripped before CDN |
 | **CDN** | 98 %+ cache hit rate; immutable URLs mean no invalidation |
 | **Metadata** | Sharded PostgreSQL by `user_id`; no cross-shard JOINs |
 | **Social Graph** | Cassandra wide rows; fast `follower_id` bulk reads |
 | **Feed** | Hybrid push/pull; Redis sorted sets; celebrity posts pulled on read |
-| **Likes** | Redis INCR + async batch flush to PostgreSQL; Bloom filter deduplication |
+| **Likes** | Redis INCR + async batch flush to PostgreSQL; Redis-set deduplication |
 | **Stories** | Redis TTL for metadata; S3 + CDN for media; Cassandra TTL column as alternative |
 | **Failure** | Redis failover + PostgreSQL fallback; circuit breakers; Kafka replay |
 
@@ -532,4 +538,12 @@ Stories metadata moved to Cassandra with a TTL column — Cassandra natively sup
 **See also:**
 - [06 – News Feed / Twitter](../06-News-Feed-Twitter/README.md) — fan-out architecture in full detail
 - [08 – WhatsApp Chat](../08-WhatsApp-Chat/README.md) — real-time messaging and presence
-- [Level 02 – Data Layer](../../Level-02-Data-Layer/README.md) — sharding, replication, and consistency foundations
+- [Level 2 – Data Layer](../../Level-02-Data-Layer/README.md) — sharding, replication, and consistency foundations
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [06 · Twitter/X News Feed](../06-News-Feed-Twitter/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [08 · WhatsApp](../08-WhatsApp-Chat/README.md)
+
+<!-- nav:end -->

@@ -154,6 +154,21 @@ photos/            → S3 Standard (0–30 days)
                    → Delete after 3 years
 ```
 
+```mermaid
+flowchart LR
+    UP["Upload<br/>photos/cat.jpg"] --> HOT["S3 Standard<br/>days 0–30<br/>read constantly"]
+    HOT -->|"lifecycle rule"| IA["Standard-IA<br/>days 31–180<br/>read rarely"]
+    IA -->|"lifecycle rule"| ARC["Glacier<br/>from day 181<br/>almost never read"]
+    ARC -->|"after 3 years"| DEL["Deleted automatically"]
+
+    style HOT fill:#fecaca,color:#000
+    style IA fill:#fef9c3,color:#000
+    style ARC fill:#dbeafe,color:#000
+    style DEL fill:#e5e7eb,color:#000
+```
+
+*Caption: A lifecycle rule moves each object to cheaper storage as it ages, with no application code involved. The trade is price per gigabyte against retrieval speed and retrieval fees.*
+
 ### Object Storage Providers
 
 | Provider | Service | Notable Feature |
@@ -170,13 +185,13 @@ photos/            → S3 Standard (0–30 days)
 ## 🏢 Real-World Examples
 
 ### Instagram / Meta
-Instagram stores billions of photos in object storage (originally a custom system, later migrated to Haystack, now a mix of on-premise blob stores and cloud). The database stores only a photo ID that maps to the blob storage URL. Serving is done via CDN. The database is tiny compared to the storage itself.
+Instagram stores billions of photos in object storage (originally Amazon S3, later migrated to Facebook's Haystack, now a mix of on-premise blob stores and cloud). The database stores only a photo ID that maps to the blob storage URL. Serving is done via CDN. The database is tiny compared to the storage itself.
 
 ### YouTube / Google Drive
-Video files (often hundreds of GB each in raw format) live in Google's blob storage (GCS). The database stores metadata: title, owner, upload timestamp, duration, processing status. A 4K video is never "in" a database row — just a reference to it.
+Video files (often hundreds of GB each in raw format) live in Google's internal blob storage (built on Colossus, the same foundation as GCS). The database stores metadata: title, owner, upload timestamp, duration, processing status. A 4K video is never "in" a database row — just a reference to it.
 
 ### Airbnb / Dropbox
-Listing photos and user files go directly to S3 via presigned URLs. Airbnb uses S3 for all media assets with CloudFront (AWS CDN) in front. Dropbox famously migrated away from S3 to build its own object storage (Magic Pocket) at petabyte scale to reduce cost — a decision only viable at extreme scale.
+Listing photos and user files go directly to S3 via presigned URLs. Airbnb uses S3 for all media assets with CloudFront (AWS CDN) in front. Dropbox famously migrated away from S3 to build its own object storage (Magic Pocket) at exabyte scale to reduce cost — a decision only viable at extreme scale.
 
 ### Pastebin / GitHub Gists
 Text pastes are small, but storing them as `TEXT` blobs in Postgres at scale is wasteful. A better design: store the paste content in S3 keyed by a short hash, store only the hash + metadata in the database.
@@ -188,7 +203,7 @@ Text pastes are small, but storing them as `TEXT` blobs in Postgres at scale is 
 | Pro | Con |
 |-----|-----|
 | **Effectively unlimited scale** — no capacity planning for storage size | **Not POSIX** — cannot append to middle of a file, no random byte-range updates |
-| **11 nines durability** — more reliable than any database you'll run | **Eventual consistency for some edge cases** — list operations may lag (though S3 is now strongly consistent for most ops) |
+| **11 nines durability** — more reliable than any database you'll run | **Per-request pricing and slow listing** — millions of tiny objects cost more in PUT/GET fees than in storage, and `LIST` returns only 1,000 keys per call |
 | **Cheap** — ~$0.023/GB/month vs ~$0.10+/GB for block storage | **Latency** — first byte latency 10–100 ms, not suitable for sub-ms random access |
 | **HTTP-native** — accessible from anywhere via URL | **No atomic multi-object transactions** — cannot update two objects atomically |
 | **Lifecycle automation** — automatic tiering to cold/archive | **Egress fees** — downloading data OUT of cloud object storage is expensive (AWS: $0.09/GB) |
@@ -209,7 +224,7 @@ Text pastes are small, but storing them as `TEXT` blobs in Postgres at scale is 
 **Do NOT use object storage for:**
 - Data that your database needs to query (store the path, not the bytes).
 - Random-access read/write workloads (use block storage / EBS instead).
-- High-frequency tiny writes (thousands of small file creates per second — use a database or message queue).
+- High-frequency tiny writes (thousands of small file creates per second — use a database or [message queue](../../Level-03-Communication/04-Message-Queues/README.md)).
 - Data requiring sub-millisecond latency (object stores are 10–100 ms first byte).
 - Transactional data that must be updated atomically.
 
@@ -237,7 +252,7 @@ Text pastes are small, but storing them as `TEXT` blobs in Postgres at scale is 
 - **For any design with user uploads** (Instagram, Dropbox, YouTube, Drive, Pastebin), mention object storage with presigned URLs unprompted.
 - **Mention the CDN pairing** — object storage + CDN is a standard combo. Serving directly from S3 to users is an antipattern.
 - **Know the lifecycle tiers** — Interviewers love "how would you handle old data?" Answer: S3 lifecycle policy: Standard → IA → Glacier → delete.
-- Common follow-up: "How do you handle large video uploads?" Answer: multipart upload (S3 allows uploading in chunks up to 10 000 parts × 5 GB each = 50 TB max object).
+- Common follow-up: "How do you handle large video uploads?" Answer: multipart upload (S3 accepts up to 10 000 parts of up to 5 GB each; the maximum object size, 5 TB for many years, was raised to 50 TB in December 2025).
 - Common follow-up: "How do you make private content accessible temporarily?" Answer: presigned URL with an expiry.
 
 ---
@@ -270,5 +285,14 @@ Text pastes are small, but storing them as `TEXT` blobs in Postgres at scale is 
 - [How Facebook Stores Billions of Photos (Haystack)](https://www.usenix.org/legacy/event/osdi10/tech/full_papers/Beaver.pdf) — the original paper.
 - [DDIA Chapter 3](https://dataintensive.net/) — Storage and Retrieval; covers storage engine trade-offs.
 - [The S3 Strong Consistency Announcement](https://aws.amazon.com/blogs/aws/amazon-s3-update-strong-read-after-write-consistency/) — December 2020.
-- Previous: [08 — Consistent Hashing](../08-Consistent-Hashing/README.md) · Next: [10 — Change Data Capture](../10-Change-Data-Capture/README.md) · Back to [Level 02 Overview](../README.md)
-- See also: [Bonus — Instagram](../../Bonus-Real-World-Architectures/README.md) · [Bonus — YouTube](../../Bonus-Real-World-Architectures/README.md) · [Bonus — Google Drive](../../Bonus-Real-World-Architectures/README.md) · [Bonus — Pastebin](../../Bonus-Real-World-Architectures/README.md)
+- See also: [Bonus — Instagram](../../Bonus-Real-World-Architectures/07-Instagram/README.md) · [Bonus — YouTube](../../Bonus-Real-World-Architectures/09-YouTube-Netflix-Streaming/README.md) · [Bonus — Google Drive](../../Bonus-Real-World-Architectures/14-Google-Drive-Dropbox/README.md) · [Bonus — Pastebin](../../Bonus-Real-World-Architectures/02-Pastebin/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Consistent Hashing](../08-Consistent-Hashing/README.md) · 🏠 [Level 2 — The Data Layer](../README.md) · ➡️ **Next:** [Change Data Capture (CDC) & Data Synchronization](../10-Change-Data-Capture/README.md)
+
+🧩 **See it applied in:** [32 · Gmail-Style Email Service](../../Bonus-Real-World-Architectures/32-Email-Service/README.md) · [37 · Distributed File System (GFS / HDFS)](../../Bonus-Real-World-Architectures/37-Distributed-File-System/README.md) · [05 · Web Crawler](../../Bonus-Real-World-Architectures/05-Web-Crawler/README.md) · [08 · WhatsApp](../../Bonus-Real-World-Architectures/08-WhatsApp-Chat/README.md) · [15 · Google Maps](../../Bonus-Real-World-Architectures/15-Google-Maps/README.md) · [16 · Ticketmaster](../../Bonus-Real-World-Architectures/16-Ticketmaster/README.md) · [25 · Live Streaming (Twitch / YouTube Live)](../../Bonus-Real-World-Architectures/25-Live-Streaming/README.md) · [28 · Google Docs Collaborative Editing](../../Bonus-Real-World-Architectures/28-Google-Docs-Collaborative-Editing/README.md) · …and 7 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

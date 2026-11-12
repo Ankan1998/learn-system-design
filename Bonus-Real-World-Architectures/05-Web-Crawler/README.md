@@ -53,9 +53,9 @@ A web crawler (also called a spider or bot) starts from a seed set of URLs and r
 | Politeness | ≤ 1 request/second per domain |
 | Freshness | Popular pages recrawled within 24 hours; long-tail within 30 days |
 | URL dedup accuracy | < 0.01% false-positive rate (Bloom filter tuned accordingly) |
-| Availability | Crawler workers are stateless and horizontally restartable; frontier is durable |
+| Availability | Crawler workers are [stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md) and horizontally restartable; frontier is durable |
 | Fault tolerance | Any single worker crash loses at most one in-flight URL; no data is permanently lost |
-| Storage durability | 99.999% — raw HTML stored in object storage with replication |
+| Storage durability | 99.999% — raw HTML stored in [object storage](../../Level-02-Data-Layer/09-Object-Storage/README.md) with replication |
 
 ---
 
@@ -89,13 +89,13 @@ Average page HTML size:    ~100 KB
 Fetch rate:                400 pages/sec
 
 Inbound bandwidth = 400 × 100 KB = 40 MB/s ≈ 320 Mbps
-Over 30 days:       40 MB/s × 2,592,000 s ≈ 96 TB raw HTML
+Over 30 days:       40 MB/s × 2,592,000 s ≈ 104 TB raw HTML
 ```
 
 ### Storage
 
 ```
-Raw HTML (compressed ~3×): 96 TB / 3     ≈  32 TB
+Raw HTML (compressed ~3×): 104 TB / 3    ≈  35 TB
 URL metadata per page:      ~200 bytes
 Metadata total:             1B × 200 B   = 200 GB
 Extracted links (avg 50/page, 100B each):
@@ -103,7 +103,7 @@ Extracted links (avg 50/page, 100B each):
 Content hash index (SHA-256, 32B + 8B URL pointer):
   1B × 40 B                              =  40 GB
 
-Total storage needed ≈ 34 TB (compressed object storage) + ~1.3 TB structured data
+Total storage needed ≈ 35 TB (compressed object storage) + ~1.3 TB structured data
 ```
 
 ### Bloom filter sizing
@@ -226,6 +226,8 @@ CREATE INDEX idx_next_crawl ON crawled_urls (next_crawl_at)
   WHERE status = 200;
 ```
 
+> The DDL is PostgreSQL syntax for readability. The rest of this design uses Cassandra, where the same table is keyed by `url_hash` and the "what is due for a recrawl?" question is answered by a second table bucketed by time (for example `PRIMARY KEY ((crawl_day), next_crawl_at, url_hash)`), because Cassandra has no partial indexes and cannot scan by an arbitrary column.
+
 ### Content store (Object Storage + metadata DB)
 
 ```sql
@@ -299,13 +301,15 @@ flowchart TD
     E1 & E2 & EN --> O
 ```
 
+*Caption: Notice the loop — extracted links pass through the dedup filter back into the Frontier Manager, while unique content flows to object storage and metadata to Cassandra.*
+
 ### Request-flow walk-through
 
 1. **Seed injection** — an operator `POST`s seed URLs to the Seed URL API. The Frontier Manager normalizes them (lowercase scheme+host, strip fragments, resolve relative paths) and inserts them into the Redis sorted set `frontier:global` with a high priority score.
 
 2. **Scheduling** — the Scheduler continuously polls `frontier:global`, picks the highest-priority URL, and checks the per-host queue for that domain. If the host's crawl-delay has elapsed, it dispatches the URL to an available Crawler Worker; otherwise it re-schedules it with a delay.
 
-3. **DNS resolution** — the Worker checks the Redis DNS cache for the domain. On miss it resolves via the system resolver and caches the `<domain → IP>` mapping with the record's TTL (min 60 s, max 24 h).
+3. **[DNS](../../Level-00-Foundations/05-DNS/README.md) resolution** — the Worker checks the Redis DNS cache for the domain. On miss it resolves via the system resolver and caches the `<domain → IP>` mapping with the record's TTL (min 60 s, max 24 h).
 
 4. **robots.txt check** — before fetching any path on a domain the Worker fetches `robots.txt` (cached in Redis for 24 h). If the URL is disallowed, it marks it `DISALLOWED` in the Crawled URL DB and moves on.
 
@@ -319,7 +323,7 @@ flowchart TD
 
 9. **Recrawl scheduling** — periodically the Recrawl Scheduler queries Cassandra for pages whose `next_crawl_at` has elapsed, re-enqueues them in the frontier with priority proportional to their estimated importance (PageRank proxy) and historical change frequency.
 
-10. **Observability** — every worker emits metrics (pages/sec, error rate, queue depth, per-host request counts) to a central monitoring system.
+10. **[Observability](../../Level-06-Scale-and-Reliability/01-Observability/README.md)** — every worker emits metrics (pages/sec, error rate, queue depth, per-host request counts) to a central monitoring system.
 
 ---
 
@@ -379,24 +383,24 @@ With 10 billion extracted links and only 1 billion unique pages to crawl, dedup 
 ```
 1. Normalize URL (lowercase host, strip default port, sort query params, strip fragment)
 2. BF.EXISTS crawled_bloom <url_hash>
-   → 0 (probably new): proceed to step 3
+   → 0 (definitely new — Bloom filters have no false negatives): skip to step 4
    → 1 (probably seen): discard  ← handles ~99.99% of dupes with zero DB reads
-3. Check Cassandra crawled_urls by url_hash
+3. (Optional, for high-priority URLs) on a 1, check Cassandra crawled_urls by url_hash
    → found: discard (true positive confirmed)
    → not found: it was a false positive; enqueue as new URL
 4. BF.ADD crawled_bloom <url_hash>
 5. Insert stub row in Cassandra crawled_urls (status=pending)
 ```
 
-**False positive budget:** with p = 0.01% and 1B entries, you'll see ~100k false positives out of 1B dedups. Each costs one Cassandra read. At 400 pages/sec that is < 1 extra read/sec, negligible.
+**False positive budget:** with p = 0.01% and 1B entries, you'll see ~100k false positives out of 1B dedups — new URLs wrongly skipped (0.01%), which is acceptable. Verifying positives in Cassandra (step 3) costs one read per duplicate, so reserve it for high-priority URLs.
 
 **Bloom filter reset:** when starting a recrawl cycle, you may want to re-crawl previously seen URLs. Rather than clearing the filter (lossy), maintain a generation counter. Each URL's entry in Cassandra includes the crawl generation. The Bloom filter is rebuilt at the start of each generation from the Cassandra truth set.
 
 ---
 
-### 7.3 Content Deduplication: MD5 Exact + SimHash Near-Duplicate
+### 7.3 Content Deduplication: SHA-256 Exact + SimHash Near-Duplicate
 
-Many pages are mirrors, pagination variants, or printer-friendly versions of each other. Storing duplicates wastes ~20–30% of storage based on Common Crawl measurements.
+Many pages are mirrors, pagination variants, or printer-friendly versions of each other. Studies of large web crawls have repeatedly found that roughly a quarter to a third of pages are exact or near duplicates of another page, so storing them all wastes that much space.
 
 ```mermaid
 flowchart TD
@@ -424,6 +428,8 @@ flowchart TD
     S3 --> S4
     S2 --> S4
 ```
+
+*Caption: Notice the two-stage check — a cheap exact SHA-256 match short-circuits first, and only non-exact pages pay for the SimHash Hamming-distance comparison.*
 
 **How SimHash works (in a nutshell):**
 
@@ -469,7 +475,7 @@ For each domain, track the set of URL path templates (collapse digit runs: `/art
 | URL frontier throughput | 400 dispatch/sec + 400 × 50 = 20k enqueue/sec (extracted links) | Redis Cluster sharded by `hash(domain)`; sorted set ops are O(log N) |
 | robots.txt fetch storms | First-touch of 100M domains each requires a robots.txt fetch | Warm robots.txt cache proactively from sitemap index; stagger first-touch across workers |
 | Cassandra write hotspot | 400 metadata writes/sec plus ~20k URL stub inserts/sec | Partition by `url_hash`; write to local DC first; async replication to replica DC |
-| Object storage throughput | 40 MB/s sustained write | S3 multi-part uploads; 20 workers write to different prefixes; S3 scales to >10 GB/s per prefix |
+| Object storage throughput | 40 MB/s sustained write | S3 multi-part uploads; 20 workers write to different prefixes; S3 scales request rates per prefix (about 3,500 writes/s each), far above what this crawler needs |
 | Worker memory | HTML parser holds full DOM in memory | Stream-parse HTML (never build full DOM); discard raw bytes after hash is computed |
 
 ### Failure modes
@@ -502,7 +508,7 @@ You are implicitly using **BFS** (breadth-first search) because seeds go into a 
 | Distributed frontier (e.g., Kafka per domain) | Massive throughput; natural partitioning | Dedup across partitions requires cross-partition coordination; politeness harder |
 | Hybrid: Kafka for URL ingestion + Redis for active frontier | Best throughput + dedup | Operational complexity of two systems |
 
-For 400 pages/sec with ~20k URL enqueues/sec, Redis Cluster is the right choice. At Google-scale (10k pages/sec) you would need the hybrid approach.
+For 400 pages/sec with ~20k URL enqueues/sec, Redis Cluster is the right choice. At Google-scale (tens of thousands of pages/sec or more) you would need the hybrid approach.
 
 ### Exact dedup only vs. SimHash near-dedup
 
@@ -516,9 +522,9 @@ Storing raw HTML is more expensive but allows reprocessing with improved parsers
 
 ## 10. 🌐 How It's Actually Done
 
-**Google Googlebot** — Google's 2009 crawl architecture paper (Shkapenyuk & Suel, "Design and Implementation of a High-Performance Distributed Web Crawler") describes a very similar two-tier frontier design with per-host queues. Googlebot processes billions of pages per day across thousands of workers. Google uses a custom DNS resolver cluster (not system DNS) and maintains its own IP reputation database.
+**Google Googlebot** — Google has not published its crawl architecture in detail; the classic academic paper (Shkapenyuk & Suel, "Design and Implementation of a High-Performance Distributed Web Crawler", ICDE 2002, Polytechnic University) describes a very similar two-tier frontier design with per-host queues. Googlebot processes billions of pages per day across thousands of workers. Google uses a custom DNS resolver cluster (not system DNS) and maintains its own IP reputation database.
 
-**Common Crawl** — an open-source web archive that crawls ~3.5 billion pages per monthly crawl using Apache Nutch and stores results in WARC (Web ARChive) format on S3. Their architecture is public; they use Hadoop for URL dedup at scale. Their data is freely available and widely used for ML training (GPT series, BERT, etc.).
+**Common Crawl** — an open-source web archive that crawls ~3.5 billion pages per monthly crawl using Apache Nutch and stores results in WARC (Web ARChive) format on S3. Their architecture is public; they use Hadoop for URL dedup at scale. Their data is freely available and widely used for ML training (GPT-3, T5's C4 dataset, etc.).
 
 **Nutch (Apache)** — the reference open-source crawler. Uses MapReduce for batch dedup, Bloom filters for in-memory dedup, and a plugin architecture for parsers. Production deployments at medium scale (100M pages) often start here.
 
@@ -526,7 +532,7 @@ Storing raw HTML is more expensive but allows reprocessing with improved parsers
 
 **SimHash** — Charikar's locality-sensitive hashing for near-duplicate detection was described in "Similarity Estimation Techniques from Rounding Algorithms" (STOC 2002). Google's application to web-scale dedup is described in Manku, Jain & Das Sarma, "Detecting Near-Duplicates for Web Crawling" (WWW 2007).
 
-**robots.txt** — governed by [RFC 9309](https://www.rfc-editor.org/rfc/rfc9309) (2022). Google open-sourced their robots.txt parser at [github.com/google/robotstxt](https://github.com/google/robotstxt). Key production lessons: some sites serve 500 errors for robots.txt — treat this as "allow all". Some serve robots.txt files > 500 KB — enforce a maximum parse size.
+**robots.txt** — governed by [RFC 9309](https://www.rfc-editor.org/rfc/rfc9309) (2022). Google open-sourced their robots.txt parser at [github.com/google/robotstxt](https://github.com/google/robotstxt). Key production lessons: some sites serve errors for robots.txt — RFC 9309 says treat 4xx as "allow all" but 5xx as "disallow all". Some serve robots.txt files > 500 KB — enforce a maximum parse size.
 
 ---
 
@@ -544,11 +550,19 @@ You are building a distributed system that:
 6. Handles **crawler traps** by normalizing URLs, capping per-domain page counts, and detecting templated URL explosions.
 7. Schedules **recrawls** based on historical change frequency and estimated page importance.
 
-At 400 pages/sec sustained across 20 workers, this design crawls 1 billion pages in 30 days, respects robots.txt and crawl-delay on every domain, and stores ~32 TB of compressed content plus ~1.3 TB of structured metadata.
+At 400 pages/sec sustained across 20 workers, this design crawls 1 billion pages in 30 days, respects robots.txt and crawl-delay on every domain, and stores ~35 TB of compressed content plus ~1.3 TB of structured metadata.
 
 ### What made this one hard
 
 - **Politeness at scale** — enforcing ≤ 1 req/sec per domain is trivially stated but requires a centralized, low-latency check on every dispatch. The two-tier Redis frontier is the elegant solution, but it takes careful thought to see why a naive per-worker counter would not work (workers don't coordinate).
-- **Dedup correctness vs. performance** — the Bloom filter can only say "probably not seen"; the Cassandra backing set is the truth. You must design both layers together and reason about what happens when the Bloom filter is lost.
+- **Dedup correctness vs. performance** — the Bloom filter can only say "definitely not seen" or "probably seen"; the Cassandra backing set is the truth. You must design both layers together and reason about what happens when the Bloom filter is lost.
 - **Crawler trap detection** — infinite URL spaces are not obviously traps at first glance. Recognizing them requires URL normalization, per-domain page caps, and template detection — all running on the hot path.
 - **Content near-dedup at 1B scale** — SimHash lookup is O(N) naively; the banding trick reduces it to near-O(1) but requires knowing the theory behind locality-sensitive hashing to implement correctly.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [04 · Notification Service](../04-Notification-Service/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [06 · Twitter/X News Feed](../06-News-Feed-Twitter/README.md)
+
+<!-- nav:end -->

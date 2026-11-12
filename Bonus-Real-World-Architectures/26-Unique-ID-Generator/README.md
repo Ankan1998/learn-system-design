@@ -10,7 +10,7 @@
 
 ## 1. 🎯 Problem & Scope
 
-Almost every large-scale system needs to assign unique identifiers to rows, events, or objects across many databases, microservices, and data centres. The naive solution — a single auto-incrementing database column — breaks the moment you shard your data or want high availability.
+Almost every large-scale system needs to assign unique identifiers to rows, events, or objects across many databases, [microservices](../../Level-05-Architecture-Patterns/01-Monolith-vs-Microservices/README.md), and data centres. The naive solution — a single auto-incrementing database column — breaks the moment you shard your data or want high availability.
 
 **What we're building:** a lightweight, horizontally scalable ID generation service that any microservice can call (or run in-process) to get a guaranteed-unique, 64-bit integer ID.
 
@@ -37,7 +37,7 @@ Almost every large-scale system needs to assign unique identifiers to rows, even
 
 ### Non-Functional
 - **Throughput:** ≥ 10 000 IDs/s per node; cluster target ≥ 1 000 000 IDs/s
-- **Latency:** p99 < 1 ms (in-process generation), p99 < 5 ms (network call)
+- **Latency:** [p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) < 1 ms (in-process generation), p99 < 5 ms (network call)
 - **Availability:** 99.99 %+ — survive the loss of any single node
 - **Uniqueness guarantee:** zero duplicates, ever
 - **ID length:** exactly 64 bits (fits `BIGINT UNSIGNED`)
@@ -57,7 +57,7 @@ Per-node ceiling: 4 096 IDs/ms = ~4 000 000 IDs/s
 Cluster ceiling:  4 096 × 1 024 nodes = ~4 billion IDs/second
 
 For 100 000 IDs/s we need:
-  100 000 / 4 096 ≈ 25 nodes — very comfortable headroom.
+  100 000 / 4 096 000 ≈ 0.03 → 1 node suffices (run 2–3 for HA) — very comfortable headroom.
 
 Timestamp field (41 bits, milliseconds since custom epoch):
   2^41 ms ≈ 69 years of IDs before overflow
@@ -106,7 +106,7 @@ gen = SnowflakeGenerator(machine_id=42)
 id = gen.next_id()   # returns int
 ```
 
-In-process is fastest and removes network as a failure domain. Twitter, Discord, and Instagram all embed generation in the application process.
+In-process is fastest and removes network as a failure domain. Many systems embed generation in the application (or database) process, e.g. Instagram generates IDs inside PostgreSQL; Twitter's original Snowflake was a standalone Thrift service.
 
 ---
 
@@ -162,9 +162,11 @@ flowchart TD
     style ZK  fill:#fff3cd,color:#000
 ```
 
+*Caption: Generator nodes never talk to each other; etcd/ZooKeeper is only used to hand out unique machine IDs, so ID generation itself needs no coordination.*
+
 **Walk-through:**
 1. On startup each Snowflake node claims a unique `machine_id` from etcd via a compare-and-swap (CAS) write.
-2. A calling service picks any healthy node via client-side load balancing (or embeds the library in-process).
+2. A calling service picks any healthy node via client-side [load balancing](../../Level-01-Building-Blocks/02-Load-Balancing/README.md) (or embeds the library in-process).
 3. The node generates the next ID in microseconds by combining timestamp + machine_id + sequence (see §7.1).
 4. If a node dies, callers transparently route to a different node. No state is lost because each node's IDs are independent.
 
@@ -214,6 +216,8 @@ block-beta
   style wk   fill:#e2d9f3,color:#000
   style seq  fill:#fff3cd,color:#000
 ```
+
+*Caption: The timestamp occupies the most significant bits, which is why Snowflake IDs sort by creation time; the 10 machine bits and 12 sequence bits guarantee uniqueness.*
 
 | Field | Bits | Max value | Purpose |
 |-------|------|-----------|---------|
@@ -306,7 +310,7 @@ Two safe strategies:
 **Strategy 1 — etcd CAS (recommended):**
 ```
 PUT /machines/<id>?prevExist=false  →  claim machine_id atomically
-Renew heartbeat every 30 s
+Renew the 30 s lease every 10 s
 On death TTL expires; another node may reuse the id ONLY after
   the original node's last_ts is safely in the past (wait ≥ 1 s)
 ```
@@ -332,7 +336,7 @@ sequenceDiagram
 *Caption: The lease turns "is node 7 still alive?" into something etcd decides, and the compare-and-set on `absent` guarantees two nodes can never hold the same machine ID at once.*
 
 **Strategy 2 — Embed in deployment config:**
-Each pod/VM has `MACHINE_ID=42` set by the orchestrator. Kubernetes StatefulSets give stable ordinal indices (pod-0, pod-1, …) which map directly to machine IDs. Simple, no runtime coordination needed.
+Each pod/VM has `MACHINE_ID=42` set by the orchestrator. [Kubernetes](../../Level-06-Scale-and-Reliability/07-Containers-and-Orchestration/README.md) StatefulSets give stable ordinal indices (pod-0, pod-1, …) which map directly to machine IDs. Simple, no runtime coordination needed.
 
 ---
 
@@ -355,7 +359,7 @@ Each pod/VM has `MACHINE_ID=42` set by the orchestrator. Kubernetes StatefulSets
 | Decision | Trade-off |
 |----------|-----------|
 | 64-bit vs 128-bit (UUID) | 64-bit is half the storage, better index locality, fits JS `Number` safely (up to 2^53 — so transmit as string); UUID needs no coordination |
-| Snowflake vs range allocation | Snowflake gives true time-sort and no gaps; range allocation has no clock dependency |
+| Snowflake vs range allocation | Snowflake gives true time-sort and wastes no ranges on crash (IDs are still not contiguous); range allocation has no clock dependency |
 | In-process vs network service | In-process: zero latency, no extra infra; network service: centralises machine_id management, easier to audit |
 | Custom epoch | Maximises timestamp bits; must document the epoch or IDs become uninterpretable in 20 years |
 
@@ -364,12 +368,12 @@ Each pod/VM has `MACHINE_ID=42` set by the orchestrator. Kubernetes StatefulSets
 ## 10. 🌐 How It's Actually Done
 
 - **Twitter Snowflake** — open-sourced in 2010; the reference implementation. Scala service with ZooKeeper machine_id registration.
-- **Discord Snowflakes** — same layout but epoch is 2015-01-01. Stored as 64-bit ints in PostgreSQL; sent as strings in the REST API.
+- **Discord Snowflakes** — 42-bit timestamp (epoch 2015-01-01) + 5-bit worker ID + 5-bit process ID + 12-bit increment. Sent as strings in the REST API, because JavaScript numbers cannot hold 64-bit integers exactly.
 - **Instagram IDs** — 41-bit time + 13-bit shard ID + 10-bit sequence, generated inside PostgreSQL via a stored procedure. The shard ID is embedded so IDs route back to their origin shard.
 - **Flickr Ticket Servers** — two MySQL servers with `auto_increment_increment=2` and different offsets; survived years of Flickr's scale.
 - **Sonyflake** — 39-bit time (10 ms units) + 8-bit sequence + 16-bit machine ID; trades per-ms throughput for longer machine-ID space.
 - **MongoDB ObjectId** — 12 bytes (96 bits): 4-byte timestamp + 5-byte random + 3-byte counter. Not 64-bit but widely used.
-- **AWS, Google, Stripe** — all use some variant of time-prefix + random-suffix for their resource IDs (e.g. `stripe_1abc…`).
+- **Stripe** — object IDs are a type prefix plus a random string (`cus_…`, `ch_…`, `pi_…`). They are not time-sortable, but the prefix makes any ID self-describing in logs and support tickets — an idea worth copying.
 
 ---
 
@@ -385,3 +389,11 @@ Each pod/VM has `MACHINE_ID=42` set by the orchestrator. Kubernetes StatefulSets
 | Clock safety | Stall on small rollbacks; refuse + alert on large ones; use NTP smearing |
 
 The Snowflake pattern is elegant because it pushes all the work into a 64-bit integer: you get ordering, sharding hints, and uniqueness guarantees with a single integer comparison. The only real operational risk is clock management — invest in good NTP/PTP infrastructure and you'll never have a duplicate.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [25 · Live Streaming (Twitch / YouTube Live)](../25-Live-Streaming/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [27 · Distributed Key-Value Store](../27-Key-Value-Store/README.md)
+
+<!-- nav:end -->

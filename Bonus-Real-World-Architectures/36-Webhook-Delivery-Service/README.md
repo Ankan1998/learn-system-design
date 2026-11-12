@@ -52,7 +52,7 @@ This is the mirror image of a [Notification Service](../04-Notification-Service/
 - Kafka ingest: 200 k msgs/s × 2.2 KB ≈ 440 MB/s; ×3 replication ≈ 1.3 GB/s cluster writes; ~256 partitions keyed by `endpoint_id`
 
 **Storage (30-day logs)**
-- Event bodies: 25 k/s × 86 400 ≈ 2.2 B events/day × 2 KB ≈ 4.4 TB/day → **~130 TB/30 d** raw (~35 TB compressed in object storage; stored once per event, not per attempt)
+- Event bodies: 25 k/s × 86 400 ≈ 2.2 B events/day × 2 KB ≈ 4.4 TB/day → **~130 TB/30 d** raw (~35 TB compressed in [object storage](../../Level-02-Data-Layer/09-Object-Storage/README.md); stored once per event, not per attempt)
 - Attempt records: 50 k del/s × 1.25 ≈ 5.4 B attempts/day × 350 B ≈ 1.9 TB/day → **~57 TB/30 d** raw (~12 TB in a columnar store)
 
 ---
@@ -129,6 +129,8 @@ erDiagram
     DELIVERY ||--o{ ATTEMPT : "logs"
 ```
 
+*Caption: DELIVERY is the join between an event and an endpoint, and it is the unit that carries retry state and collects attempts.*
+
 One `EVENT` fans out into one `DELIVERY` per subscribed endpoint; each `DELIVERY` accumulates `ATTEMPT` rows until it succeeds or hits 72 h.
 
 **Storage choices:**
@@ -177,6 +179,8 @@ flowchart TD
     class Prod,Cust ext
 ```
 
+*Caption: Notice that retries and replays always re-enter through the slow lane, so failing endpoints never compete with first attempts in the fast lane.*
+
 The pipeline: durable ingest → fan-out → lane-based dispatch → signed HTTP send, with failures looping through the scheduler back into the slow lane.
 
 **Walk-through (`payment.succeeded` for tenant T):**
@@ -210,10 +214,12 @@ flowchart TD
     class F2,S2,WF,WS good
 ```
 
+*Caption: With one queue a single dead endpoint ties up every worker, and with a separate slow lane its retries wait there while healthy endpoints keep getting fast deliveries.*
+
 Three layers of defense, cheapest first:
 - **Bounded per-endpoint concurrency** — max N in-flight requests per endpoint (say 32). Excess deliveries wait *for that endpoint only*, not in workers.
 - **Two lanes** — first failure moves an endpoint's traffic to the slow lane; sustained success moves it back. Retries *always* ride the slow lane, so retry storms can't crowd out first attempts.
-- **Per-endpoint queues** (the Svix approach) — perfect isolation, but millions of queues need careful management. The two-lane design gets ~95% of the benefit with two topics; add lanes (per-tenant, per-shard) only if noisy neighbors persist.
+- **Per-endpoint queues** (the approach of dedicated webhook services) — perfect isolation, but millions of queues need careful management. The two-lane design gets ~95% of the benefit with two topics; add lanes (per-tenant, per-shard) only if [noisy neighbors](../../Level-05-Architecture-Patterns/10-Multi-Tenancy/README.md) persist.
 
 ---
 
@@ -239,7 +245,7 @@ The early retries catch deploys and blips (most outages are minutes); the 16 h t
 
 - **Jitter is mandatory.** When a popular endpoint dies, 50 000 deliveries fail in the same second — without jitter they all retry in the same second, forever, as a synchronized wave. Use equal jitter: `sleep = delay/2 + random(0, delay/2)`.
 - **Retry on:** timeouts, connection errors, 429 (honoring `Retry-After`, capped), 5xx. **Don't retry on:** most 4xx (`404` won't heal — though Stripe retries these anyway for simplicity).
-- **Auto-disabling:** health tracker keeps consecutive-failure count + 24 h EWMA failure rate per endpoint. 100% failures for 24 h → `PAUSED` + email ("we're still queueing"). Sustained failure past the retry window (~3–7 days) → `DISABLED`: stop creating deliveries, final email, require manual re-enable (with optional bulk replay). Shopify is stricter: 19 consecutive failures over ~48 h and the subscription is deleted.
+- **Auto-disabling:** health tracker keeps consecutive-failure count + 24 h EWMA failure rate per endpoint. 100% failures for 24 h → `PAUSED` + email ("we're still queueing"). Sustained failure past the retry window (~3–7 days) → `DISABLED`: stop creating deliveries, final email, require manual re-enable (with optional bulk replay). Shopify is stricter: it retries 8 times over 4 hours, and a subscription that keeps failing is removed.
 
 ### 7.2 Security: signatures, replay windows, and SSRF
 
@@ -250,7 +256,7 @@ The early retries catch deploys and blips (most outages are minutes); the 16 h t
 - **mTLS** as an option for banks/enterprises — cryptographic *transport* identity on top of the HMAC *message* identity. Also publish **static egress IPs** so customers can firewall-allowlist you (Stripe and GitHub both do).
 
 **SSRF — the sleeper vulnerability.** You run a service that makes HTTP requests to *user-supplied URLs from inside your network*. Without controls, a customer registers `http://169.254.169.254/latest/meta-data/` (cloud metadata = credentials) or `http://10.0.3.7:8500` (your internal Consul) and reads the response from their delivery log:
-- Resolve DNS, then reject private/internal ranges: `10/8`, `172.16/12`, `192.168/16`, `127/8`, `169.254/16`, `::1`, `fd00::/8`.
+- Resolve [DNS](../../Level-00-Foundations/05-DNS/README.md), then reject private/internal ranges: `10/8`, `172.16/12`, `192.168/16`, `127/8`, `169.254/16`, `::1`, `fc00::/7`.
 - **Pin the resolved IP** for the actual connection — re-resolving lets attackers pass the check with a public IP, then flip the DNS record to an internal one (DNS rebinding).
 - Re-validate on redirects (or don't follow them). Run senders in an **egress-isolated network** that physically can't reach internal services — Stripe open-sourced Smokescreen, an egress proxy doing exactly this. Defense in depth: validate *and* isolate.
 
@@ -292,6 +298,8 @@ flowchart LR
     class OPEN bad
 ```
 
+*Caption: The breaker never jumps from OPEN straight to full rate; recovery always passes through a throttled HALF-OPEN ramp that falls back on failure.*
+
 Per-endpoint circuit breaker: trip on sustained errors, probe gently, and only ramp back to full rate as the endpoint proves healthy.
 
 Key choices: while OPEN, deliveries **park without burning attempts** (don't drain the 72 h budget against a known-dead host). In HALF-OPEN, drain the backlog via a token bucket starting tiny and doubling each clean minute — 5 M deliveries clear in hours without a second outage. And drain **oldest-first** for closer-to-ordered delivery, unless the tenant opts into newest-first freshness.
@@ -317,10 +325,10 @@ Key choices: while OPEN, deliveries **park without burning attempts** (don't dra
 | Decision | Chosen | Alternative | Why chosen |
 |---|---|---|---|
 | Transport backbone | Kafka topics + lanes | SQS queue per endpoint | Millions of queues are painful to manage; Kafka gives replay + ordering per partition; lanes solve isolation |
-| Isolation model | Two lanes + per-endpoint caps | Full per-endpoint queues (Svix-style) | 95% of the isolation for ~1% of the operational surface; revisit if noisy neighbors persist |
+| Isolation model | Two lanes + per-endpoint caps | Full per-endpoint queues | 95% of the isolation for ~1% of the operational surface; revisit if noisy neighbors persist |
 | Delivery semantics | At-least-once + consumer dedupe | Exactly-once delivery | Exactly-once to an arbitrary URL is impossible (ack loss); duplicates + idempotency keys are honest |
 | Ordering | Best-effort per key | Strict per-endpoint FIFO | Strict = 1 in-flight + stop-on-failure = self-inflicted head-of-line blocking |
-| Authentication | HMAC-SHA256 + timestamp | mTLS only / OAuth per call | HMAC is one function call for receivers; mTLS offered as an upgrade, not the default |
+| Authentication | HMAC-SHA256 + timestamp | mTLS only / [OAuth](../../Level-03-Communication/08-Authentication-and-Authorization/README.md) per call | HMAC is one function call for receivers; mTLS offered as an upgrade, not the default |
 | Payload style | Fat payload (full object) | Thin "poke" + API fetch | Fat is one hop and works offline from our API; thin wins when staleness/ordering bite — offer both |
 | Retry horizon | 72 h + auto-disable | Forever / no retries (GitHub) | 72 h covers a long weekend outage; retrying forever wastes capacity on dead endpoints |
 
@@ -332,11 +340,11 @@ Key choices: while OPEN, deliveries **park without burning attempts** (don't dra
 
 **GitHub** — signs with `X-Hub-Signature-256`, enforces a **10-second timeout**, and (surprisingly) does **not auto-retry** failed deliveries: the deliveries API + UI let you inspect and *redeliver* manually. A reminder that "at-least-once for 72 h" is a product choice, not a law.
 
-**Shopify** — retries **19 times over ~48 hours**, then deletes the subscription after continued failures. Their engineering blog describes rearchitecting webhooks onto a Kafka-backed pipeline for exactly the reasons in this chapter: isolation and retry storms. Official guidance: return 200 fast, process async, expect duplicates.
+**Shopify** — retries **8 times over 4 hours** with exponential backoff (it used to be 19 times over 48 hours) and removes a subscription that keeps failing. Official guidance: return 200 fast, process async, expect duplicates.
 
-**Svix** — webhooks-as-a-service (you publish events; they handle delivery, retries, logs, portal). Co-authors of the **Standard Webhooks** spec — the `webhook-id` / `webhook-timestamp` / `webhook-signature` headers used in this design. Uses per-endpoint queueing (Redis) for hard isolation.
+**Svix** — webhooks-as-a-service (you publish events; they handle delivery, retries, logs, portal). Co-authors of the **Standard Webhooks** spec — the `webhook-id` / `webhook-timestamp` / `webhook-signature` headers used in this design. Its core promise is isolation: one slow or broken endpoint must not delay anyone else's deliveries.
 
-**AWS-native designs** — a common pattern: EventBridge/SNS fan-out into SQS, with **visibility timeout as the retry timer** and redrive-to-DLQ after N receives; EventBridge **API Destinations** even does managed signed HTTP delivery with built-in rate limiting. Great for one product's webhooks; platform-scale multi-tenant isolation usually outgrows it.
+**AWS-native designs** — a common pattern: EventBridge/SNS fan-out into SQS, with **visibility timeout as the retry timer** and redrive-to-DLQ after N receives; EventBridge **API Destinations** even does managed authenticated HTTP delivery with built-in rate limiting. Great for one product's webhooks; platform-scale multi-tenant isolation usually outgrows it.
 
 ---
 
@@ -351,6 +359,14 @@ Key choices: while OPEN, deliveries **park without burning attempts** (don't dra
 | Endpoint health | EWMA failure rate; PAUSED at 24 h of failures, DISABLED after sustained failure + email trail |
 | Security | HMAC-SHA256 over `timestamp.body`, ±5 min replay window, secret rotation, SSRF guard with IP pinning + egress isolation |
 | Ordering | Best-effort via partition keys + sequence hints; strict ordering rejected as self-inflicted head-of-line blocking |
-| Observability | Every attempt logged to ClickHouse (30 d), customer-facing log + replay UI |
+| [Observability](../../Level-06-Scale-and-Reliability/01-Observability/README.md) | Every attempt logged to ClickHouse (30 d), customer-facing log + replay UI |
 
 The 30-second whiteboard pitch: sending an HTTP POST is trivial — the product is everything around it. Treat every customer endpoint as an independently failing system: quarantine the sick ones (lanes + breakers) so they can't hurt the healthy ones, retry with jitter and a deadline, sign everything, trust no URL (SSRF), and give customers the logs and replay button so *they* can debug their side. At-least-once plus idempotency keys beats chasing exactly-once — the network already made that decision for you.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [35 · Gaming Leaderboard](../35-Gaming-Leaderboard/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [37 · Distributed File System (GFS / HDFS)](../37-Distributed-File-System/README.md)
+
+<!-- nav:end -->

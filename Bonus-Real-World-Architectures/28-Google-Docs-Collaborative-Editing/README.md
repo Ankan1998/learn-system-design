@@ -68,7 +68,7 @@ Keystroke rate:
   But: not all users type simultaneously; active typing ~20% of session time
   Realistic: 50M × 5 × 0.2 = 50M ops/s
   Each op: ~50 bytes (JSON operation payload)
-  Network: 50M × 50B = 2.5 GB/s outbound from servers
+  Network: 50M × 50B = 2.5 GB/s inbound; × 4 other collaborators ≈ 10 GB/s outbound from servers
 
 Storage:
   Op log: 50M ops/s × 50 bytes × 86400 s/day = ~216 TB/day of op logs
@@ -138,7 +138,7 @@ WebSocket connections:
 
 ```
 GET  /v1/docs/{doc_id}                 → current snapshot + revision number
-GET  /v1/docs/{doc_id}/history?from=100&to=200  → op log slice
+GET  /v1/docs/{doc_id}/history?from=100&to=200  → op log slice (recent ops; older history is served as snapshots)
 POST /v1/docs/{doc_id}/checkpoint      → force snapshot (admin)
 POST /v1/docs                          → create new document
 ```
@@ -155,7 +155,7 @@ POST /v1/docs                          → create new document
 | `title` | text | Document title |
 | `owner_id` | UUID | Creator |
 | `created_at` | timestamp | |
-| `snapshot` | JSONB | Current document content (rich-text AST) |
+| `snapshot_key` | text | Object-storage key of the latest snapshot (rich-text AST); tiny documents may inline it as JSONB |
 | `snapshot_revision` | int | Revision number of the snapshot |
 
 ### Operations log (append-only)
@@ -173,7 +173,7 @@ POST /v1/docs                          → create new document
 **Storage justification:**
 - Operations log in PostgreSQL (or Spanner for global scale): append-only, never updated → excellent write throughput; JSONB for flexible op schemas
 - Snapshots written every N operations so that loading a document only replays the last few hundred ops, not millions
-- Version history: keep all rows in the operations log forever (or archive to object storage after 30 days)
+- Version history: keep all rows in the operations log forever (or archive to [object storage](../../Level-02-Data-Layer/09-Object-Storage/README.md) after 30 days)
 - In-memory: each document session server holds the current document state + a pending-op buffer in RAM for fast OT/CRDT processing
 
 ---
@@ -227,9 +227,11 @@ flowchart TD
     style PS fill:#e2d9f3,color:#000
 ```
 
+*Caption: The load balancer pins every client of a document to the same stateful session server, which alone orders ops before persisting them and fanning them out.*
+
 **Walk-through (online edit):**
 1. User A types a character. The client **optimistically applies** the op locally (instant feedback) and sends it to the session server over WebSocket.
-2. The session server (S1) holds the authoritative in-memory state for that document. It assigns the next global revision number to the op, transforms it against any concurrent ops it knows about (OT) or merges it (CRDT), and appends it to the operations log.
+2. The session server (S1) holds the authoritative in-memory state for that document. It assigns the next global revision number to the op, transforms it against any concurrent ops it knows about (OT) or merges it ([CRDT](../../Level-04-Distributed-Systems/09-CRDTs-and-Conflict-Resolution/README.md)), and appends it to the operations log.
 3. S1 broadcasts the (possibly transformed) op + its revision to all other connected clients (B, C if online).
 4. Each client applies the incoming op using its local OT/CRDT algorithm to reconcile with its own pending ops.
 5. All clients converge to the same document state.
@@ -249,14 +251,14 @@ User B (at position 0): inserts "Say: "    → expects "Say: Hello"
 
 Both ops are created against revision N. The server receives A's op first. If B's op is then naively applied at position 0 — fine, it's before the insertion. But if B instead had inserted after position 3 and A inserted at position 3 too, the positions shift underneath each other and you get garbled text.
 
-**The invariant you need:** given any two concurrent operations O1 and O2, applying O1 then transform(O2, O1) must yield the same final document as applying O2 then transform(O1, O2). This is called the **convergence property** (also: CC1 in OT literature).
+**The invariant you need:** given any two concurrent operations O1 and O2, applying O1 then transform(O2, O1) must yield the same final document as applying O2 then transform(O1, O2). This is called the **convergence property** (also: TP1 in OT literature).
 
 ### 7.2 Operational Transformation (OT)
 
 **How it works:** when the server receives an op from a client, it knows which revision the client was at when it generated the op. If the server's document is now at a later revision (because other ops came in), it **transforms** the incoming op against each intermediate op to adjust positions.
 
 ```
-Server state: "Hello World"  (revision 5)
+Server state: "Say: Hello"  (revision 5)
 Client A was at revision 4: "Hello"
 Client A's op: insert(" World", pos=5)   at revision=4
 
@@ -294,6 +296,8 @@ sequenceDiagram
     S-->>CB: op_A  (rev=4), then op_B' (rev=5) [ACK]
     Note over CA,CB: Both apply same ops → same document ✅
 ```
+
+*Caption: Both clients typed at position 5, the server picked an order and shifted the second insert by one, and both clients end up with the same text.*
 
 ### 7.3 CRDTs — The Alternative
 
@@ -356,6 +360,8 @@ flowchart LR
     style PR fill:#fff3cd,color:#000
 ```
 
+*Caption: Cursor updates bypass the operations log entirely; the session server just rebroadcasts them and parks them in Redis with a short TTL so stale cursors vanish.*
+
 ### 7.5 Document Persistence & Version History
 
 **Every write is an append to the operations log**, not an update to the document. The document's current state is always derivable by replaying ops from the last snapshot.
@@ -391,6 +397,8 @@ sequenceDiagram
     Note over Client,Server: Both at revision 55, same content ✅
 ```
 
+*Caption: On reconnect the client first pulls the ops it missed, transforms its queued offline ops against them, and only then submits, so the server receives them as new revisions.*
+
 The client is essentially running the same OT algorithm it uses online — it just batches the pending ops and submits them as a group. The server transforms the batch against whatever ops arrived during the offline period.
 
 For **long offline periods** (days), the conflict resolution can be complex. Google Docs handles this by prompting the user: "You've been offline for a long time. Here are the changes you made offline — do you want to merge them?" — gracefully degrading to a human-in-the-loop resolution.
@@ -407,7 +415,7 @@ For **long offline periods** (days), the conflict resolution can be complex. Goo
 | Client sends gigantic op batch | Server OOM during transform | Cap batch size; reject batches > 1 000 ops; require incremental sync |
 | Presence fanout storm | 10 000 users × 50M updates/s | Throttle presence updates (50 ms); use pub/sub fan-out tree; don't send presence to inactive tabs |
 | CRDT tombstone explosion | Memory grows unboundedly in long-lived documents | Periodic GC: rebuild document from scratch, assign new IDs, discard tombstones |
-| Network partition between session servers | Split-brain: two servers both think they're authoritative | Use only ONE session server per document (strong leader); use distributed lock on doc_id via etcd |
+| Network partition between session servers | [Split-brain](../../Level-04-Distributed-Systems/05-Leader-Election/README.md): two servers both think they're authoritative | Use only ONE session server per document (strong leader); use [distributed lock](../../Level-04-Distributed-Systems/08-Distributed-Locking/README.md) on doc_id via etcd |
 
 **The key scaling insight:** the bottleneck is not the OT computation (that's O(n) in concurrent ops, typically tiny) — it's the **fan-out**. Broadcasting a single op to 1 000 connected clients takes 1 000 WebSocket sends. Use a pub/sub layer (Redis Pub/Sub, Kafka, or a custom multicast) to decouple the session server from the fan-out.
 
@@ -422,7 +430,7 @@ For **long offline periods** (days), the conflict resolution can be complex. Goo
 | WebSocket (persistent) | ✅ | HTTP long-poll / SSE | WebSocket is bidirectional; lower latency; better for high-frequency ops |
 | Op log as source of truth | ✅ | Mutable document store | Append-only log is immutable, auditable, and enables version history for free |
 | Snapshot + replay | ✅ | Full document replication on every change | Snapshot bounds load time; replaying 100 ops is fast |
-| Single session server per doc | ✅ | Distributed multi-master per doc | Avoids multi-master conflict; session server is lightweight (stateless on restart) |
+| Single session server per doc | ✅ | Distributed multi-master per doc | Avoids multi-master conflict; session server is lightweight ([stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md) on restart) |
 
 ---
 
@@ -438,7 +446,7 @@ For **long offline periods** (days), the conflict resolution can be complex. Goo
 
 - **Yjs / Automerge** are open-source CRDT libraries. Yjs is used in production by many startups (JupyterLab collaborative mode, various editors). Automerge (from Ink & Switch) is more research-oriented but has production deployments. Both support offline-first editing natively.
 
-- **Quill.js + ShareDB (OpeNational Transforms):** the open-source stack for OT-based collaborative editing. ShareDB is a Node.js real-time database built on OT; Quill is the rich-text editor. This is the "self-hosted Google Docs" stack used by many companies.
+- **Quill.js + ShareDB (Operational Transformation):** the open-source stack for OT-based collaborative editing. ShareDB is a Node.js real-time database built on OT; Quill is the rich-text editor. This is the "self-hosted Google Docs" stack used by many companies.
 
 ---
 
@@ -456,3 +464,11 @@ For **long offline periods** (days), the conflict resolution can be complex. Goo
 | Scaling | Session server fan-out via pub/sub; one server per doc; shard by doc_id for hot docs |
 
 The hardest insight in collaborative editing is that **the problem isn't storage or networking — it's maintaining the invariant that every client converges to the same document**. OT solves this with transform functions and a central authority. CRDTs solve it by designing data structures where concurrent edits commute. Both approaches work; choose OT when you have a central server and need battle-tested text editing semantics, choose CRDTs when you need peer-to-peer or offline-first semantics with non-linear data structures.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [27 · Distributed Key-Value Store](../27-Key-Value-Store/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [29 · Nearby Friends / Proximity](../29-Nearby-Friends-Proximity/README.md)
+
+<!-- nav:end -->

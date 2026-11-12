@@ -18,7 +18,7 @@ Google processes **8.5 billion searches per day** (~100,000 queries per second) 
 
 - **Discover** pages continuously (the web grows by millions of pages daily).
 - **Parse, index, and rank** pages so the most relevant result for any query rises to the top.
-- **Serve** queries at p99 < 500 ms globally with 99.999 % availability.
+- **Serve** queries at [p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) < 500 ms globally with 99.999 % availability.
 - Handle **spam, low-quality content, duplicate pages**, and adversarial SEO.
 
 This design focuses on: crawling → indexing → ranking → query serving. We link the web-crawler design for crawling detail and go deep on the indexing and serving pipeline.
@@ -148,9 +148,11 @@ erDiagram
     DOCUMENT ||--o{ LINK_GRAPH : "links to"
 ```
 
+*Caption: Notice POSTING is the join between TERM and DOCUMENT, while LINK_GRAPH connects documents to each other and feeds PageRank.*
+
 **Storage choices:**
-- **Document store** — Bigtable / Colossus (GFS) — content-addressed, key = doc_id, cheap at-rest compression.
-- **Inverted index** — custom SSTable format on GFS (same as Bigtable internals); sharded by term hash.
+- **Document store** — Bigtable / Colossus (GFS) — keyed by doc_id (the original Bigtable web table used the reversed URL as its row key), cheap at-rest compression.
+- **Inverted index** — custom SSTable format on GFS (same as Bigtable internals); sharded by document (doc_id range/hash).
 - **Link graph** — distributed graph DB / custom adjacency store for PageRank computation.
 - **Query cache** — Memcached cluster keyed by normalised query string.
 - **Autocomplete trie** — in-memory prefix trie, replicated to all serving nodes.
@@ -214,10 +216,12 @@ flowchart TD
     classDef ext fill:#eeeeee,stroke:#888888,color:#000
 ```
 
+*Caption: Notice the offline crawl and indexing pipelines only write to the stores, while the online path reads them through cache, scatter-gather, ranking, and snippets.*
+
 **Walk-through:**
 1. **Crawl** — distributed crawler fetches URLs, stores raw HTML in GFS.
 2. **Parse & analyze** — HTML is parsed, text extracted, tokenised, stemmed, and deduplicated. Near-duplicate pages (SimHash) are collapsed to a canonical URL.
-3. **Inverted index build** — MapReduce job emits `(term, doc_id, tf, positions)` records; the Reduce phase merges and sorts posting lists per term, writes SSTable shards.
+3. **Inverted index build** — MapReduce job emits `(term, doc_id, tf, positions)` records; the Reduce phase merges and sorts posting lists per term and writes one SSTable index shard per slice of documents (the index is partitioned by document, see §7.1).
 4. **PageRank** — iterative graph computation over the link graph, run periodically; scores annotate the index.
 5. **Query serving** — user query hits the nearest PoP, is spell-corrected, parsed, and checked in the query cache. On cache miss, the Mixer fans out to thousands of Index Servers (scatter), each returning its local top-K; the Merger merges candidate lists and re-ranks with a full ML feature vector; Snippet Generator fetches stored summaries for the top 10.
 
@@ -231,36 +235,28 @@ The inverted index maps **term → sorted posting list** where each posting is `
 
 ```mermaid
 flowchart LR
-    subgraph MapPhase["Map Phase"]
-        M1["Mapper 1<br/>doc 1..1M<br/>emit (term, doc, tf)"]
-        M2["Mapper 2<br/>doc 1M..2M<br/>emit (term, doc, tf)"]
-        MN["Mapper N<br/>..."]
+    subgraph Docs["Corpus split by doc_id"]
+        D1["Doc partition 1<br/>docs 0..10M"]
+        D2["Doc partition 2<br/>docs 10M..20M"]
+        DN["Doc partition N<br/>..."]
     end
 
-    subgraph ShufflePhase["Shuffle / Sort"]
-        SH["Partition by hash(term)<br/>Sort by term, then doc_id"]
+    subgraph Build["One indexing job per partition"]
+        B1["Map: emit (term, doc_id, tf, positions)<br/>Shuffle: sort by term, then doc_id<br/>Reduce: merge postings per term"]
+        B2["Map, shuffle, reduce<br/>(same job, different docs)"]
+        BN["..."]
     end
 
-    subgraph ReducePhase["Reduce Phase"]
-        R1["Reducer shard A–F<br/>merge postings<br/>write SSTable"]
-        R2["Reducer shard G–M<br/>..."]
-        RN["Reducer shard N–Z<br/>..."]
-    end
+    IndexShard1[("Index Shard 1<br/>all terms for its docs<br/>SSTable on GFS")]
+    IndexShard2[("Index Shard 2")]
+    IndexShard3[("Index Shard N")]
 
-    IndexShard1[("Index Shard A–F<br/>SSTable on GFS")]
-    IndexShard2[("Index Shard G–M")]
-    IndexShard3[("Index Shard N–Z")]
-
-    M1 --> ShufflePhase
-    M2 --> ShufflePhase
-    MN --> ShufflePhase
-    ShufflePhase --> R1
-    ShufflePhase --> R2
-    ShufflePhase --> RN
-    R1 --> IndexShard1
-    R2 --> IndexShard2
-    RN --> IndexShard3
+    D1 --> B1 --> IndexShard1
+    D2 --> B2 --> IndexShard2
+    DN --> BN --> IndexShard3
 ```
+
+*Caption: The corpus is cut by document, and each slice is indexed independently into one shard that holds every term for its own documents. That is why, at query time, each shard can answer on its own and return a local top-K.*
 
 Posting lists are **delta-encoded and varint-compressed** (Elias-Gamma / VByte). The list for "the" contains billions of doc_ids but compresses to a fraction of naive storage. Skip pointers every 128 entries allow O(log N) intersection without scanning the full list.
 
@@ -277,7 +273,7 @@ d = 0.85 (damping factor)
 
 - Each iteration: each page distributes its current PR evenly to its out-links; receivers sum contributions.
 - Convergence: ~50–100 iterations for the full web graph.
-- In practice Google runs **topic-sensitive PageRank** (separate scores per topic category) and combines them with query context at serving time.
+- PageRank is now one signal among hundreds. Variants such as **topic-sensitive PageRank** (Haveliwala, 2002), which computes separate scores per topic category, show how link analysis can be combined with query context; Google has not published which variants it runs today.
 - Modern ranking uses **hundreds of signals** beyond PageRank: anchor text, click-through rates, page freshness, mobile-friendliness, HTTPS, Core Web Vitals, and learned neural ranking models (BERT, MUM).
 
 ---
@@ -287,9 +283,9 @@ d = 0.85 (damping factor)
 ```mermaid
 sequenceDiagram
     participant FE as Frontend Mixer
-    participant IS1 as Index Server 1<br/>(shards A-F)
-    participant IS2 as Index Server 2<br/>(shards G-M)
-    participant ISN as Index Server N<br/>(shards N-Z)
+    participant IS1 as Index Server 1<br/>(doc shard 1)
+    participant IS2 as Index Server 2<br/>(doc shard 2)
+    participant ISN as Index Server N<br/>(doc shard N)
     participant Rank as Ranker
 
     FE->>IS1: lookup("distributed"), lookup("systems")
@@ -305,6 +301,8 @@ sequenceDiagram
     Note over FE: Snippet fetch, personalisation, ads
 ```
 
+*Caption: Notice every index server receives the same query in parallel and returns only its local top-K, so the Mixer merges a small candidate set.*
+
 Each Index Server loads its portion of the inverted index entirely **in RAM** (hot tier). A shard typically holds ~1 % of the corpus. The Mixer enforces a **deadline**: any shard that doesn't respond in 50 ms is dropped from this query — hedged requests cover slow replicas.
 
 ---
@@ -313,7 +311,7 @@ Each Index Server loads its portion of the inverted index entirely **in RAM** (h
 
 The batch rebuild cycle takes hours/days. For freshness:
 
-- **Caffeine** (Google's real-time indexing system): high-priority pages (news sites, Twitter, Wikipedia) are re-crawled within seconds and fed through a **streaming indexing pipeline** (Cloud Dataflow / Flume in streaming mode).
+- **Caffeine** (Google's real-time indexing system): high-priority pages (news sites, Twitter, Wikipedia) are re-crawled within seconds and fed through an **incremental indexing pipeline** (built on Percolator, transactional incremental processing over Bigtable).
 - The serving layer maintains a **base index** (batch rebuilt) and a **freshness index** (streaming updated, smaller, held in memory). Results are merged at query time.
 - The freshness index trades completeness for recency: it only covers the ~0.1 % of the web that changes fast.
 
@@ -323,7 +321,7 @@ The batch rebuild cycle takes hours/days. For freshness:
 
 | Bottleneck | Mitigation |
 |---|---|
-| Index size (petabytes) | Horizontal sharding by term hash; SSTable on GFS with replication factor 3 |
+| Index size (petabytes) | Horizontal sharding by document; SSTable on GFS with replication factor 3 |
 | Query latency | Entire hot index in RAM per shard; scatter deadline + hedged requests |
 | Query cache hit rate | ~40–60 % of queries are repeated; Memcached cluster normalises queries before lookup |
 | Long posting list intersection | Skip pointers, WAND (Weak AND) for early termination, BM25 upper-bound pruning |
@@ -337,7 +335,7 @@ The batch rebuild cycle takes hours/days. For freshness:
 
 | Decision | Chosen | Alternative | Why chosen |
 |---|---|---|---|
-| Index sharding | By term (each server owns all docs for its terms) | By document (each server owns all terms for its docs) | Term sharding allows parallel posting-list intersection per shard |
+| Index sharding | By document (each server owns all terms for its docs) | By term (each server owns all docs for its terms) | Document sharding lets every shard intersect posting lists locally and return its own top-K in parallel; Google's index is document-partitioned |
 | Serving freshness | Separate freshness index merged at serving time | Full index rebuild on every update | Full rebuild takes too long; two-tier approach balances freshness and coverage |
 | Ranking | Offline PageRank + online BM25 + ML re-rank | Pure neural retrieval (dense embeddings) | Hybrid is more interpretable; dense retrieval added as an additional signal |
 | Query cache | Cache normalised query → SERP | Cache individual posting lists | SERP cache handles 40 % of traffic with simple key; posting cache has lower hit rate |
@@ -347,7 +345,7 @@ The batch rebuild cycle takes hours/days. For freshness:
 ## 10. 🌐 How It's Actually Done
 
 **Google's founding papers** are essential reading:
-- **The Anatomy of a Large-Scale Hypertextual Web Search Engine** (Brin & Page, 1998) — describes the original bigram inverted index, PageRank, and the two-phase serving pipeline.
+- **The Anatomy of a Large-Scale Hypertextual Web Search Engine** (Brin & Page, 1998) — describes the original inverted index (barrels and hit lists), PageRank, and the two-phase serving pipeline.
 - **MapReduce** (Dean & Ghemawat, 2004) — the batch computation backbone for index builds.
 - **Bigtable** (Chang et al., 2006) — the storage layer for the crawl repository and parts of the index.
 - **Pregel** (Malewicz et al., 2010) — distributed graph processing for PageRank at web scale.
@@ -369,3 +367,11 @@ Building a search engine at Google's scale is the ultimate distributed systems c
 5. **Reliability** — every component is replicated; hedged requests + deadlines prevent tail latency from killing the SLA.
 
 In an interview, the key insight is the **two-level architecture**: offline batch indexing for coverage/correctness and online streaming indexing for freshness, unified at query-serving time.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [21 · Distributed Job Scheduler](../21-Distributed-Job-Scheduler/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [23 · Distributed Counter & Analytics](../23-Distributed-Counter-Analytics/README.md)
+
+<!-- nav:end -->

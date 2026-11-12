@@ -58,7 +58,7 @@ TCP sits on top of IP and adds the reliability that IP does not provide. TCP is:
 
 #### The TCP 3-Way Handshake
 
-Before any data is sent, TCP performs a **3-way handshake** to establish a connection. It costs approximately **1.5 RTT** (round-trip times) of latency before the first byte of real data can flow:
+Before any data is sent, TCP performs a **3-way handshake** to establish a connection. It costs approximately **1 RTT** (round-trip time) of latency before the first byte of real data can flow:
 
 | Step | Direction | Packet | Meaning |
 |------|-----------|--------|---------|
@@ -180,7 +180,7 @@ Unlike TCP, UDP has no setup or teardown phase. A message is simply fired and th
 | 3 | Receiver either gets it or does not — there is no ACK |
 | 4 | Sender is already sending the next datagram |
 
-For a DNS query, this entire exchange takes one round-trip (query + response), compared to TCP's minimum of 1.5 RTT before data can even start.
+For a DNS query, this entire exchange takes one round-trip (query + response), compared to TCP's minimum of 1 RTT before data can even start.
 
 *Compare this with the TCP diagram above: no handshake, no acknowledgments, no teardown — and when a datagram is lost, nothing happens.*
 
@@ -241,9 +241,9 @@ sequenceDiagram
 
 **Zoom and WebRTC use UDP.** Real-time video calls cannot afford to wait for TCP retransmissions. If a video frame is 100ms late because TCP is retransmitting it, that frame is already useless — you would rather show a slightly blurry frame and keep the audio in sync. WebRTC (the protocol powering browser-based video calls) runs over UDP and implements its own lightweight reliability only where absolutely necessary.
 
-**Online gaming (Valorant, CS:GO, League of Legends) uses UDP.** A game server might send 64 position updates per second. If one update is lost, the game client simply uses the next update that arrives — there is no point in waiting for a retransmission of stale position data. UDP's low latency keeps the gameplay feeling responsive.
+**Online gaming (Valorant, Counter-Strike 2, League of Legends) uses UDP.** A game server might send 64 position updates per second. If one update is lost, the game client simply uses the next update that arrives — there is no point in waiting for a retransmission of stale position data. UDP's low latency keeps the gameplay feeling responsive.
 
-**QUIC (HTTP/3) — UDP with reliability built on top.** QUIC is Google's protocol that now powers HTTP/3. It runs on UDP to avoid TCP's 1-RTT handshake cost and instead implements its own multiplexing, reliability, and encryption (TLS 1.3) directly in the application layer. QUIC can establish a connection in 0-RTT for repeat connections, making it significantly faster than TCP + TLS for web browsing.
+**QUIC (HTTP/3) — UDP with reliability built on top.** QUIC started at Google and was standardized by the IETF as RFC 9000 (2021); it is the transport underneath HTTP/3. It runs on UDP and implements its own multiplexing, reliability, and encryption (TLS 1.3) in user space rather than in the operating system kernel. Because the transport and TLS handshakes are merged, a new connection is ready after 1 RTT (TCP + TLS 1.3 needs 2), and a repeat connection can send data immediately (0-RTT).
 
 ---
 
@@ -287,7 +287,7 @@ sequenceDiagram
 UDP skips the handshake and retransmissions, but TCP's congestion control actually helps in congested networks. When a network is overloaded, TCP backs off and each sender gets a fair share. A UDP sender that blasts data at full speed can congest the network and cause even more packet loss, making its effective throughput lower than TCP's. Measure before assuming.
 
 **Pitfall 2: Forgetting that TCP's handshake costs latency.**
-Every new TCP connection requires ~1 RTT (one round-trip) before the first byte of real data can be sent. On a network with 100ms RTT (a cross-continental connection), that is 100ms of dead time just saying hello. This is why HTTP/2 reuses connections (keep-alive), and why QUIC was invented. When you design a system making thousands of short-lived connections, TCP's handshake overhead adds up fast.
+Every new TCP connection requires ~1 RTT (one round-trip) before the first byte of real data can be sent. On a network with 100ms RTT (a cross-continental connection), that is 100ms of dead time just saying hello. This is why HTTP/1.1 keep-alive and HTTP/2 reuse connections, and why QUIC was invented. When you design a system making thousands of short-lived connections, TCP's handshake overhead adds up fast.
 
 **Pitfall 3: Assuming packets arrive in order with UDP.**
 If you send UDP packets numbered 1, 2, 3, the receiver might see them as 3, 1, 2. Or it might only see 1 and 3. If your UDP application displays data as it arrives without reordering, you will show a garbled stream. Video conferencing apps include sequence numbers in their own application-layer headers so they can detect and compensate for out-of-order delivery.
@@ -340,3 +340,13 @@ TCP hides packet loss from you by retransmitting, but it does not hide the *dela
 - **IETF RFC 768 — User Datagram Protocol** — the original 1980 UDP specification, only 3 pages long: https://datatracker.ietf.org/doc/html/rfc768
 - **IETF RFC 9000 — QUIC: A UDP-Based Multiplexed and Secure Transport** — how HTTP/3 builds reliability on top of UDP: https://datatracker.ietf.org/doc/html/rfc9000
 - **"HTTP/3 explained"** by Daniel Stenberg (creator of curl) — free online book covering QUIC and HTTP/3 in depth: https://http3-explained.haxx.se/
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [How the Internet Works](../03-How-the-Internet-Works/README.md) · 🏠 [Level 0 — Foundations](../README.md) · ➡️ **Next:** [DNS — The Internet's Phone Book](../05-DNS/README.md)
+
+🧩 **See it applied in:** [30 · Video Conferencing (Zoom / Google Meet)](../../Bonus-Real-World-Architectures/30-Video-Conferencing/README.md)
+
+<!-- nav:end -->

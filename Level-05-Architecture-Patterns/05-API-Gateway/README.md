@@ -10,7 +10,7 @@
 
 You've built 15 microservices. Now your mobile app needs to:
 
-- Authenticate every request (check JWT tokens)
+- Authenticate every request (check [JWT](../../Level-03-Communication/08-Authentication-and-Authorization/README.md) tokens)
 - Call 4 different services and combine their responses for a single screen
 - Handle HTTPS/TLS termination
 - Enforce rate limits (max 100 req/sec per user)
@@ -18,7 +18,7 @@ You've built 15 microservices. Now your mobile app needs to:
 - Handle CORS for browser clients
 - Transform old API formats for mobile clients on older app versions
 
-**Without an API Gateway:** Every service must implement auth, rate limiting, CORS, and logging itself — 15 times. Every mobile request needs knowledge of 15 different service URLs. Your mobile client becomes tightly coupled to your backend's internal service structure.
+**Without an API Gateway:** Every service must implement auth, [rate limiting](../../Level-03-Communication/07-Rate-Limiting/README.md), CORS, and logging itself — 15 times. Every mobile request needs knowledge of 15 different service URLs. Your mobile client becomes tightly coupled to your backend's internal service structure.
 
 **With an API Gateway:** One entry point handles all of this. Services stay focused on their business logic.
 
@@ -195,12 +195,12 @@ graph TD
 | Tool | Type | Key Strength | Used By |
 |------|------|-------------|---------|
 | **Kong** | Open source + managed | Plugin ecosystem, high perf (nginx-based) | Startup to enterprise |
-| **AWS API Gateway** | Fully managed | Native AWS integration, serverless | AWS-native teams |
+| **AWS API Gateway** | Fully managed | Native AWS integration, [serverless](../08-Serverless-Architecture/README.md) | AWS-native teams |
 | **Netflix Zuul** (v1) | Open source (Java) | Netflix OSS ecosystem | Java teams |
 | **Spring Cloud Gateway** | Open source (Java) | Spring ecosystem, reactive | Java/Spring teams |
 | **Apigee** (Google) | Enterprise managed | Full API management lifecycle | Enterprise |
 | **Traefik** | Open source | Kubernetes-native, automatic config | Container-first teams |
-| **Envoy** | Open source proxy | Service mesh, high perf, extensible | Istio, Lyft, Stripe |
+| **Envoy** | Open source proxy | [Service mesh](../09-Service-Mesh/README.md), high perf, extensible | Istio, Lyft, Stripe |
 | **Azure API Management** | Managed | Azure ecosystem | Azure-native teams |
 
 ---
@@ -211,7 +211,7 @@ graph TD
 
 **AWS API Gateway:** AWS API Gateway is used by millions of serverless architectures. It integrates natively with Lambda, allowing serverless backends. Features include usage plans (rate limiting per API key), request validation (reject malformed JSON before it hits Lambda), response caching (TTL per route), and native integration with AWS WAF for security. A typical pattern: `Client → API Gateway → Lambda → DynamoDB`.
 
-**Kong (Stripe, Nasdaq):** Kong is built on top of nginx and handles high-traffic API scenarios. Stripe uses Kong for external API traffic management. Its plugin system covers auth (JWT, OAuth, API keys), rate limiting, logging, and transformation. Kong's declarative configuration makes it GitOps-friendly.
+**Kong:** Kong is built on top of nginx (via OpenResty) and handles high-traffic API scenarios. Its plugin system covers auth (JWT, OAuth, API keys), rate limiting, logging, and transformation. Kong's declarative configuration makes it GitOps-friendly.
 
 ---
 
@@ -304,4 +304,10 @@ graph TD
 
 ---
 
-*← [Service Discovery](../04-Service-Discovery/README.md) · [Level 05 Overview](../README.md) · Next: [Resilience Patterns](../06-Resilience-Patterns/README.md) →*
+<!-- nav:start -->
+
+⬅️ **Previous:** [Service Discovery](../04-Service-Discovery/README.md) · 🏠 [Level 5 — Architecture Patterns](../README.md) · ➡️ **Next:** [Resilience Patterns](../06-Resilience-Patterns/README.md)
+
+🧩 **See it applied in:** [03 · Rate Limiter](../../Bonus-Real-World-Architectures/03-Rate-Limiter/README.md) · [10 · Typeahead / Autocomplete](../../Bonus-Real-World-Architectures/10-Typeahead-Autocomplete/README.md) · [04 · Notification Service](../../Bonus-Real-World-Architectures/04-Notification-Service/README.md) · [15 · Google Maps](../../Bonus-Real-World-Architectures/15-Google-Maps/README.md) · [29 · Nearby Friends / Proximity](../../Bonus-Real-World-Architectures/29-Nearby-Friends-Proximity/README.md) · [32 · Gmail-Style Email Service](../../Bonus-Real-World-Architectures/32-Email-Service/README.md) · [35 · Gaming Leaderboard](../../Bonus-Real-World-Architectures/35-Gaming-Leaderboard/README.md)
+
+<!-- nav:end -->

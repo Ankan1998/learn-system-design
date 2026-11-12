@@ -10,7 +10,7 @@
 
 Two replicas accept writes at the same time. This happens whenever you have **multi-leader replication** (two data centers both taking writes), **leaderless replication** (Dynamo-style quorums), or **offline clients** (a phone editing a note on a plane). Eventually the replicas talk, and they disagree.
 
-The classic story is Amazon's shopping cart. Two sessions add items concurrently; Dynamo keeps both versions and hands the conflict to the application. Amazon's merge rule was "union of the carts" — which is why, famously, **deleted items sometimes came back**. A removal on one replica and an addition on another both look like "the cart changed," and union can't tell a deliberate deletion from a missing addition.
+The classic story is Amazon's shopping cart. Two sessions add items concurrently; Dynamo keeps both versions and hands the conflict to the application. Amazon's merge rule was "union of the carts" — which is why, famously, **deleted items sometimes came back**. Picture it: session 1 deletes milk while session 2, still looking at the old cart, adds eggs. The two versions are `{}` and `{milk, eggs}`, their union is `{milk, eggs}`, and the milk is back. An item's absence from one version could mean "deleted" or "never arrived here," and union cannot tell which.
 
 The easy answers all lose something:
 
@@ -47,7 +47,7 @@ Two writes conflict only if they're **concurrent**: neither replica saw the othe
 | **Last-writer-wins** | Highest timestamp wins | One of the writes, silently; correctness under clock skew |
 | **Application merge** (siblings) | Store all concurrent versions; app merges on read | Simplicity — every reader needs merge logic |
 | **Operational Transformation (OT)** | Transform each operation against concurrent ones | Needs a central server to order operations |
-| **CRDT** | The data type's merge function is commutative, associative, idempotent | Ability to enforce cross-object invariants; some metadata overhead |
+| **CRDT** | The data type's merge function is commutative, associative, [idempotent](../07-Idempotency-and-Exactly-Once/README.md) | Ability to enforce cross-object invariants; some metadata overhead |
 
 ### Step 3 — What makes a merge "conflict-free"
 
@@ -84,7 +84,7 @@ Mathematically this makes the states a **join-semilattice**: every update moves 
 
 ### Step 6 — The OR-Set: the workhorse
 
-The Observed-Remove Set solves the shopping-cart problem directly. Every `add(x)` attaches a fresh unique tag `(replica, counter)`. A `remove(x)` records the tags for `x` that this replica has *seen*. On merge, `x` is present if any add-tag exists that isn't covered by a remove. A concurrent add (new tag) therefore survives a concurrent remove (which couldn't have observed the new tag): **add-wins**. Amazon's resurrected items were exactly a remove losing to a concurrent add without the tags to tell them apart.
+The Observed-Remove Set solves the shopping-cart problem directly. Every `add(x)` attaches a fresh unique tag `(replica, counter)`. A `remove(x)` records the tags for `x` that this replica has *seen*. On merge, `x` is present if any add-tag exists that isn't covered by a remove. A concurrent add (new tag) therefore survives a concurrent remove (which couldn't have observed the new tag): **add-wins**. Tags also fix Amazon's resurrected items, which had a slightly different cause: the cart recorded a removal only as *absence*, so merging with any older version that still held the item brought it back. An OR-Set records the removal explicitly (the tags it observed), so a stale copy of the same add can never resurrect it.
 
 ### Step 7 — The costs nobody mentions in the demo
 
@@ -153,7 +153,7 @@ sequenceDiagram
     Note over A,C: all three replicas converge: milk {c1}
 ```
 
-*Caption: Amazon's cart lost this race because it lacked per-add tags. With them, the merge is unambiguous and add-wins is guaranteed.*
+*Caption: Bob's remove names the exact add it saw (tag a1), so it cannot cancel Carol's later add (tag c1), and a stale copy of a1 can never bring the item back. A cart merged by plain union has neither property.*
 
 ### The Resolution Ladder
 
@@ -296,5 +296,14 @@ SoundCloud built Roshi, an LWW-element-set on top of Redis, to serve its activit
 - [How Figma's multiplayer technology works](https://www.figma.com/blog/how-figmas-multiplayer-technology-works/) — a pragmatic middle path between OT and CRDTs.
 - [Automerge](https://automerge.org/) and [Yjs](https://docs.yjs.dev/) — production CRDT libraries and their design docs.
 - [Designing Data-Intensive Applications, Ch. 5 — Handling Write Conflicts](https://dataintensive.net/) — the surrounding replication context.
-- Previous: [08 — Distributed Locking](../08-Distributed-Locking/README.md) · Next: [10 — Gossip Protocols, Membership & Failure Detection](../10-Gossip-and-Failure-Detection/README.md) · Back to [Level 04 Overview](../README.md)
 - See also: [Google Docs (OT vs CRDTs)](../../Bonus-Real-World-Architectures/28-Google-Docs-Collaborative-Editing/README.md) · [Distributed Counter / Analytics](../../Bonus-Real-World-Architectures/23-Distributed-Counter-Analytics/README.md) · [Key-Value Store (Dynamo)](../../Bonus-Real-World-Architectures/27-Key-Value-Store/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Distributed Locking](../08-Distributed-Locking/README.md) · 🏠 [Level 4 — Distributed Systems](../README.md) · ➡️ **Next:** [Gossip Protocols, Membership & Failure Detection](../10-Gossip-and-Failure-Detection/README.md)
+
+🧩 **See it applied in:** [14 · Google Drive / Dropbox](../../Bonus-Real-World-Architectures/14-Google-Drive-Dropbox/README.md) · [44 · Identity & Access Management Service (Auth0 / Okta)](../../Bonus-Real-World-Architectures/44-Identity-and-Access-Service/README.md)
+
+<!-- nav:end -->

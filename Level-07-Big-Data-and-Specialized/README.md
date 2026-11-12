@@ -5,7 +5,7 @@
 
 ---
 
-**Level:** 7 · **Prerequisites:** [Level 04 — Distributed Systems](../Level-04-Distributed-Systems/README.md) · [Level 05 — Reliability & Scalability](../Level-06-Scale-and-Reliability/README.md) · [Level 03 — Communication](../Level-03-Communication/README.md)
+**Level:** 7 · **Prerequisites:** [Level 4 — Distributed Systems](../Level-04-Distributed-Systems/README.md) · [Level 6 — Scale & Reliability](../Level-06-Scale-and-Reliability/README.md) · [Level 3 — Communication](../Level-03-Communication/README.md)
 **Estimated Time:** 15–19 hours · **Difficulty:** Advanced
 
 ---
@@ -46,9 +46,9 @@ By the end of Level 7, you will be able to:
 
 ```mermaid
 flowchart TD
-    PRE1([Level 04<br/>Distributed Systems]) --> A
-    PRE2([Level 05<br/>Reliability]) --> A
-    PRE3([Level 03<br/>Communication]) --> B
+    PRE1([Level 4<br/>Distributed Systems]) --> A
+    PRE2([Level 6<br/>Scale & Reliability]) --> A
+    PRE3([Level 3<br/>Communication]) --> B
 
     A[01 Batch Processing<br/>MapReduce · Spark · ETL] --> C
     B[02 Stream Processing<br/>Kafka · Flink · Windows] --> C
@@ -100,10 +100,10 @@ flowchart TD
 
 Before diving in, make sure you're comfortable with:
 
-- [ ] Consistent hashing and partitioning strategies ([Level 04](../Level-04-Distributed-Systems/README.md))
-- [ ] CAP theorem and replication trade-offs ([Level 04](../Level-04-Distributed-Systems/README.md))
-- [ ] Pub-Sub messaging basics ([Level 03 — Pub-Sub](../Level-03-Communication/05-Pub-Sub/README.md))
-- [ ] Basic SQL and database indexing ([Level 02](../Level-02-Data-Layer/README.md))
+- [ ] Consistent hashing and partitioning strategies ([Level 2 — Consistent Hashing](../Level-02-Data-Layer/08-Consistent-Hashing/README.md))
+- [ ] CAP theorem and replication trade-offs ([Level 4](../Level-04-Distributed-Systems/README.md))
+- [ ] Pub-Sub messaging basics ([Level 3 — Pub-Sub](../Level-03-Communication/05-Pub-Sub/README.md))
+- [ ] Basic SQL and database indexing ([Level 2](../Level-02-Data-Layer/README.md))
 
 ---
 
@@ -116,4 +116,8 @@ Before diving in, make sure you're comfortable with:
 
 ---
 
-*Part of the [System Design Curriculum](../README.md) — Level 7 of 8*
+<!-- nav:start -->
+
+⬅️ **Previous level:** [Level 6 — Scale & Reliability](../Level-06-Scale-and-Reliability/README.md) · 🏠 [Curriculum home](../README.md) · ➡️ **Start this level:** [Batch Processing](01-Batch-Processing/README.md)
+
+<!-- nav:end -->

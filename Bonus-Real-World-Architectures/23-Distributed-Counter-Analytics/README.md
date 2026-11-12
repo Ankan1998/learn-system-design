@@ -61,7 +61,7 @@ Unique visitor (UV) storage using HyperLogLog:
 
 Event ingestion (Kafka):
   1M events/s × avg 200 bytes = 200 MB/s ingest
-  Kafka: 100 partitions × 2 MB/s each  →  200 MB/s write, 10 Gbps replication
+  Kafka: 100 partitions × 2 MB/s each  →  200 MB/s write; ×3 replication ≈ 600 MB/s (~5 Gbps) of broker traffic
 ```
 
 ---
@@ -117,20 +117,22 @@ erDiagram
         datetime bucket_start  PK
         string   window_size   PK
         bigint   count
-        bigint   hll_sketch    "12KB HyperLogLog"
+        bytes    hll_sketch    "12KB HyperLogLog"
     }
 
     ENTITY_SNAPSHOT {
         string   entity_id     PK
         string   metric        PK
         bigint   total_count
-        bigint   hll_merged
+        bytes    hll_merged
         datetime snapshot_at
     }
 
     COUNTER_SHARD ||--o{ TIME_BUCKET : "aggregated-into"
     ENTITY_SNAPSHOT ||--o{ TIME_BUCKET : "rolled-up-from"
 ```
+
+*Caption: Notice live counts are split across numbered counter shards, while time buckets and snapshots carry both exact counts and HyperLogLog sketches for uniques.*
 
 **Storage choices:**
 - **Hot counters** — Redis cluster with `INCRBY` on sharded keys; sub-millisecond writes.
@@ -195,6 +197,8 @@ flowchart TD
     classDef ext fill:#eeeeee,stroke:#888888,color:#000
 ```
 
+*Caption: Notice Kafka feeds two consumers in parallel, the Shard Aggregator for live Redis totals and Flink for time buckets, while reads go cache, Redis, then Cassandra.*
+
 **Walk-through:**
 1. Events hit the Counter API, which produces to Kafka (fire-and-forget; 202 Accepted to caller).
 2. The Shard Aggregator consumes from Kafka and batches increments — instead of one Redis write per event, it accumulates over 100 ms and issues one `INCRBY N` per shard key.
@@ -235,8 +239,10 @@ flowchart LR
     S3 --> ReadPath
 ```
 
+*Caption: Spreading one hot counter across several keys divides the write load, and a read simply adds the pieces back together.*
+
 - **Write:** route each event to `shard = hash(user_id or random) % N`. Each shard receives ~1/N of the traffic.
-- **Read:** pipeline GET across all N shards, sum the results. N=16 is typical; at N=16 reads require 16 round-trips (pipelined — ~0.5 ms extra).
+- **Read:** pipeline GET across all N shards, sum the results. N=16 is typical; at N=16 reads require 16 GETs (pipelined into one round-trip per node — ~0.5 ms extra).
 - **N is configurable per entity:** viral entities get N=64; low-traffic entities share shard 0.
 
 ---
@@ -257,7 +263,9 @@ sequenceDiagram
     end
 ```
 
-This collapses **10,000 Kafka events into ~200 Redis commands** per 100 ms flush, reducing Redis write amplification by 50×. The aggregator is stateful (holds in-memory accumulator per group) but the accumulator is ephemeral — if it crashes, Kafka re-delivers from the last committed offset; we re-aggregate from there. Since we only lose the in-memory batch (100 ms of events), the counter error is bounded.
+*Caption: Notice thousands of events are grouped by entity and shard in memory, then sent as one pipelined batch of INCRBY commands every 100 ms.*
+
+This collapses **10,000 Kafka events into ~200 Redis commands** per 100 ms flush, reducing Redis write amplification by 50×. The aggregator is stateful (holds in-memory accumulator per group) but the accumulator is ephemeral. Offsets are committed only after a successful flush, so after a crash Kafka re-delivers everything since the last committed offset and we re-aggregate it. Nothing is lost; the worst case is that one batch (100 ms of events) that reached Redis just before the crash is applied twice, so the counter error is small and bounded. Where even that matters, store the flushed offset next to the counters and skip batches that were already applied.
 
 ---
 
@@ -270,7 +278,7 @@ Standard HLL algorithm:
   For each element x: hash(x) → binary string
   Find position of leftmost 1 bit (leading zeros + 1) → k
   Maintain M registers, each holding max(k) seen for that hash prefix
-  Estimate = α × M² × harmonic_mean(2^(-register_values))
+  Estimate = α × M² / Σ 2^(-register_values)   (i.e. α × M × harmonic_mean(2^register_values))
 
 Redis commands:
   PFADD  video_123:unique_viewers  user_id_abc   → O(1)
@@ -286,7 +294,7 @@ Redis commands:
 
 When running across multiple regions (US, EU, APAC), counters in each region must eventually merge without coordination:
 
-- Use a **G-Counter CRDT** (Grow-only Counter): each region maintains a vector `[us: 10M, eu: 5M, apac: 3M]`.
+- Use a **G-Counter [CRDT](../../Level-04-Distributed-Systems/09-CRDTs-and-Conflict-Resolution/README.md)** (Grow-only Counter): each region maintains a vector `[us: 10M, eu: 5M, apac: 3M]`.
 - **Local write:** increment only the local slot.
 - **Merge:** take the element-wise maximum of all known vectors.
 - **Read:** sum all slots.
@@ -316,7 +324,7 @@ G-Counters are **eventually consistent** and require no cross-region coordinatio
 
 **Failure modes:**
 - Redis node failure → read path falls back to Cassandra snapshot (slightly stale); writes continue to surviving shards; Redis cluster reshards automatically.
-- Flink job restart → re-process from Kafka offset; Cassandra upserts are idempotent (counter+HLL bucket rows).
+- Flink job restart → re-process from Kafka offset; Cassandra upserts are [idempotent](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md) (counter+HLL bucket rows).
 - Cassandra node failure → RF=3, QUORUM reads/writes; < 1 s impact.
 - Count drift (batching crash) → at most 100 ms of events lost; counter under-counts by < 0.01 %.
 
@@ -343,9 +351,9 @@ G-Counters are **eventually consistent** and require no cross-region coordinatio
 
 **Twitter/X** uses a custom **Manhattan** distributed key-value store for counters, with client-side fan-out for high-traffic entities and a Finagle-based aggregation layer.
 
-**Cloudflare Analytics** built a custom **CRDT-based** analytics system that runs at every PoP independently and merges results eventually — avoiding any cross-datacenter coordination for their billions of requests/day counting workload.
+**Cloudflare Analytics** ships request logs from every PoP through Kafka into **ClickHouse**, which aggregates millions of requests per second into pre-computed rollups for their dashboards and APIs.
 
-**Facebook Gorilla** is their in-memory time-series DB that compresses time-series data 10× using XOR delta-of-delta encoding — directly applicable to the time-bucket storage layer.
+**Facebook Gorilla** is their in-memory time-series DB that compresses time-series data ~12× using delta-of-delta timestamps and XOR-encoded values — directly applicable to the time-bucket storage layer.
 
 **Redis** natively supports HyperLogLog (`PFADD`, `PFCOUNT`, `PFMERGE`), making it the go-to choice for UV counting without any custom sketch implementation.
 
@@ -360,3 +368,11 @@ Distributed counting at scale requires solving three distinct problems:
 3. **Multi-region consistency without coordination** — solved with G-Counter CRDTs (grow-only, eventual convergence, no cross-region writes needed).
 
 The golden rule: **separate the write path from the read path**. Write events into Kafka (durable, async), aggregate in Flink/stream processor, materialise into Redis (hot) and Cassandra (warm). Reads hit cache → Redis → Cassandra — never the raw event stream.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [22 · Google Search](../22-Google-Search/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [24 · Stock Exchange](../24-Stock-Exchange/README.md)
+
+<!-- nav:end -->

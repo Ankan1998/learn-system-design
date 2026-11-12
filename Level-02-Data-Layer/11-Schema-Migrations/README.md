@@ -14,7 +14,7 @@ What actually happens depends on the database and version — and none of the ou
 
 - On older MySQL, the `ALTER` **rebuilds the entire table** and holds a lock while it does. The site is read-only for 40 minutes.
 - On PostgreSQL, the statement needs an `ACCESS EXCLUSIVE` lock. A long-running analytics query already holds a lock on `users`, so the `ALTER` **waits** — and while it waits, *every new query* on `users` queues behind it. The site freezes within seconds even though the `ALTER` hasn't done anything yet.
-- The migration finishes, then the rolling deploy starts. For ten minutes, half the app servers run new code that expects `plan`, and half run old code that does `INSERT INTO users (id, email)` — which now fails because the old code doesn't know about `plan` (or worse, silently writes the wrong default).
+- The migration finishes, then the rolling deploy starts. For ten minutes, half the app servers run new code that expects `plan`, and half run old code that has never heard of it. The `DEFAULT 'free'` is the only thing keeping the old code's `INSERT INTO users (id, email)` alive: add the column as `NOT NULL` without a default and every one of those inserts fails. Even with the default, old servers silently file every new signup under `free`, including customers who just paid.
 - Someone decides to rename `plan` to `subscription_tier`. Every old server crashes on the next query.
 
 **The core problem:** a schema change is not one atomic event. It's a coordination problem between the database, the *old* code, the *new* code, and the data that already exists — all of which must keep working at every instant during the change.
@@ -165,7 +165,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    Q1["Long-running report<br/>holds SHARE lock on users"]
+    Q1["Long-running report<br/>holds ACCESS SHARE lock on users"]
     ALT["ALTER TABLE users ...<br/>waits for ACCESS EXCLUSIVE"]
     Q2["New SELECT arrives"]
     Q3["New UPDATE arrives"]
@@ -305,5 +305,14 @@ Braintree's engineering guide (the source of the `lock_timeout` habit for many t
 - [PostgreSQL: ALTER TABLE — Notes](https://www.postgresql.org/docs/current/sql-altertable.html) — which forms rewrite the table and which are metadata-only.
 - [strong_migrations](https://github.com/ankane/strong_migrations) — catches dangerous migrations in Rails; its README doubles as a checklist for any stack.
 - [Parallel Change — Danilo Sato (martinfowler.com)](https://martinfowler.com/bliki/ParallelChange.html) — the expand/contract pattern formalized.
-- Previous: [10 — Change Data Capture](../10-Change-Data-Capture/README.md) · Next Level: [Level 03 — Communication](../../Level-03-Communication/README.md) · Back to [Level 02 Overview](../README.md)
 - See also: [Deployment Strategies](../../Level-06-Scale-and-Reliability/04-Deployment-Strategies/README.md) · [Data Serialization & Schema Evolution](../../Level-03-Communication/09-Data-Serialization-and-Schema-Evolution/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Change Data Capture (CDC) & Data Synchronization](../10-Change-Data-Capture/README.md) · 🏠 [Level 2 — The Data Layer](../README.md) · ➡️ **Next:** [Level 3 — Communication](../../Level-03-Communication/README.md)
+
+🧩 **See it applied in:** [46 · Distributed SQL Database (Spanner / CockroachDB)](../../Bonus-Real-World-Architectures/46-Distributed-SQL-Database/README.md)
+
+<!-- nav:end -->

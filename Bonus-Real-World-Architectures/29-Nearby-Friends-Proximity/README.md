@@ -51,11 +51,11 @@ These two problems *look* similar but require fundamentally different architectu
 
 | Property | Target |
 |---|---|
-| Venue search latency | < 200 ms p99 |
+| Venue search latency | < 200 ms [p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) |
 | Friend location freshness | < 5 s end-to-end |
 | Availability | 99.99 % (friend location), 99.9 % (venue search) |
 | Location update write throughput | 2 M writes/s (peak) |
-| Concurrent WebSocket connections | 50 M |
+| Concurrent WebSocket connections | 20 M (peak, see §3) |
 | Data durability | Location is ephemeral; venue data durable |
 | Privacy | Friend location never exposed outside friendship graph |
 
@@ -335,6 +335,8 @@ flowchart TD
     style Ranking fill:#d1fae5,color:#000
 ```
 
+*Caption: Two separate paths share only the edge; live friend locations flow through Redis GEO, Kafka and pub/sub, while venue search is a cached PostGIS lookup.*
+
 ### Numbered walk-through
 
 1. **Mobile client sends location ping** every 5 s via the persistent WebSocket connection (same socket used to receive pushes — avoids re-establishing connections). The WebSocket Gateway forwards location updates to the **Location Service**.
@@ -342,7 +344,7 @@ flowchart TD
 3. **Fan-Out Processor** consumes from Kafka. For each location update it calls `GEORADIUS` on Redis GEO to find all users within N km, then intersects with the user's friend list from the **Social Graph Service** to find nearby *friends*.
 4. **Fan-Out Processor** publishes a `location_update` event to the **Pub/Sub Broker** on a per-user channel (e.g., channel `user:<friend_id>`).
 5. **WebSocket Gateway** is subscribed to channels for all users it currently hosts. It receives the pub/sub message and pushes it over the open WebSocket to that friend's mobile app.
-6. **Venue search** is completely separate. The **REST API Gateway** routes `GET /venues/nearby` to the **Venue Search Service**, which checks **Redis Cache** first (popular geohash cells cached for 5 min), then falls back to a PostGIS `ST_DWithin` query, applies the **Ranking Engine**, and returns results.
+6. **Venue search** is completely separate. The **REST [API Gateway](../../Level-05-Architecture-Patterns/05-API-Gateway/README.md)** routes `GET /venues/nearby` to the **Venue Search Service**, which checks **Redis Cache** first (popular geohash cells cached for 5 min), then falls back to a PostGIS `ST_DWithin` query, applies the **Ranking Engine**, and returns results.
 
 ---
 
@@ -400,9 +402,11 @@ flowchart TD
     style L6 fill:#fce7f3,color:#000
 ```
 
+*Caption: Each extra geohash character picks a sub-cell of its parent, so a shared prefix means nested, nearby cells and cell size shrinks with every level.*
+
 **Radius query with geohash:** To find venues within 5 km of a point, you compute the geohash at precision 5 for that point, then query the cell *and its 8 neighbors* (the cell could be near an edge). You index venues on their geohash string — this becomes a `WHERE geohash LIKE '9q8yy%'` or an IN-list of 9 cells. Fast B-tree index lookup.
 
-**Quadtree** recursively subdivides space into 4 quadrants. Each leaf node holds a bounded number of points; when it overflows, it splits. Good for non-uniform distributions (cities have many venues; oceans have none). Used by Tinder's geoshard approach and by PostGIS internally. More adaptive than geohash but harder to shard.
+**Quadtree** recursively subdivides space into 4 quadrants. Each leaf node holds a bounded number of points; when it overflows, it splits. Good for non-uniform distributions (cities have many venues; oceans have none). It is the classic interview answer for proximity search (PostGIS's GiST index, by contrast, is an R-tree, and Tinder's geosharding uses S2 cells). More adaptive than geohash but harder to shard.
 
 **Redis GEO** uses geohash internally: `GEOADD` stores the coordinate as a geohash score in a sorted set. `GEORADIUS` computes the relevant geohash cells and does a sorted-set range scan — pure in-memory, sub-millisecond.
 
@@ -460,7 +464,7 @@ sequenceDiagram
 
 ### 7.3 Redis GEO Commands in Practice
 
-Redis GEO is a thin wrapper over its sorted-set data structure, using a 52-bit geohash as the score. Here's how you use it:
+Redis GEO is a thin wrapper over its sorted-set data structure, using a 52-bit geohash as the score (`GEORADIUS` is deprecated since Redis 6.2 in favour of the equivalent `GEOSEARCH`). Here's how you use it:
 
 ```bash
 # Add / update a user's location
@@ -493,7 +497,7 @@ SET geo:ttl:user:alice 1 EX 30    # expire this sentinel after 30 s
 ZREM geo:locations user:alice
 ```
 
-**Sharding Redis GEO:** A single Redis node can hold ~10 M members in a sorted set comfortably. For 50 M concurrent users you shard by geohash prefix (e.g., 32 shards, one per first geohash character). Each shard holds users in one geographic region. A radius query that crosses shard boundaries requires querying 2–4 shards and merging results — acceptable since GEORADIUS is fast.
+**[Sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md) Redis GEO:** A single Redis node can hold ~10 M members in a sorted set comfortably. For 20 M concurrent users you shard by geohash prefix (e.g., 32 shards, one per first geohash character). Each shard holds users in one geographic region. A radius query that crosses shard boundaries requires querying 2–4 shards and merging results — acceptable since GEORADIUS is fast.
 
 ---
 
@@ -570,7 +574,7 @@ A single famous venue (e.g., a Michelin-starred restaurant) gets queried million
 |---|---|---|---|
 | Geohash + Redis GEO | Sub-ms, simple sharding, native Redis support | Edge artifacts at cell boundaries; fixed cell sizes | Live user locations (dynamic, in-memory) |
 | PostGIS GiST index | Exact results, flexible queries, handles polygons | Disk-bound, slower than in-memory | Static venues, complex shapes |
-| Quadtree | Adaptive density, no boundary artifacts | Complex to implement, harder to shard | Custom geo engines (Tinder's approach) |
+| Quadtree | Adaptive density, no boundary artifacts | Complex to implement, harder to shard | Custom in-memory geo engines |
 | S2 Geometry (Google) | Exact spherical geometry, no edge cases | More complex; Go/C++ libraries | High-precision global apps |
 
 ### Push vs Pull for friend locations
@@ -596,7 +600,7 @@ Yelp and Google monetize by letting venues pay for priority placement — a "spo
 ## 10. 🌐 How It's Actually Done
 
 **Yelp (static venues)**
-- Built on PostgreSQL + PostGIS for the core venue index, with Elasticsearch layered on for full-text + faceted search.
+- Built on MySQL for the core venue data, with Elasticsearch handling geo, full-text and faceted search.
 - Geohash-based caching in Memcached for popular city/category combinations.
 - Ranking is a hand-tuned + ML hybrid — human editors set category weights; an XGBoost model personalizes ordering by user history.
 
@@ -610,13 +614,13 @@ Yelp and Google monetize by letting venues pay for priority placement — a "spo
 - Update frequency adapts to movement speed: faster updates when driving, slower when stationary.
 
 **Tinder (proximity matching for people)**
-- Originally used a quadtree partitioned by geoshard. Each shard owns a geographic region; matches are local to the shard.
-- Migrated toward a system similar to Redis GEO with geohash-based partitioning as scale grew.
+- Shards its recommendation index (Elasticsearch) by geography: the world is divided into Google S2 cells, and neighbouring cells are grouped into "geoshards" balanced by user count.
+- A query for people within N miles touches only the few geoshards that overlap the search circle instead of the whole index (described in Tinder's "Geosharded Recommendations" engineering posts, 2019).
 - A key difference from friend proximity: Tinder's "nearby" is asymmetric (you don't need to be in *their* nearby to see them) and filtered by preference, so the intersection logic is different.
 
 **Uber (for contrast)**
 - Maintains a spatial index of driver locations updated every 4 s.
-- When a rider requests, the dispatch system does a geohash radius lookup to find candidate drivers, then applies supply/demand matching and ETA ranking.
+- When a rider requests, the dispatch system does a spatial-cell (S2, later H3) lookup to find candidate drivers, then applies supply/demand matching and ETA ranking.
 - See [Uber case study](../11-Uber-Ride-Sharing/README.md) for the full driver-dispatch deep dive.
 
 ---
@@ -627,12 +631,12 @@ Here's your mental model for interviews:
 
 **Split the problem first.** Static venues (Yelp) = search problem on a fixed dataset; cache aggressively, use PostGIS for the source of truth. Dynamic users (Snap Map) = stream-processing + fan-out problem; use Redis GEO for in-memory geo queries, Kafka to absorb write spikes, WebSockets to push results.
 
-**Geospatial indexing is the foundation.** Geohash gives you cheap prefix-based partitioning and is what Redis GEO uses under the hood. For exact queries or complex polygons, PostGIS GiST beats geohash. For fully custom engines at Tinder/Uber scale, quadtrees win on density-adaptiveness.
+**Geospatial indexing is the foundation.** Geohash gives you cheap prefix-based partitioning and is what Redis GEO uses under the hood. For exact queries or complex polygons, PostGIS GiST beats geohash. For custom engines at very large scale, hierarchical cell systems (S2 at Tinder, H3 at Uber) or quadtrees add density-adaptiveness.
 
 **The hard numbers:**
 - 10 M active users × 1 update/5 s = **2 M writes/s** — don't touch SQL for this
 - Fan-out multiplier of 2–3× → **5 M pub/sub pushes/s** — batch and cap fan-out
-- 50 M WebSocket connections → **400+ gateway servers** at 50 k connections each
+- 20 M WebSocket connections → **400+ gateway servers** at 50 k connections each
 
 **The key tricks:**
 1. Redis GEO (`GEOADD`, `GEORADIUS`) for live user locations — sub-millisecond, naturally shardable by geohash prefix
@@ -644,3 +648,11 @@ Here's your mental model for interviews:
 **Contrast with Uber:** Uber does 1-to-1 matching (nearest driver wins); proximity does 1-to-many broadcast (all nearby friends see you). Same geo primitives, opposite fan-out direction.
 
 When an interviewer asks "how do you scale this?", your answer should flow: Redis GEO cluster (sharded by geohash prefix) → Kafka for write absorption → Fan-Out Processor with delta threshold and friend-list caching → Redis Pub/Sub → WebSocket batch delivery. That end-to-end is what separates a good answer from a great one.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [28 · Google Docs Collaborative Editing](../28-Google-Docs-Collaborative-Editing/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [30 · Video Conferencing (Zoom / Google Meet)](../30-Video-Conferencing/README.md)
+
+<!-- nav:end -->

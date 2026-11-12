@@ -94,11 +94,11 @@ A threshold of φ = 8 (Cassandra's default) means "the chance this delay is norm
 |----------------|-------------------|
 | Membership and liveness | Deciding *the* leader |
 | Spreading config, schema versions, metadata | Anything that must be agreed exactly once |
-| Failure detection | Locks, leases, fencing tokens |
+| Failure detection | Locks, leases, [fencing tokens](../08-Distributed-Locking/README.md) |
 | Computing aggregates (cluster load, counts) | Strongly consistent config |
 | Anti-entropy of replicas (with Merkle trees) | Ordering writes |
 
-The production pattern is **both**: Consul runs Serf (SWIM gossip) for membership across thousands of agents *and* Raft among 3–5 servers for the consistent catalog and locks. Cassandra runs gossip only — it has no leader to elect. Redis Cluster uses a gossip bus of PING/PONG frames carrying slot ownership. Kubernetes, by contrast, centralizes: nodes heartbeat to the API server backed by etcd, which is fine because a Kubernetes cluster is thousands of nodes at most and already has the consensus store.
+The production pattern is **both**: Consul runs Serf (SWIM gossip) for membership across thousands of agents *and* Raft among 3–5 servers for the consistent catalog and locks. Cassandra runs gossip only — it has no leader to elect. Redis Cluster uses a gossip bus of PING/PONG frames carrying slot ownership. [Kubernetes](../../Level-06-Scale-and-Reliability/07-Containers-and-Orchestration/README.md), by contrast, centralizes: nodes heartbeat to the API server backed by etcd, which is fine because a Kubernetes cluster is thousands of nodes at most and already has the consensus store.
 
 ### Step 7 — Practical parameters and the partition case
 
@@ -169,7 +169,7 @@ flowchart TD
     H["Heartbeats from node B<br/>inter-arrival samples: 1.0 s, 1.1 s, 0.9 s, 1.3 s ..."]
     DIST["Sliding-window distribution<br/>mean 1.05 s, std dev 0.15 s"]
     NOW["Now: 2.2 s since last heartbeat"]
-    PHI["phi = -log10 P(delay > 2.2 s)<br/>= about 9"]
+    PHI["phi = -log10 P(delay > 2.2 s)<br/>= about 14"]
     THR{"phi above threshold 8?"}
     SUS["Mark SUSPECT and gossip"]
     OK["Still ALIVE, keep waiting"]
@@ -246,7 +246,7 @@ Dynamo's paper describes a gossip-based protocol that propagates membership chan
 Every Redis Cluster node exchanges PING/PONG frames on a dedicated port carrying the sender's view of slot ownership and node states; a node is flagged PFAIL by one node and FAIL once a majority of masters agree — a gossip-plus-quorum hybrid for failure detection.
 
 ### Uber Ringpop
-Ringpop combined SWIM membership with consistent hashing so that application processes could shard requests among themselves with no external coordinator — gossip as the substrate for a self-organizing service layer.
+Ringpop combined SWIM membership with [consistent hashing](../../Level-02-Data-Layer/08-Consistent-Hashing/README.md) so that application processes could shard requests among themselves with no external coordinator — gossip as the substrate for a self-organizing service layer.
 
 ### Akka Cluster
 Akka's clustering uses a gossip protocol with vector clocks for convergence and the phi-accrual detector for reachability; its documentation is one of the clearest explanations of tuning φ in practice.
@@ -332,5 +332,14 @@ Akka's clustering uses a gossip protocol with vector clocks for convergence and 
 - [Cassandra Gossip documentation](https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html#gossip) — SYN/ACK/ACK2 and the phi detector in practice.
 - [Consul Architecture — Gossip and Consensus](https://developer.hashicorp.com/consul/docs/architecture) — the two-layer design explained by its authors.
 - [Akka Cluster — Failure Detector](https://doc.akka.io/docs/akka/current/typed/cluster-concepts.html#failure-detector) — tuning φ in a real system.
-- Previous: [09 — CRDTs & Conflict Resolution](../09-CRDTs-and-Conflict-Resolution/README.md) · Next Level: [Level 05 — Architecture Patterns](../../Level-05-Architecture-Patterns/README.md) · Back to [Level 04 Overview](../README.md)
 - See also: [Key-Value Store (Dynamo)](../../Bonus-Real-World-Architectures/27-Key-Value-Store/README.md) · [Distributed Cache (Redis)](../../Bonus-Real-World-Architectures/18-Distributed-Cache/README.md) · [Distributed Coordination Service](../../Bonus-Real-World-Architectures/39-Distributed-Coordination-Service/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [CRDTs & Conflict Resolution](../09-CRDTs-and-Conflict-Resolution/README.md) · 🏠 [Level 4 — Distributed Systems](../README.md) · ➡️ **Next:** [Level 5 — Architecture Patterns](../../Level-05-Architecture-Patterns/README.md)
+
+🧩 **See it applied in:** [11 · Uber Ride-Sharing](../../Bonus-Real-World-Architectures/11-Uber-Ride-Sharing/README.md) · [33 · Content Delivery Network (CDN)](../../Bonus-Real-World-Architectures/33-Content-Delivery-Network/README.md)
+
+<!-- nav:end -->

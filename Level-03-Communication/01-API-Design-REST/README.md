@@ -42,7 +42,7 @@ The key insight: **treat everything as a resource** (noun), identified by a URL,
 | GET | Read | ✅ Yes | ✅ Yes | Fetch resource |
 | POST | Create | ❌ No | ❌ No | Create new resource |
 | PUT | Replace | ✅ Yes | ❌ No | Full update (replace) |
-| PATCH | Modify | ✅ Usually | ❌ No | Partial update |
+| PATCH | Modify | ⚠️ Not guaranteed | ❌ No | Partial update ("set email" is [idempotent](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md), "append item" is not) |
 | DELETE | Delete | ✅ Yes | ❌ No | Remove resource |
 
 > **Idempotent** = calling it N times gives the same result as calling it once. **Safe** = no side effects (read-only).
@@ -63,6 +63,8 @@ sequenceDiagram
     S-->>LB: 200 OK<br/>Content-Type: application/json<br/>{"id":42,"name":"Alice",...}
     LB-->>C: 200 OK + JSON body
 ```
+
+*Caption: Notice that the auth token travels with the request itself, so any stateless API server behind the load balancer can handle it.*
 
 ---
 
@@ -114,7 +116,7 @@ sequenceDiagram
 | **Query param** | `/users?version=2` | Easy for exploration | Can be missed |
 | **Content negotiation** | `Accept: application/vnd.api.v2+json` | RESTful-purist | Complex for clients |
 
-**Recommendation:** URL path versioning (`/v1/`, `/v2/`) is the most practical. Stripe, GitHub, and Twilio all use it.
+**Recommendation:** URL path versioning (`/v1/`, `/v2/`) is the most practical. Stripe and Twilio both use it.
 
 ---
 
@@ -142,6 +144,23 @@ GET /users?limit=20&after=eyJpZCI6NDB9   → stable, efficient
 
 **Use offset for admin panels / small datasets; cursor for infinite scroll / large datasets.**
 
+```mermaid
+flowchart LR
+    subgraph OFF["Offset: LIMIT 20 OFFSET 100000"]
+        direction TB
+        O1["Database reads and discards<br/>100,000 rows"] --> O2["returns the next 20"]
+    end
+    subgraph CUR["Cursor: WHERE id > last_seen_id LIMIT 20"]
+        direction TB
+        K1["Index jumps straight<br/>to last_seen_id"] --> K2["returns the next 20"]
+    end
+
+    style OFF fill:#fee2e2,color:#000
+    style CUR fill:#dcfce7,color:#000
+```
+
+*Caption: Offset pagination gets slower the deeper you page, because the skipped rows are still read. A cursor seeks through the index, so page 5,000 costs the same as page 1.*
+
 ---
 
 ## 📊 Richardson Maturity Model
@@ -161,20 +180,22 @@ graph TD
     style L3 fill:#d1ecf1,color:#000
 ```
 
+*Caption: The Richardson Maturity Model: each level adds one REST idea, from a single do-everything endpoint up to responses that link to the next possible actions.*
+
 Most production APIs live at **Level 2**. Level 3 (HATEOAS) is theoretically pure REST but rarely adopted in practice.
 
 ---
 
 ## 🏢 Real-World Examples
 
-**GitHub REST API** (`api.github.com/v3`)
+**GitHub REST API** (`api.github.com`)
 - `GET /repos/{owner}/{repo}` → repo details
 - `POST /repos/{owner}/{repo}/issues` → create issue
-- Uses cursor pagination (`Link` header with `rel=next`)
+- Paginates through a `Link` response header (`rel="next"`): page numbers on most endpoints, opaque cursors on newer ones
 - Returns `X-RateLimit-Remaining` headers
 
 **Stripe API** (`api.stripe.com/v1`)
-- Idempotency keys via `Idempotency-Key` header on POST/PUT
+- Idempotency keys via `Idempotency-Key` header on POST
 - Versioned by date (`Stripe-Version: 2023-10-16`)
 - Consistent error format: `{"error": {"type": "...", "message": "..."}}`
 - Cursor pagination with `starting_after` / `ending_before`
@@ -191,7 +212,7 @@ Most production APIs live at **Level 2**. Level 3 (HATEOAS) is theoretically pur
 | Tooling | Ubiquitous (curl, Postman, browsers) | — |
 | Over-fetching | — | Returns whole object; client may need 2 fields |
 | Under-fetching | — | May require multiple round-trips |
-| Real-time | — | Request/response only; need WebSockets or SSE |
+| Real-time | — | Request/response only; need [WebSockets](../06-WebSockets-and-Realtime/README.md) or SSE |
 | Type safety | — | No built-in schema enforcement on wire |
 | Performance | Good for public APIs | Binary protocols (gRPC) are faster internally |
 
@@ -209,7 +230,7 @@ Most production APIs live at **Level 2**. Level 3 (HATEOAS) is theoretically pur
 - You have deeply nested, relationship-heavy queries → consider **GraphQL**
 - Internal microservices need high-throughput, low-latency → consider **gRPC**
 - You need real-time push → consider **WebSockets / SSE**
-- You need long-running async work → consider **Message Queues**
+- You need long-running async work → consider **[Message Queues](../04-Message-Queues/README.md)**
 
 ---
 
@@ -263,4 +284,13 @@ Most production APIs live at **Level 2**. Level 3 (HATEOAS) is theoretically pur
 - [GitHub REST API Docs](https://docs.github.com/en/rest)
 - [Stripe API Reference](https://stripe.com/docs/api)
 - [Richardson Maturity Model — Martin Fowler](https://martinfowler.com/articles/richardsonMaturityModel.html)
-- Next: [02-GraphQL](../02-GraphQL/README.md) — solving over/under-fetching
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Level 3 — Communication (overview)](../README.md) · ➡️ **Next:** [GraphQL](../02-GraphQL/README.md)
+
+🧩 **See it applied in:** [03 · Rate Limiter](../../Bonus-Real-World-Architectures/03-Rate-Limiter/README.md)
+
+<!-- nav:end -->

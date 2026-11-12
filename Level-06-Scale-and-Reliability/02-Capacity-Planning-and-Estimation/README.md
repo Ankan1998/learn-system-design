@@ -2,7 +2,7 @@
 
 > Capacity planning is the practice of estimating the computational resources — servers, storage, bandwidth, and memory — a system will require to handle its expected load before you build it.
 
-**Level:** 6 · **Topic:** 2 · **Prerequisites:** [01 - Observability](../01-Observability) · [Caching](../../Level-01-Building-Blocks/03-Caching)
+**Level:** 6 · **Topic:** 2 · **Prerequisites:** [Observability](../01-Observability/README.md) · [Caching](../../Level-01-Building-Blocks/03-Caching/README.md)
 
 ---
 
@@ -59,6 +59,8 @@ flowchart TD
     classDef input fill:#d0e8ff,stroke:#6aaed6,color:#000
     classDef derived fill:#fff3cd,stroke:#f0ad4e,color:#000
 ```
+
+*Caption: Every estimate flows from DAU through average QPS; peak load, storage, and bandwidth branch from there, and cache size derives from storage and bandwidth.*
 
 Start with **DAU** (how many users are active daily) and fan out to compute everything else. Each downstream number feeds your architectural decisions.
 
@@ -261,7 +263,7 @@ Peak read QPS  = 17,000 × 3 = ~51,000 QPS
 Peak write QPS = 3,500 × 3  = ~10,500 QPS
 ```
 
-This is a read-heavy system (read:write ≈ 5:1), which is typical for social media. You'd lean toward read replicas and aggressive caching.
+This is a read-heavy system (read:write ≈ 5:1), which is typical for social media. You'd lean toward [read replicas](../../Level-02-Data-Layer/01-Database-Replication/README.md) and aggressive caching.
 
 **Step 4 — Storage per year (tweets only)**
 
@@ -319,7 +321,7 @@ Storage/year = 11,500 uploads/s × 300,000 bytes × 86,400 s × 365 days
              ≈ ~109 PB/year
 ```
 
-With replication (3×) and encoding overhead (1.5×): **~490 PB/year**. You need distributed object storage (think S3-style), not traditional databases.
+With replication (3×) and encoding overhead (1.5×): **~490 PB/year**. You need distributed [object storage](../../Level-02-Data-Layer/09-Object-Storage/README.md) (think S3-style), not traditional databases.
 
 **Step 4 — Outbound bandwidth**
 ```
@@ -353,7 +355,7 @@ In interviews and early architecture discussions, fast estimation wins every tim
 - Evaluating whether a single machine can handle a use case (or if you need to distribute)
 - Choosing between storage tiers (in-memory vs SSD vs HDD vs object storage)
 - Justifying infrastructure budget to stakeholders
-- Determining if a CDN, caching layer, or database sharding is needed
+- Determining if a CDN, caching layer, or database [sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md) is needed
 
 **Do not use raw back-of-envelope estimates when:**
 - Making multi-million dollar infrastructure procurement decisions (hire a capacity team, run load tests)
@@ -366,7 +368,7 @@ In interviews and early architecture discussions, fast estimation wins every tim
 
 **Forgetting the peak multiplier** — average QPS is not peak QPS. A system that handles average load fine will fall over during evening rush if you didn't design for 2–3× burst. Always multiply.
 
-**Ignoring replication factor** — databases, blob stores, and message queues replicate data for durability. If you compute 50 TB and provision exactly 50 TB, you have zero redundancy. Apply the replication multiplier to storage estimates.
+**Ignoring replication factor** — databases, blob stores, and [message queues](../../Level-03-Communication/04-Message-Queues/README.md) replicate data for durability. If you compute 50 TB and provision exactly 50 TB, you have zero redundancy. Apply the replication multiplier to storage estimates.
 
 **Not stating assumptions** — if you assume 300M DAU and never say it, the interviewer can't tell whether you know your assumptions or whether you're just making up numbers. State every assumption out loud: "I'll assume 300M daily active users. Is that reasonable?"
 
@@ -405,7 +407,7 @@ In interviews and early architecture discussions, fast estimation wins every tim
 - The core formula: `QPS = DAU × actions/day ÷ 86,400`.
 - Always multiply QPS by 2–3× for peak traffic.
 - Only write QPS contributes to storage growth.
-- Apply a 3–10× multiplier to raw storage for replication and overhead.
+- Apply a 5–10× multiplier to raw storage for replication, indexes, and safety margin.
 - State all assumptions out loud; round aggressively; check your units.
 - Use the resulting numbers to justify every major architectural choice.
 
@@ -441,3 +443,13 @@ A URL shortening service handles 100M URL shortenings per day and 10 billion URL
 - [The Art of Capacity Planning (O'Reilly)](https://www.oreilly.com/library/view/the-art-of/9780596518578/)
 - [Google SRE Book — Chapter 18: Software Engineering in SRE (capacity planning section)](https://sre.google/sre-book/software-engineering-in-sre/)
 - [High Scalability Blog — Real-world architecture teardowns](http://highscalability.com/)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Observability](../01-Observability/README.md) · 🏠 [Level 6 — Scale & Reliability](../README.md) · ➡️ **Next:** [High Availability and Disaster Recovery](../03-High-Availability-and-DR/README.md)
+
+🧩 **See it applied in:** [38 · LLM Chat Service (ChatGPT)](../../Bonus-Real-World-Architectures/38-LLM-Chat-Service/README.md)
+
+<!-- nav:end -->

@@ -167,7 +167,7 @@ flowchart TB
 |----------|-------------|------|------|
 | **Sticky sessions** | LB routes user to same server via cookie/IP | No code change to existing app | Defeats load distribution; server crash = lost sessions |
 | **Externalized sessions (Redis)** | Sessions stored in Redis; servers are stateless | True horizontal scaling; crash-safe | Redis becomes a dependency; network hop per request |
-| **JWT / Signed tokens** | Session state encoded in a signed token sent with every request | Zero server state; works without Redis | Token revocation is hard; tokens can grow large; secret key management |
+| **[JWT](../../Level-03-Communication/08-Authentication-and-Authorization/README.md) / Signed tokens** | Session state encoded in a signed token sent with every request | Zero server state; works without Redis | Token revocation is hard; tokens can grow large; secret key management |
 
 ### Comparing Stateless vs Stateful Services
 
@@ -186,12 +186,12 @@ Some services are inherently stateful and that's OK:
 
 | Service Type | Why It's Stateful | How It Scales |
 |-------------|------------------|---------------|
-| **Database** | Stores all persistent data | Replication + sharding |
+| **Database** | Stores all persistent data | Replication + [sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md) |
 | **Cache (Redis)** | Holds key-value state | Redis Cluster or sharding |
 | **Message queue** | Holds unprocessed messages | Cluster + partitioning (Kafka) |
 | **Game server** | Tracks real-time match state | Single authoritative server per match; matches distributed across servers |
 | **WebSocket server** | Maintains persistent connections | Connections sharded across servers; pub/sub for cross-server messaging |
-| **Leader election** | One node must be "in charge" | Paxos/Raft consensus protocol |
+| **Leader election** | One node must be "in charge" | [Paxos](../../Level-04-Distributed-Systems/03-Consensus-Paxos-Raft/README.md)/Raft consensus protocol |
 
 The key insight: even in systems with stateful components, **the goal is to isolate state in dedicated stateful services** (database, Redis) so that the application logic layer can remain stateless and horizontally scalable.
 
@@ -201,12 +201,12 @@ The key insight: even in systems with stateful components, **the goal is to isol
 
 ### Netflix — Stateless API Services
 
-Netflix's API layer (which handles 200M+ subscriber requests) is entirely stateless. Each service instance:
+Netflix's API layer (serving 300M+ subscribers) is stateless. Each service instance:
 - Holds no user session data
 - Reads user preferences from a shared database or cache
-- Signs requests with JWTs for authentication
+- Authenticates each request from the token the device presents, with no session pinned to one instance
 
-This allows Netflix to scale API instances up/down within seconds in response to traffic (especially during "pause all of Netflix" events like the Super Bowl halftime show). No service instance is irreplaceable.
+This allows Netflix to add and remove API instances as traffic climbs every evening and falls overnight, and to move all traffic out of an entire AWS region during failover drills. No service instance is irreplaceable.
 
 ### Facebook — PHP "Stateless" Architecture
 
@@ -224,7 +224,7 @@ The solution: treat match servers as **ephemeral stateful units**. Each match ru
 
 ### 12-Factor App — Industry Standard for Stateless Services
 
-The [12-Factor App methodology](https://12factor.net/) defines the industry standard for building stateless, cloud-native services. Factor VI states: "Execute the app as one or more stateless processes. Any data that needs to persist must be stored in a stateful backing service (database)." This principle is the foundation of Kubernetes, Heroku, and modern microservice architecture.
+The [12-Factor App methodology](https://12factor.net/) defines the industry standard for building stateless, cloud-native services. Factor VI states: "Execute the app as one or more stateless processes. Any data that needs to persist must be stored in a stateful backing service, typically a database." The methodology came out of Heroku's platform, and this principle underpins how stateless workloads run on [Kubernetes](../../Level-06-Scale-and-Reliability/07-Containers-and-Orchestration/README.md) and in modern microservice architectures.
 
 ---
 
@@ -306,7 +306,16 @@ The [12-Factor App methodology](https://12factor.net/) defines the industry stan
 ## 📚 Further Reading
 
 - [12-Factor App — Factor VI: Processes](https://12factor.net/processes)
-- [Redis as a Session Store](https://redis.io/docs/manual/patterns/session-store/)
+- [Redis as a Session Store](https://redis.io/solutions/session-management/)
 - [JWT.io — JSON Web Tokens](https://jwt.io/introduction)
 - [The Stateless Service Pattern (Microsoft Azure Architecture)](https://learn.microsoft.com/en-us/azure/architecture/patterns/static-content-hosting)
-- Previous: [CDN](../06-CDN/README.md) · Next: [08 — Concurrency Models & Async I/O](../08-Concurrency-and-Async-IO/README.md) · Back to [Level 01 Overview](../README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [CDN (Content Delivery Network)](../06-CDN/README.md) · 🏠 [Level 1 — Building Blocks](../README.md) · ➡️ **Next:** [Concurrency Models & Async I/O](../08-Concurrency-and-Async-IO/README.md)
+
+🧩 **See it applied in:** [01 · URL Shortener](../../Bonus-Real-World-Architectures/01-URL-Shortener/README.md) · [04 · Notification Service](../../Bonus-Real-World-Architectures/04-Notification-Service/README.md) · [05 · Web Crawler](../../Bonus-Real-World-Architectures/05-Web-Crawler/README.md) · [06 · Twitter/X News Feed](../../Bonus-Real-World-Architectures/06-News-Feed-Twitter/README.md) · [07 · Instagram](../../Bonus-Real-World-Architectures/07-Instagram/README.md) · [12 · Food Delivery (DoorDash / Swiggy)](../../Bonus-Real-World-Architectures/12-Food-Delivery/README.md) · [13 · Airbnb Booking](../../Bonus-Real-World-Architectures/13-Airbnb-Booking/README.md) · [14 · Google Drive / Dropbox](../../Bonus-Real-World-Architectures/14-Google-Drive-Dropbox/README.md) · …and 9 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

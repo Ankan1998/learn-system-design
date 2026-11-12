@@ -18,7 +18,7 @@ Every production system emits three types of telemetry:
 - **Metrics** — numeric measurements over time: CPU%, request latency histograms, error rates.
 - **Traces** — distributed request traces spanning multiple services (the "three pillars of observability").
 
-At scale — think 10,000 microservices, each on 50 hosts, emitting 10 K events/second — you're looking at 5 billion log lines and hundreds of millions of metric data points per minute. You need to ingest all of it, store it reliably but cheaply, make it queryable in seconds, and fire accurate alerts with minimal noise.
+At scale — think 10,000 [microservices](../../Level-05-Architecture-Patterns/01-Monolith-vs-Microservices/README.md), each on 50 hosts, each host emitting 20 log lines/second — you're looking at 600 million log lines and hundreds of millions of metric data points per minute. You need to ingest all of it, store it reliably but cheaply, make it queryable in seconds, and fire accurate alerts with minimal noise.
 
 We're designing a platform like **Datadog**, **the ELK Stack** (Elasticsearch + Logstash + Kibana), the **Prometheus + Grafana + Loki** stack, or **Honeycomb**.
 
@@ -41,17 +41,17 @@ Out of scope: distributed tracing internals (a separate design), the UI/dashboar
 - Store logs with full-text search; retain for configurable periods (7 days → 1 year).
 - Store metrics with configurable downsampling and retention tiers.
 - Query logs by time range + filter expressions (`service="payments" level="error"`).
-- Query metrics with aggregation functions (sum, avg, p99, rate over time).
+- Query metrics with aggregation functions (sum, avg, [p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md), rate over time).
 - Define alert rules (threshold, anomaly, no-data); notify via PagerDuty, Slack, email.
 - Deduplication: same alert firing repeatedly → single notification until resolved.
 
 ### Non-Functional
-- **Ingest:** 10 M log lines/second globally; 1 M metric data points/second.
+- **Ingest:** 10 M log lines/second globally; ~3.3 M metric data points/second.
 - **Query latency:** log search < 5 s p99; metric query < 2 s p99.
 - **Alert latency:** alert fires within 60 s of condition being true.
 - **Availability:** ingestion 99.9%; query/alert 99.95%.
 - **Durability:** no data loss after acknowledgment; replicate across ≥3 AZs.
-- **Retention:** hot logs 7 days on SSD; warm 30 days on HDD; cold 1 year on object storage.
+- **Retention:** hot logs 7 days on SSD; warm 30 days on HDD; cold 1 year on [object storage](../../Level-02-Data-Layer/09-Object-Storage/README.md).
 
 ---
 
@@ -77,8 +77,8 @@ Out of scope: distributed tracing internals (a separate design), the UI/dashboar
 | Scrape interval | 15 s per series → 3.3 M data points/s |
 | Bytes per data point (raw) | 16 bytes (timestamp + value) |
 | Raw bandwidth | 53 MB/s |
-| After compression (delta + XOR, à la Gorilla) | ~1.3 MB/s compressed |
-| 15-day hot storage (no downsampling) | ~1.7 TB |
+| After compression (delta + XOR, à la Gorilla) | ~4.4 MB/s compressed |
+| 15-day hot storage (no downsampling) | ~5.7 TB |
 
 **Cardinality problem preview:**
 50 M unique time series is already large. If each series has labels like `{service, host, endpoint, status_code, customer_id}` and `customer_id` has 10 M values, you can easily blow up to **billions** of series. We'll address this in Deep Dives.
@@ -180,6 +180,8 @@ erDiagram
     ALERT_RULE ||--o{ ALERT_INCIDENT : "fires"
 ```
 
+*Caption: Notice that metrics split into a series (name plus labels) and its many samples, while log events stand alone and alert rules produce incidents.*
+
 **Storage justification:**
 
 | Data | Store | Why |
@@ -258,12 +260,14 @@ flowchart TD
     style Notify fill:#fce7f3,color:#000
 ```
 
+*Caption: Logs and pushed metrics flow through Kafka into tiered stores, scraped metrics go straight to the TSDB, and alerts query metrics before Alertmanager notifies.*
+
 **Walk-through — a log line's journey:**
 
 1. A service emits a structured JSON log event; the **Agent** on the host buffers and batches it (100 ms or 1,000 lines, whichever comes first).
 2. Agent publishes the batch to the **Kafka `log-events` topic**. Kafka provides durability and back-pressure handling.
 3. **Log Processor** (Flink / Kafka Streams consumer) parses, enriches (adds geo-IP, resolves hostnames), applies sampling rules, and indexes into **Elasticsearch** (hot tier).
-4. A parallel Kafka consumer streams log batches to **Parquet files on HDD** (warm tier). An S3 lifecycle rule moves files older than 30 days to **cold object storage**.
+4. A parallel Kafka consumer streams log batches to **Parquet files on HDD** (warm tier). A lifecycle job moves files older than 30 days to **cold object storage**.
 5. User queries hit the **Log Query Service**, which fans out to ES (recent) or Trino/Athena (older) depending on the time range.
 
 **Walk-through — an alert firing:**
@@ -296,16 +300,18 @@ flowchart LR
     style PROC fill:#dcfce7,color:#000
 ```
 
+*Caption: The agent writes to a local disk buffer before Kafka, so a slow broker or agent restart does not lose log lines.*
+
 **Agent design (Fluent Bit / Vector):**
 - Runs as a DaemonSet on each k8s node (one agent per host).
 - Tails log files or reads from journald.
 - Local disk buffer (WAL): if Kafka is slow, the agent buffers to disk (up to X GB) rather than dropping logs. Survives agent restarts.
 - Batch compression: gzip or zstd batches before network send → 4–8× bandwidth reduction.
-- Back-pressure propagation: if Kafka consumer offset lag exceeds a threshold, the agent's Kafka producer slows ingestion → back-pressure signals to upstream log writers (they may start dropping at the application layer if fully backed up).
+- Back-pressure: Kafka decouples the two sides, so slow consumers show up as growing consumer lag (alert on it and scale the processors), not as slower producers. Producers feel pressure only when the brokers themselves are saturated or unreachable: sends block or time out, the agent's local buffer fills, and the agent starts shedding the least valuable logs (DEBUG first).
 
 **Kafka partitioning strategy:**
 - Partition key: `service` + `host` → logs from the same host arrive in order within a partition.
-- Partition count: sized to match peak throughput / (producer throughput per partition). At 5 GB/s compressed, with 200 MB/s per partition → 25 partitions minimum; use 64 for headroom.
+- Partition count: sized to match peak throughput / (producer throughput per partition). At 5 GB/s raw (about 1 GB/s after compression) and a conservative ~10 MB/s per partition → ~100 partitions; use 128 for headroom.
 - Retention: 24–48 hours on Kafka (allows reprocessing after processor bugs).
 
 **Log enrichment in the processor:**
@@ -317,7 +323,7 @@ Add fields the application doesn't know at emit time: `cluster`, `region`, `kube
 
 Raw metric storage without compression would require:
 ```
-50 M series × 1 sample/15s × 86400 s/day × 16 bytes = 46 TB/day
+50 M series × 1 sample/15s × 86400 s/day × 16 bytes ≈ 4.6 TB/day
 ```
 That's unsustainable. Two techniques bring it down dramatically:
 
@@ -327,11 +333,11 @@ That's unsustainable. Two techniques bring it down dramatically:
 Timestamps:  delta-of-delta encoding (most series scrape at fixed intervals,
              so Δ is nearly constant → encodes in 1–2 bits)
 Values:      XOR with previous value — if a CPU metric barely changes,
-             most bits are zero → Fibonacci/variable-length encoding
+             most bits are zero → store only the meaningful bits (leading/trailing-zero counts)
 Result:      ~1.37 bytes per sample (vs 16 bytes raw) → 12:1 compression
 ```
 
-At 12:1 compression: 46 TB/day → **3.8 TB/day**.
+At 12:1 compression: 4.6 TB/day → **~380 GB/day**.
 
 **Downsampling tiers:**
 
@@ -349,9 +355,11 @@ flowchart LR
     style HOUR fill:#e0f2fe,color:#000
 ```
 
+*Caption: Each tier trades resolution for retention and moves to cheaper storage, from 15-second samples on SSD to 1-hour rollups in object storage.*
+
 Query routing: when a query asks for 30-day trends, the query engine automatically selects the 5-minute rollup tier (much faster to read than raw 15-second samples). For recent 1-hour windows, it uses raw data.
 
-**Thanos / Cortex / VictoriaMetrics** solve the Prometheus scaling problem by sharding time-series storage horizontally and providing a global query layer that federates across shards.
+**Thanos / Cortex / VictoriaMetrics** solve the Prometheus scaling problem by [sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md) time-series storage horizontally and providing a global query layer that federates across shards.
 
 ---
 
@@ -384,6 +392,8 @@ flowchart TD
     style AM fill:#ffedd5,color:#000
     style NOTIFY fill:#dcfce7,color:#000
 ```
+
+*Caption: The evaluator only decides state; grouping, inhibition, silences, and routing all happen inside Alertmanager before any notification is sent.*
 
 **Rule evaluator lifecycle:**
 1. Load all enabled rules from PostgreSQL at startup; re-read on change events.
@@ -477,7 +487,7 @@ Honeycomb's key insight: if you store all events and use columnar storage with g
 
 ## 10. 🌐 How It's Actually Done
 
-**Datadog:** Uses a custom time-series database ("DDSketch" for quantile sketches), with Kafka for ingestion and a proprietary indexed log storage. Their agent is "dd-agent" (now the Datadog Agent, open-source). They process petabytes of data daily. Alert evaluation uses a distributed rule engine. Their "Live Tail" feature streams logs in real-time using server-sent events.
+**Datadog:** Uses a custom [time-series database](../../Level-07-Big-Data-and-Specialized/08-Specialized-Databases/README.md) (plus its "DDSketch" algorithm for quantile sketches), with Kafka for ingestion and a proprietary indexed log storage. Their agent is "dd-agent" (now the Datadog Agent, open-source). They process petabytes of data daily. Alert evaluation uses a distributed rule engine. Their "Live Tail" feature streams logs to the browser seconds after ingestion, before they are indexed.
 
 **Prometheus + Grafana + Loki (the OSS stack):**
 - **Prometheus** is the de-facto standard for metric collection (pull model, PromQL). At scale, **Thanos** or **Cortex** provide long-term storage and global federation.
@@ -509,4 +519,12 @@ The key insight: **observability data has radically different access patterns at
 
 ---
 
-*Siblings: [Distributed Message Queue](../19-Distributed-Message-Queue/README.md) · [Ad-Click Aggregator](../20-Ad-Click-Aggregator/README.md) · [Google Search](../22-Google-Search/README.md)*
+**Related:** [Distributed Message Queue](../19-Distributed-Message-Queue/README.md) · [Ad-Click Aggregator](../20-Ad-Click-Aggregator/README.md) · [Google Search](../22-Google-Search/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [33 · Content Delivery Network (CDN)](../33-Content-Delivery-Network/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [35 · Gaming Leaderboard](../35-Gaming-Leaderboard/README.md)
+
+<!-- nav:end -->

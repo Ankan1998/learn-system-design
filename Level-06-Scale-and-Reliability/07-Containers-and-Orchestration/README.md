@@ -82,7 +82,7 @@ flowchart TD
 | **Density** | ~5–20 VMs per host | 100s of containers per host |
 | **Overhead** | Hypervisor + guest OS | Near-native (5–10% max) |
 | **Security boundary** | Strong (kernel isolation) | Weaker (shared kernel) |
-| **Best for** | Multi-tenant isolation, legacy OSes | Microservices, CI/CD, high-density workloads |
+| **Best for** | [Multi-tenant](../../Level-05-Architecture-Patterns/10-Multi-Tenancy/README.md) isolation, legacy OSes | Microservices, CI/CD, high-density workloads |
 
 ### Docker: Images, Layers, and Registries
 
@@ -153,7 +153,7 @@ flowchart TD
 
 ### Key Kubernetes Concepts
 
-**Pod:** the smallest deployable unit. One or more containers that share a network namespace and storage. Usually one container per pod; sidecars (logging, service mesh proxies) are the exception.
+**Pod:** the smallest deployable unit. One or more containers that share a network namespace and storage. Usually one container per pod; sidecars (logging, [service mesh](../../Level-05-Architecture-Patterns/09-Service-Mesh/README.md) proxies) are the exception.
 
 **Deployment:** declares "I want 3 replicas of this container image running at all times." The Deployment controller ensures this is always true — it creates a ReplicaSet, which creates Pods.
 
@@ -170,21 +170,28 @@ flowchart TD
 
 ```mermaid
 sequenceDiagram
-    participant K as Controller Manager
+    participant RS as ReplicaSet controller
     participant API as API Server
-    participant N as kubelet (Node 2)
-    participant P as Pod C
+    participant S as Scheduler
+    participant N2 as kubelet (Node 2)
+    participant N3 as kubelet (Node 3)
 
-    Note over P: Pod C crashes (OOM, bug)
-    N->>API: Pod C status = Failed
-    API->>K: Actual: 2 pods, Desired: 3 pods
-    K->>API: Create new Pod E
-    API->>N: Schedule Pod E on Node 2
-    N->>P: Start Pod E
-    Note over P: Pod E running ✅
+    Note over N2: Case 1 — a container in Pod C crashes (OOM, bug)
+    N2->>N2: Restart the container in place (with backoff)
+    N2->>API: Pod C status: restart count +1, running again
+
+    Note over N2: Case 2 — Node 2 itself dies
+    Note over API: No heartbeat from Node 2, node marked NotReady, its pods evicted
+    API->>RS: Watch event: 2 ready pods, desired 3
+    RS->>API: Create Pod E
+    API->>S: Pod E has no node yet
+    S->>API: Bind Pod E to Node 3
+    API->>N3: Watch event: Pod E is assigned to you
+    N3->>N3: Pull image, start containers
+    Note over N3: Pod E running ✅
 ```
 
-*Caption: Kubernetes detects the failure within seconds via the kubelet heartbeat, then the controller loop creates a replacement. No human intervention needed.*
+*Caption: Two layers of self-healing. A crashed container is restarted in place by the kubelet. A lost pod (node failure, eviction, deletion) is replaced by the ReplicaSet controller, which sees fewer ready pods than desired, and the scheduler places the replacement on a healthy node. By default pods on a dead node are evicted after about five minutes. No human intervention needed.*
 
 ---
 
@@ -194,7 +201,7 @@ sequenceDiagram
 
 | Runtime | Notes |
 |---------|-------|
-| **Docker** | Most familiar; actually uses containerd underneath. Deprecated as K8s runtime (still fine for development). |
+| **Docker** | Most familiar; actually uses containerd underneath. No longer a direct K8s runtime since dockershim was removed in v1.24 (still fine for development). |
 | **containerd** | The industry-standard K8s runtime. Lightweight, CNCF-graduated. |
 | **CRI-O** | Lightweight alternative to containerd, designed specifically for Kubernetes. |
 
@@ -227,7 +234,7 @@ Pod A → Envoy sidecar A → (mTLS, retry, trace) → Envoy sidecar B → Pod B
 
 ### Serverless: The Other End of the Spectrum
 
-Serverless (AWS Lambda, Google Cloud Run, Azure Functions) abstracts away even the container/VM — you deploy a function, the cloud runs it on demand and charges per invocation.
+[Serverless](../../Level-05-Architecture-Patterns/08-Serverless-Architecture/README.md) (AWS Lambda, Google Cloud Run, Azure Functions) abstracts away even the container/VM — you deploy a function, the cloud runs it on demand and charges per invocation.
 
 | | Containers (K8s) | Serverless |
 |--|------------------|-----------|
@@ -243,13 +250,13 @@ Serverless (AWS Lambda, Google Cloud Run, Azure Functions) abstracts away even t
 ## 🏢 Real-World Examples
 
 ### Spotify — Kubernetes at Scale
-Spotify migrated from on-premise bare metal to GKE, running ~1 500 microservices on Kubernetes. Their infra team used Kubernetes to standardize deployments across all squads — developers no longer manage servers, just Kubernetes manifests. They use Helm charts for packaging and Argo CD for GitOps-style deployments.
+Spotify moved from Helios, its homegrown container orchestrator, to Kubernetes on GKE, where it now runs thousands of microservices. Kubernetes standardized deployments across all squads — developers ship manifests instead of managing servers — and Backstage, the developer portal Spotify built and open-sourced, became the front door to all of it.
 
 ### Airbnb — SOA on Kubernetes
-Airbnb runs a service-oriented architecture on Kubernetes. They built Ottr (their internal K8s deployment platform) and use Envoy as a service mesh for all internal service communication. Every Airbnb engineer can deploy a new service without involving the infrastructure team.
+Airbnb runs a service-oriented architecture on Kubernetes. They built internal tooling (such as kube-gen, which generates their Kubernetes configs) and use Envoy as a service mesh for all internal service communication. Every Airbnb engineer can deploy a new service without involving the infrastructure team.
 
 ### Netflix — Containers + Titus
-Netflix runs containers via their own system (Titus) built on top of Apache Mesos (earlier) and now integrated with AWS ECS/EKS. Their containers handle everything from API serving to stream encoding. Netflix open-sourced many of their reliability patterns (Hystrix, Ribbon) that Kubernetes now implements natively.
+Netflix runs containers on Titus, its own platform, originally built on Apache Mesos and later re-platformed onto Kubernetes, running on AWS EC2. Their containers handle everything from API serving to stream encoding. Netflix open-sourced many of their reliability patterns (Hystrix, Ribbon) that service meshes on Kubernetes now provide at the infrastructure layer.
 
 ### GitHub Actions / CI Pipelines
 Nearly all modern CI/CD pipelines (GitHub Actions, GitLab CI, CircleCI) run jobs inside Docker containers for isolation. Each job gets a fresh container image, ensuring "clean room" builds. This is containers solving the "it works on my machine" problem for CI.
@@ -341,5 +348,14 @@ Nearly all modern CI/CD pipelines (GitHub Actions, GitLab CI, CircleCI) run jobs
 - [The Kubernetes Book — Nigel Poulton](https://nigelpoulton.com/books/) — beginner-friendly introduction.
 - [Envoy Proxy Docs](https://www.envoyproxy.io/docs) — the sidecar underlying most service meshes.
 - [Docker Getting Started](https://docs.docker.com/get-started/) — official beginner tutorial.
-- [Google SRE Book — Chapter 7: The Evolution of Automation at Google](https://sre.google/sre-book/the-evolution-of-automation-at-google/) — context on why automation matters.
-- Previous: [06 — Multi-Region and Geo-Distribution](../06-Multi-Region-and-Geo-Distribution/README.md) · Next: [08 — Testing Distributed Systems](../08-Testing-Distributed-Systems/README.md) · Back to [Level 06 Overview](../README.md)
+- [Google SRE Book — Chapter 7: The Evolution of Automation at Google](https://sre.google/sre-book/automation-at-google/) — context on why automation matters.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Multi-Region and Geo-Distribution](../06-Multi-Region-and-Geo-Distribution/README.md) · 🏠 [Level 6 — Scale & Reliability](../README.md) · ➡️ **Next:** [Testing Distributed Systems — Load, Chaos & Canary](../08-Testing-Distributed-Systems/README.md)
+
+🧩 **See it applied in:** [39 · Distributed Coordination Service (ZooKeeper / etcd)](../../Bonus-Real-World-Architectures/39-Distributed-Coordination-Service/README.md) · [41 · Online Code Judge (LeetCode / HackerRank)](../../Bonus-Real-World-Architectures/41-Online-Code-Judge/README.md) · [09 · YouTube / Netflix](../../Bonus-Real-World-Architectures/09-YouTube-Netflix-Streaming/README.md) · [21 · Distributed Job Scheduler](../../Bonus-Real-World-Architectures/21-Distributed-Job-Scheduler/README.md) · [26 · Unique ID Generator](../../Bonus-Real-World-Architectures/26-Unique-ID-Generator/README.md)
+
+<!-- nav:end -->

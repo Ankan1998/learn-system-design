@@ -32,8 +32,8 @@ A calendar looks like the simplest CRUD app imaginable: events with a start and 
 - **Sync:** incremental changes to mobile and desktop clients, including offline edits.
 
 ### Non-Functional
-- 500M monthly users; **read-heavy** (~50 views per write).
-- View load **p99 < 200 ms**; free/busy for 10 people **< 300 ms**.
+- 500M monthly users; **read-heavy** (~5 views per write).
+- View load **[p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) < 200 ms**; free/busy for 10 people **< 300 ms**.
 - Reminders delivered within **±30 s** of the scheduled instant — including across DST transitions.
 - A user's own edits are **strongly consistent**; guests' views converge within seconds.
 - Durable: an accepted meeting is never lost. **99.99%** availability.
@@ -63,7 +63,7 @@ A calendar looks like the simplest CRUD app imaginable: events with a start and 
 
 ```
 POST  /calendars/{cal}/events
-      { title, start: {dateTime, timeZone}, end: {...}, recurrence: ["RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20260630"],
+      { title, start: {dateTime, timeZone}, end: {...}, recurrence: ["RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20260630T235959Z"],
         attendees: [{email, optional}], reminders: [{method, minutes}] }
 PATCH /events/{id}?scope=this|following|all      # recurring edit scope
 DELETE /events/{id}?scope=...
@@ -148,6 +148,8 @@ erDiagram
     EVENT ||--o{ REMINDER : "schedules"
 ```
 
+*Caption: Notice that an event stores wall-clock time plus an IANA zone with UTC derived, and recurring series are one row plus per-instance exception rows.*
+
 **Storage choices:**
 - A **relational store sharded by `calendar_id`** (Spanner, CockroachDB, or sharded PostgreSQL). A user's views are single-shard; invitations are the cross-shard case (Deep Dive 7.2).
 - Indexes: `(calendar_id, start_utc)` for single events; `(calendar_id, recurrence_end_utc)` so recurring rules that could produce instances in a window are found without scanning every rule ever created.
@@ -192,6 +194,8 @@ flowchart LR
     style K fill:#e5e7eb,color:#000
 ```
 
+*Caption: The calendar service writes the event once and publishes a change; invitations, reminders, sync, and free/busy all react asynchronously from the event bus.*
+
 **Walk-through — creating "Team sync, weekly, Tuesdays 9:00 New York, 5 guests, remind 10 min before":**
 1. The client sends the event with `start_local = 09:00`, `tz = America/New_York`, and the RRULE. The calendar service checks the user's write permission, stores **one row** plus five attendee rows, computes `start_utc` for the first instance and `recurrence_end_utc`, and publishes `EventCreated`.
 2. The **invitation service** consumes it: for guests on the same provider it writes a lightweight reference on each guest's calendar shard; for external guests it sends an iCalendar invitation email.
@@ -232,6 +236,8 @@ flowchart LR
     style Z fill:#fde68a,color:#000
     style V fill:#bbf7d0,color:#000
 ```
+
+*Caption: The same 09:00 New York rule maps to different UTC instants before and after the March 8 DST change, so Tokyo viewers see 23:00 then 22:00.*
 
 ### 7.2 Invitations across users
 
@@ -284,9 +290,11 @@ flowchart LR
     style SEND fill:#bbf7d0,color:#000
 ```
 
+*Caption: Only the next instance's reminder exists at any time; each fire loops back to materialize the following one into its minute bucket.*
+
 ### 7.5 Sync and offline edits
 
-Every calendar has a **monotonic change sequence**. A client holds a **sync token** (the last sequence it saw) and asks for everything after it; deletions appear as **tombstones** in the change log so a client can remove them. Servers push a lightweight "something changed" signal (WebSocket or mobile push) so clients sync promptly instead of polling. A token older than the log's retention forces a full resync.
+Every calendar has a **monotonic change sequence**. A client holds a **sync token** (the last sequence it saw) and asks for everything after it; deletions appear as **tombstones** in the change log so a client can remove them. Servers push a lightweight "something changed" signal ([WebSocket](../../Level-03-Communication/06-WebSockets-and-Realtime/README.md) or mobile push) so clients sync promptly instead of polling. A token older than the log's retention forces a full resync.
 
 Offline edits are sent with the event **version** the client last saw. If the server's version matches, the edit applies; if not, the server merges **field-by-field** where the fields don't overlap (client changed the title, someone else changed the room) and returns a conflict for the same-field case, which the client resolves by re-applying on the latest version. Titles, times, and attendee lists are treated as separate fields so that most real conflicts merge cleanly.
 
@@ -301,7 +309,7 @@ Offline edits are sent with the event **version** the client last saw. If the se
 | Bottleneck / failure | Symptom | Mitigation |
 |----------------------|---------|------------|
 | Reminder burst at :00 | Minute-long backlog, late pings | Pre-fetch and smooth sends; scale workers by bucket size; prioritize by offset |
-| Hot shared calendar (company holidays, 2M viewers) | One shard's reads saturate | Cache expanded windows; read replicas; treat as immutable and CDN-cache the JSON |
+| Hot shared calendar (company holidays, 2M viewers) | One shard's reads saturate | Cache expanded windows; [read replicas](../../Level-02-Data-Layer/01-Database-Replication/README.md); treat as immutable and CDN-cache the JSON |
 | All-hands invite to 20,000 guests | Fan-out storm on one write | Asynchronous, rate-limited fan-out; guests see the invite within seconds, not in the same request |
 | Free/busy for very large groups | Merge of hundreds of lists | Attendance-ranked slots; cap attendees per query; cached busy lists |
 | Recurring rule with no end and a small interval | Expansion explodes | Window-bounded expansion; instance caps per request |
@@ -329,7 +337,7 @@ Offline edits are sent with the event **version** the client last saw. If the se
 
 ## 10. 🌐 How It's Actually Done
 
-**Google Calendar API:** the public API is a faithful reflection of this design — events carry `start.dateTime` with `start.timeZone`, recurrence is an RRULE array, `instances` expands a series inside a window, `freebusy` returns busy intervals only, and `syncToken` drives incremental sync with tombstones for deletions. Google has described migrating Calendar's storage to Spanner for cross-region consistency.
+**Google Calendar API:** the public API is a faithful reflection of this design — events carry `start.dateTime` with `start.timeZone`, recurrence is an RRULE array, `instances` expands a series inside a window, `freebusy` returns busy intervals only, and `syncToken` drives incremental sync with tombstones for deletions.
 
 **The iCalendar standards (RFC 5545 / iTIP / iMIP) and CalDAV:** the shared language of the whole industry. RRULE semantics, exception handling via `EXDATE` and `RECURRENCE-ID`, and invitation `REQUEST`/`REPLY` messages are all standardized, which is why calendars from different vendors interoperate at all.
 
@@ -359,4 +367,12 @@ The 30-second whiteboard pitch: a calendar is easy until recurrence, guests, rem
 
 ---
 
-[← Back to all real-world architectures](../README.md) · Related: [Notification Service](../04-Notification-Service/README.md) · [Google Drive / Dropbox (sync)](../14-Google-Drive-Dropbox/README.md) · [Clocks & Event Ordering](../../Level-04-Distributed-Systems/06-Clocks-and-Ordering/README.md)
+**Related:** [Notification Service](../04-Notification-Service/README.md) · [Google Drive / Dropbox (sync)](../14-Google-Drive-Dropbox/README.md) · [Clocks & Event Ordering](../../Level-04-Distributed-Systems/06-Clocks-and-Ordering/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [42 · Social Graph Store (Facebook TAO)](../42-Social-Graph-Store/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [44 · Identity & Access Management Service (Auth0 / Okta)](../44-Identity-and-Access-Service/README.md)
+
+<!-- nav:end -->

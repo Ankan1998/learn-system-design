@@ -60,6 +60,8 @@ sequenceDiagram
     S-->>C: [{msg: "Hello!"}]
 ```
 
+*Caption: Notice that most polls come back empty, and a new message can wait up to a full polling interval before the client sees it.*
+
 - Simple to implement — just `setInterval(() => fetch('/messages'), 5000)`
 - Wasted requests (99% return empty)
 - Up to 5s delay for new messages
@@ -76,6 +78,8 @@ sequenceDiagram
     S-->>C: [{msg: "Hello!"}]
     C->>S: GET /messages?wait=30s (immediately reconnects)
 ```
+
+*Caption: The server holds the request open until a message arrives, answers at once, and the client immediately opens the next waiting request.*
 
 - Lower latency than polling
 - Server must hold many open connections (expensive on threads-per-connection servers)
@@ -126,8 +130,10 @@ sequenceDiagram
     Note over C,S: Either side can send at any time
 ```
 
+*Caption: One HTTP request upgrades the connection, and after the 101 response the same TCP connection carries messages in both directions for as long as it stays open.*
+
 - **Both sides can send at any time** without the other initiating
-- Binary or text frames (JSON, MessagePack, Protobuf)
+- Binary or text frames (JSON, MessagePack, [Protobuf](../09-Data-Serialization-and-Schema-Evolution/README.md))
 - Latency: typically 5–50 ms (only the message, no HTTP overhead after handshake)
 - URL scheme: `ws://` (plain) or `wss://` (TLS)
 
@@ -182,6 +188,8 @@ graph TD
     style R fill:#fde8d8,color:#000
 ```
 
+*Caption: Users A and B sit on different servers, so the Redis backplane is the only path a message can take between them.*
+
 **Sticky sessions** (IP hash or cookie) route the same user to the same server.
 **Redis Pub/Sub backplane** lets servers broadcast messages to each other: when Server 1 receives a message for User B, it publishes to Redis; Server 2 is subscribed and pushes to User B.
 
@@ -189,7 +197,7 @@ Real-world pattern used by **Socket.IO** (the `socket.io-redis` adapter), **Phoe
 
 ### Connection Limits
 
-A single server can hold ~10,000–100,000 concurrent WebSocket connections (depends on memory and OS file descriptor limits). Node.js / Elixir handle this well (async/event-loop); Java/Go with goroutines also scale well.
+A single server can hold ~10,000–100,000 concurrent WebSocket connections (depends on memory and OS file descriptor limits). Node.js / Elixir handle this well (async/event-loop); Java (NIO) and Go ([goroutines](../../Level-01-Building-Blocks/08-Concurrency-and-Async-IO/README.md)) also scale well.
 
 ---
 
@@ -199,11 +207,11 @@ A single server can hold ~10,000–100,000 concurrent WebSocket connections (dep
 
 **Discord** — WebSockets for chat, voice signaling, and guild member lists. Uses Gateway bots (WebSocket-based) for third-party integrations.
 
-**Figma** — WebSockets for collaborative design editing. Real-time cursor positions and edits flow through a WebSocket connection with operational transforms applied.
+**Figma** — WebSockets for collaborative design editing. Real-time cursor positions and edits flow through a WebSocket connection, merged by a server-authoritative, CRDT-inspired scheme (Figma deliberately avoided operational transforms).
 
 **Robinhood / Interactive Brokers** — WebSockets for real-time stock price quotes and order status updates.
 
-**Google Docs** — Uses a combination of SSE (server → client) and XHR (client → server) internally; WebSockets for the operational transform engine.
+**Google Docs** — A reminder that WebSockets are optional: its collaboration channel has long run over plain HTTP, with a long-lived streaming response for server → client and ordinary XHR posts for client → server. That combination passes through corporate proxies that break WebSockets.
 
 ---
 
@@ -253,7 +261,7 @@ A single server can hold ~10,000–100,000 concurrent WebSocket connections (dep
 4. **Sending too much data** — WebSocket ≠ license to stream megabytes; send only diffs (delta updates)
 5. **Authentication on upgrade** — validate auth tokens at the handshake; don't rely on cookies for WS connections in APIs
 6. **No rate limiting on WS messages** — a malicious client can flood the server with messages; rate-limit at the message level too
-7. **Browser limits** — browsers limit to ~6 WebSocket connections per origin; design to share one connection per tab
+7. **Browser limits** — browsers cap total WebSocket connections (e.g., ~255 in Chrome) and SSE over HTTP/1.1 shares the ~6-connections-per-origin limit; design to share one connection per tab
 
 ---
 
@@ -296,4 +304,13 @@ A single server can hold ~10,000–100,000 concurrent WebSocket connections (dep
 - [Server-Sent Events — MDN](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events)
 - [Socket.IO Scaling with Redis Adapter](https://socket.io/docs/v4/redis-adapter/)
 - [How Discord Scaled to Millions](https://discord.com/blog/how-discord-scaled-elixir-to-5-000-000-concurrent-users)
-- Previous: [05-Pub-Sub](../05-Pub-Sub/README.md) · Next: [07-Rate-Limiting](../07-Rate-Limiting/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Pub/Sub (Publish/Subscribe)](../05-Pub-Sub/README.md) · 🏠 [Level 3 — Communication](../README.md) · ➡️ **Next:** [Rate Limiting](../07-Rate-Limiting/README.md)
+
+🧩 **See it applied in:** [11 · Uber Ride-Sharing](../../Bonus-Real-World-Architectures/11-Uber-Ride-Sharing/README.md) · [25 · Live Streaming (Twitch / YouTube Live)](../../Bonus-Real-World-Architectures/25-Live-Streaming/README.md) · [28 · Google Docs Collaborative Editing](../../Bonus-Real-World-Architectures/28-Google-Docs-Collaborative-Editing/README.md) · [29 · Nearby Friends / Proximity](../../Bonus-Real-World-Architectures/29-Nearby-Friends-Proximity/README.md) · [30 · Video Conferencing (Zoom / Google Meet)](../../Bonus-Real-World-Architectures/30-Video-Conferencing/README.md) · [38 · LLM Chat Service (ChatGPT)](../../Bonus-Real-World-Architectures/38-LLM-Chat-Service/README.md) · [08 · WhatsApp](../../Bonus-Real-World-Architectures/08-WhatsApp-Chat/README.md) · [35 · Gaming Leaderboard](../../Bonus-Real-World-Architectures/35-Gaming-Leaderboard/README.md) · …and 2 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

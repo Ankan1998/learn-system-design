@@ -70,7 +70,7 @@ The hazard is the **hot tenant** — one customer that is 30% of all traffic. Sh
 
 Isolation of *data* is not isolation of *performance*. Controls, from cheapest to strongest:
 
-1. **Per-tenant rate limits and quotas** at the API gateway — requests per second, rows per export, concurrent jobs.
+1. **Per-tenant rate limits and quotas** at the [API gateway](../05-API-Gateway/README.md) — requests per second, rows per export, concurrent jobs.
 2. **Fair scheduling in async work** — weighted fair queuing so 1,000 jobs from one tenant don't starve one job from another. A common implementation: one queue per tenant, round-robin across queues.
 3. **Bulkheads** — separate worker pools, connection pools, or even clusters per tier (free / pro / enterprise), so a flood in one can't drain another.
 4. **Shuffle sharding** — assign each tenant to a random small subset of nodes (say 2 out of 8). Two tenants share *both* nodes only rarely, so a badly behaving tenant takes down its own pair and a tiny fraction of others, not the whole fleet. With 8 nodes choose 2 there are 28 distinct pairs; with 100 nodes choose 5 there are 75 million.
@@ -80,7 +80,7 @@ Isolation of *data* is not isolation of *performance*. Controls, from cheapest t
 
 - **Encryption:** a data-encryption key per tenant (envelope-encrypted under a master key) enables *crypto-shredding* — delete the tenant's key and their data is unrecoverable everywhere at once, including backups. See [Data Privacy & Encryption](../../Level-06-Scale-and-Reliability/09-Data-Privacy-and-Encryption/README.md).
 - **Data residency:** a tenant's home region is a property in the control plane; their shard, backups, and queues are pinned there.
-- **Observability:** `tenant_id` as a log field and trace attribute is essential; as a *metrics label* it can explode cardinality — aggregate to tier, or track only the top N tenants.
+- **[Observability](../../Level-06-Scale-and-Reliability/01-Observability/README.md):** `tenant_id` as a log field and trace attribute is essential; as a *metrics label* it can explode cardinality — aggregate to tier, or track only the top N tenants.
 - **Backups and restores:** "restore one customer's data to yesterday" is trivial in silo, possible in bridge, and a real engineering project in pool (logical export by `tenant_id`).
 - **Feature flags and configuration:** per-tenant settings live in a **control plane** that provisions tenants, stores their tier/region/flags, and is queried by the **data plane** that serves requests.
 
@@ -200,7 +200,7 @@ flowchart TD
 | Concern | Pool approach | Bridge approach | Silo approach |
 |---------|---------------|-----------------|---------------|
 | **Data isolation** | `tenant_id` column + RLS | Separate DB / schema per tenant | Separate everything |
-| **Schema migrations** | Run once | Run N times (orchestrated, can take hours across thousands of DBs) | Run N times |
+| **[Schema migrations](../../Level-02-Data-Layer/11-Schema-Migrations/README.md)** | Run once | Run N times (orchestrated, can take hours across thousands of DBs) | Run N times |
 | **Connection pooling** | One pool | One pool per DB — watch total connections | Per stack |
 | **Backup / restore one tenant** | Logical export by ID | Restore one DB | Restore one stack |
 | **Per-tenant customization** | Config rows, feature flags | Config + optional schema differences | Anything, including code version |
@@ -313,5 +313,14 @@ Stripe treats every account as a tenant boundary enforced at the API key layer, 
 - [The Force.com Multitenant Architecture (Salesforce whitepaper)](https://developer.salesforce.com/wiki/multi_tenant_architecture) — the metadata-driven pool model.
 - [Scaling Datastores at Slack with Vitess](https://slack.engineering/scaling-datastores-at-slack-with-vitess/) — tenant sharding and resharding at scale.
 - [PostgreSQL Row Security Policies](https://www.postgresql.org/docs/current/ddl-rowsecurity.html) — the official docs for RLS.
-- Previous: [09 — Service Mesh](../09-Service-Mesh/README.md) · Next Level: [Level 06 — Scale & Reliability](../../Level-06-Scale-and-Reliability/README.md) · Back to [Level 05 Overview](../README.md)
 - See also: [Sharding & Partitioning](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md) · [Resilience Patterns](../06-Resilience-Patterns/README.md) · [Multi-Region & Geo-Distribution](../../Level-06-Scale-and-Reliability/06-Multi-Region-and-Geo-Distribution/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Service Mesh](../09-Service-Mesh/README.md) · 🏠 [Level 5 — Architecture Patterns](../README.md) · ➡️ **Next:** [Level 6 — Scale & Reliability](../../Level-06-Scale-and-Reliability/README.md)
+
+🧩 **See it applied in:** [44 · Identity & Access Management Service (Auth0 / Okta)](../../Bonus-Real-World-Architectures/44-Identity-and-Access-Service/README.md) · [31 · E-Commerce Platform (Amazon)](../../Bonus-Real-World-Architectures/31-E-Commerce-Platform/README.md) · [33 · Content Delivery Network (CDN)](../../Bonus-Real-World-Architectures/33-Content-Delivery-Network/README.md) · [36 · Webhook Delivery Service](../../Bonus-Real-World-Architectures/36-Webhook-Delivery-Service/README.md) · [41 · Online Code Judge (LeetCode / HackerRank)](../../Bonus-Real-World-Architectures/41-Online-Code-Judge/README.md)
+
+<!-- nav:end -->

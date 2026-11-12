@@ -70,6 +70,8 @@ graph TD
     style S5 fill:#fff3cd,color:#000
 ```
 
+*Caption: Notice that the Order Service publishes one event to a single topic, and every subscriber receives its own copy without the publisher knowing any of them.*
+
 ### Event Flow with a Broker
 
 ```mermaid
@@ -91,6 +93,8 @@ sequenceDiagram
     Sub2->>Sub2: send confirmation email
     Sub2-->>Broker: ACK
 ```
+
+*Caption: The broker acknowledges the publisher once the event is stored, then each subscriber receives and acknowledges it independently of the others.*
 
 ---
 
@@ -119,9 +123,9 @@ Kafka deserves special mention because it blurs the line between queue and pub/s
 | Ordering | Per-topic (sometimes) | Per-partition (strict) |
 | Scale | Millions of topics | Millions of messages/sec per topic |
 | Consumer groups | One copy per subscriber | Multiple groups; each group reads independently |
-| Use case | Notification fan-out | Stream processing, event sourcing, audit logs |
+| Use case | Notification fan-out | Stream processing, [event sourcing](../../Level-05-Architecture-Patterns/03-CQRS-and-Event-Sourcing/README.md), audit logs |
 
-Kafka is covered in depth at [Level-07 Stream Processing](../../Level-07-Big-Data-and-Specialized/02-Stream-Processing/README.md).
+Kafka is covered in depth at [Level 7 Stream Processing](../../Level-07-Big-Data-and-Specialized/02-Stream-Processing/README.md).
 
 ---
 
@@ -131,7 +135,7 @@ Kafka is covered in depth at [Level-07 Stream Processing](../../Level-07-Big-Dat
 |----------|------|-----------|---------|
 | **Apache Kafka** | Distributed log | ✅ Persistent | High-throughput streams, replay, event sourcing |
 | **Google Pub/Sub** | Managed pub/sub | ✅ Persistent | GCP workloads, push + pull, global scale |
-| **AWS SNS** | Managed fan-out | ❌ Fire-and-forget | Fan-out to SQS queues, Lambda, HTTP |
+| **AWS SNS** | Managed fan-out | ⚠️ No replay — retries delivery, then drops or dead-letters | Fan-out to SQS queues, Lambda, HTTP |
 | **AWS SNS + SQS** | Fan-out + queue | ✅ Via SQS | Fan-out with per-subscriber durability |
 | **Redis Pub/Sub** | In-memory | ❌ None | Real-time notifications, chat (not critical data) |
 | **NATS** | Lightweight broker | Optional (JetStream) | Low-latency IoT, cloud-native |
@@ -157,11 +161,13 @@ graph TD
     style Q3 fill:#fff3cd,color:#000
 ```
 
+*Caption: SNS copies each event into one queue per subscriber, so a slow or failing service falls behind on its own queue without affecting the others.*
+
 ---
 
 ## 🏢 Real-World Examples
 
-**LinkedIn** — Kafka was built at LinkedIn in 2011 to handle the activity stream (profile views, connection requests, messages). Now processes trillions of messages per day.
+**LinkedIn** — Kafka was built at LinkedIn (open-sourced in 2011) to handle the activity stream (profile views, connection requests, messages). Now processes trillions of messages per day.
 
 **Netflix** — Uses Kafka to fan out play events, viewing history, and recommendation triggers to 30+ downstream services.
 
@@ -206,10 +212,10 @@ graph TD
 
 1. **Redis Pub/Sub for critical events** — Redis Pub/Sub has no persistence; if a subscriber is down when the event fires, it's gone. Use Kafka or Google Pub/Sub for durability.
 2. **No subscriber isolation** — slow subscribers shouldn't slow down others; each subscriber should have its own queue/offset
-3. **Schema-less events** — as the event system grows, add a schema registry (Confluent Schema Registry for Kafka); breaking changes in event shape break all subscribers silently
-4. **Thundering herd** — a single high-traffic event triggers 20 subscribers simultaneously, all hammering the same database; use rate limiting at the subscriber level
+3. **Schema-less events** — as the event system grows, add a [schema registry](../09-Data-Serialization-and-Schema-Evolution/README.md) (Confluent Schema Registry for Kafka); breaking changes in event shape break all subscribers silently
+4. **Thundering herd** — a single high-traffic event triggers 20 subscribers simultaneously, all hammering the same database; use [rate limiting](../07-Rate-Limiting/README.md) at the subscriber level
 5. **Runaway consumer lag** — monitor consumer group lag in Kafka; a lagging consumer may eventually OOM trying to catch up
-6. **Not idempotent subscribers** — at-least-once delivery applies here too; subscribers must handle duplicate events
+6. **Not [idempotent](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md) subscribers** — at-least-once delivery applies here too; subscribers must handle duplicate events
 
 ---
 
@@ -250,6 +256,15 @@ graph TD
 - [Apache Kafka Documentation](https://kafka.apache.org/documentation/)
 - [Google Cloud Pub/Sub Overview](https://cloud.google.com/pubsub/docs/overview)
 - [AWS SNS + SQS Fan-Out Pattern](https://docs.aws.amazon.com/sns/latest/dg/sns-sqs-as-subscriber.html)
-- [The Log — Jay Kreps (LinkedIn)](https://engineering.linkedin.com/distributed-systems/log-what-every-software-engineer-should-know-about-real-time-datas-unifying)
-- [Kafka Deep Dive → Level-07](../../Level-07-Big-Data-and-Specialized/02-Stream-Processing/README.md)
-- Previous: [04-Message-Queues](../04-Message-Queues/README.md) · Next: [06-WebSockets-and-Realtime](../06-WebSockets-and-Realtime/README.md)
+- [The Log — Jay Kreps (LinkedIn)](https://www.linkedin.com/blog/engineering/distributed-systems/log-what-every-software-engineer-should-know-about-real-time-datas-unifying)
+- [Kafka Deep Dive → Level 7](../../Level-07-Big-Data-and-Specialized/02-Stream-Processing/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Message Queues](../04-Message-Queues/README.md) · 🏠 [Level 3 — Communication](../README.md) · ➡️ **Next:** [WebSockets and Real-Time Communication](../06-WebSockets-and-Realtime/README.md)
+
+🧩 **See it applied in:** [06 · Twitter/X News Feed](../../Bonus-Real-World-Architectures/06-News-Feed-Twitter/README.md) · [25 · Live Streaming (Twitch / YouTube Live)](../../Bonus-Real-World-Architectures/25-Live-Streaming/README.md) · [29 · Nearby Friends / Proximity](../../Bonus-Real-World-Architectures/29-Nearby-Friends-Proximity/README.md)
+
+<!-- nav:end -->

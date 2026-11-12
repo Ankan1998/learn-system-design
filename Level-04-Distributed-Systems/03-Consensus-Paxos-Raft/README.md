@@ -31,7 +31,7 @@ The committee's rules:
 2. Once passed, the resolution **cannot be undone**
 3. A new chairperson (leader) can be elected if the current one leaves — but only if a majority elect them
 
-This is essentially Raft's leader election and log replication. The majority rule (quorum) is the key insight: any two majorities overlap in at least one member, which prevents two conflicting decisions from both being "approved."
+This is essentially Raft's [leader election](../05-Leader-Election/README.md) and log replication. The majority rule (quorum) is the key insight: any two majorities overlap in at least one member, which prevents two conflicting decisions from both being "approved."
 
 ---
 
@@ -101,6 +101,8 @@ flowchart TD
     style C fill:#eff6ff,stroke:#3b82f6,color:#000
 ```
 
+*Caption: The leader can answer the client after 3 of 5 nodes hold the entry, so the lagging Node 5 does not block the commit.*
+
 ### Raft Leader Election
 
 ```mermaid
@@ -118,7 +120,7 @@ sequenceDiagram
     N1->>N4: RequestVote(term=4, lastLogIndex, lastLogTerm)
     N1->>N5: RequestVote(term=4, lastLogIndex, lastLogTerm)
 
-    N2-->>N1: VoteGranted (N2 hasn't seen term 4 yet, log is ≥ N1)
+    N2-->>N1: VoteGranted (N2 hasn't voted in term 4, N1's log is at least as up-to-date)
     N3-->>N1: VoteGranted
     N4-->>N1: VoteGranted
 
@@ -132,6 +134,8 @@ sequenceDiagram
 
     Note over N2,N5: All followers update term, reset election timers
 ```
+
+*Caption: Notice that N1 becomes leader as soon as it holds a majority of votes, then immediately sends heartbeats so other nodes do not start competing elections.*
 
 **Election rules:**
 - Each node starts as a **Follower**, with an election timeout (randomized 150–300ms)
@@ -169,6 +173,8 @@ sequenceDiagram
     F2->>F2: Apply x=10 to state machine
 ```
 
+*Caption: The leader acknowledges the client once a majority has appended the entry, and followers only apply it after learning the new commit index.*
+
 **Commit rule:** An entry is committed only when stored on a majority of nodes. Once committed, it's permanent.
 
 ### Raft Safety Guarantee
@@ -201,6 +207,8 @@ timeline
     Term 4 : Node C wins election
              : Stable operation resumes
 ```
+
+*Caption: Every election starts a new term, a term has at most one leader, and a term in which nobody wins a majority simply ends and is followed by another.*
 
 ### Raft Membership Changes
 
@@ -254,16 +262,16 @@ For a replicated log (which is what you actually need for a database), you run P
 ## 🏢 Real-World Examples
 
 ### etcd (Raft)
-etcd is a distributed key-value store used as Kubernetes' primary data store. It implements Raft directly and is used for leader election, service discovery, and configuration storage across the entire Kubernetes control plane. Every `kubectl` command touching cluster state goes through etcd consensus.
+etcd is a distributed key-value store used as [Kubernetes](../../Level-06-Scale-and-Reliability/07-Containers-and-Orchestration/README.md)' primary data store. It implements Raft directly and is used for leader election, service discovery, and configuration storage across the entire Kubernetes control plane. Every `kubectl` command touching cluster state goes through etcd consensus.
 
 ### CockroachDB (Raft)
-CockroachDB runs a separate Raft group per range (contiguous span of key space, default 64MB). Each Raft group independently elects leaders and replicates that range's data. A 3-node CockroachDB cluster might run hundreds of Raft groups simultaneously.
+CockroachDB runs a separate Raft group per range (contiguous span of key space, default 512MB in current versions, 64MB in older ones). Each Raft group independently elects leaders and replicates that range's data. A 3-node CockroachDB cluster might run hundreds of Raft groups simultaneously.
 
 ### Apache ZooKeeper (ZAB — Zookeeper Atomic Broadcast)
-ZooKeeper uses ZAB, not Raft or Paxos, but ZAB achieves the same goals. ZooKeeper is used for leader election in Kafka, HBase, and many other systems. Unlike etcd/Raft, ZAB distinguishes between "recovery mode" and "broadcast mode."
+ZooKeeper uses ZAB, not Raft or Paxos, but ZAB achieves the same goals. ZooKeeper is used for leader election in HBase and many other systems, and was used by Kafka until KRaft replaced it (ZooKeeper support was removed in Kafka 4.0). Unlike etcd/Raft, ZAB distinguishes between "recovery mode" and "broadcast mode."
 
 ### Consul (Raft)
-HashiCorp's Consul uses Raft for its consensus and is commonly used for service mesh coordination and distributed locking. The Consul leader handles all writes; followers forward writes to the leader.
+HashiCorp's Consul uses Raft for its consensus and is commonly used for [service mesh](../../Level-05-Architecture-Patterns/09-Service-Mesh/README.md) coordination and distributed locking. The Consul leader handles all writes; followers forward writes to the leader.
 
 ### Google Chubby / Bigtable (Paxos)
 Google's Chubby lock service (described in a 2006 paper) uses Paxos internally. Chubby underpins Bigtable and many other Google systems. The Chubby paper is a great case study in how to build a practical lock service on top of consensus.
@@ -296,7 +304,7 @@ Google's Chubby lock service (described in a 2006 paper) uses Paxos internally. 
 ## ✅ When to Use / ❌ When NOT to Use
 
 ### Use Consensus When:
-- You need a single source of truth: leader election, distributed locks, configuration
+- You need a single source of truth: leader election, [distributed locks](../08-Distributed-Locking/README.md), configuration
 - You're building a replicated state machine (database, coordination service)
 - You need linearizable reads and writes
 
@@ -372,3 +380,13 @@ Google's Chubby lock service (described in a 2006 paper) uses Paxos internally. 
 - **Chubby (2006):** "The Chubby Lock Service for Loosely-Coupled Distributed Systems" — Google — practical consensus in production
 - **ZooKeeper (2010):** "ZooKeeper: Wait-free Coordination for Internet-scale Systems" — USENIX ATC
 - **CockroachDB blog:** "How CockroachDB Does Distributed Atomic Transactions" — explains per-range Raft groups
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Consistency Models](../02-Consistency-Models/README.md) · 🏠 [Level 4 — Distributed Systems](../README.md) · ➡️ **Next:** [Distributed Transactions](../04-Distributed-Transactions/README.md)
+
+🧩 **See it applied in:** [24 · Stock Exchange](../../Bonus-Real-World-Architectures/24-Stock-Exchange/README.md) · [39 · Distributed Coordination Service (ZooKeeper / etcd)](../../Bonus-Real-World-Architectures/39-Distributed-Coordination-Service/README.md) · [46 · Distributed SQL Database (Spanner / CockroachDB)](../../Bonus-Real-World-Architectures/46-Distributed-SQL-Database/README.md) · [19 · Distributed Message Queue](../../Bonus-Real-World-Architectures/19-Distributed-Message-Queue/README.md) · [37 · Distributed File System (GFS / HDFS)](../../Bonus-Real-World-Architectures/37-Distributed-File-System/README.md)
+
+<!-- nav:end -->

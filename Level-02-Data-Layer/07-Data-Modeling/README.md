@@ -8,7 +8,7 @@
 
 ## 🎯 The Problem
 
-You're building an e-commerce platform. You need to store customers, orders, order items, and products. A junior developer creates five normalized tables with perfect foreign keys. The main page query to show a customer's order history requires joining five tables — and it takes 2 seconds. A senior developer at a company using Cassandra creates a single denormalized table per query pattern and serves the same data in 2 milliseconds.
+You're building an e-commerce platform. You need to store customers, orders, order items, and products. A junior developer creates four normalized tables with perfect foreign keys. The main page query to show a customer's order history requires joining all four — and it takes 2 seconds. A senior developer at a company using Cassandra creates a single denormalized table per query pattern and serves the same data in 2 milliseconds.
 
 Both schemas store the same data. The difference is entirely in how the data is modeled for the access pattern.
 
@@ -157,8 +157,8 @@ If this order history query runs 10 000 times/second and joins are too slow, you
 order_history (denormalized, optimized for read)
 --------------------------------------------------
 customer_id | order_id | placed_at | product_name | quantity | unit_price | total_amount
-42          | 1001     | 2024-01-15| iPhone 15    | 1        | 999.00     | 999.00
-42          | 1001     | 2024-01-15| AirPods      | 2        | 199.00     | 999.00
+42          | 1001     | 2024-01-15| iPhone 15    | 1        | 999.00     | 1397.00
+42          | 1001     | 2024-01-15| AirPods      | 2        | 199.00     | 1397.00
 ```
 
 Now the query is `SELECT * FROM order_history WHERE customer_id = 42 ORDER BY placed_at DESC LIMIT 20` — a single table, single index, no joins. But if a product's name changes, you must update every row in `order_history` that references it.
@@ -277,7 +277,7 @@ flowchart LR
 ## 🏢 Real-World Examples
 
 - **Amazon (DynamoDB — single-table design):** many Amazon services use a single DynamoDB table where different entity types coexist, differentiated by their partition key prefix (`USER#42`, `ORDER#1001`). This is the extreme of access-pattern-driven modeling.
-- **Twitter (Cassandra):** the timeline feature is a classic denormalized model. When you follow someone, their tweets are *pre-written* into your personal timeline partition. Reading your feed is a single Cassandra partition read — instant. Writing a tweet causes fan-out writes to all followers' timelines.
+- **Twitter (Redis):** the timeline feature is a classic denormalized model. When you follow someone, their tweets are *pre-written* into your personal timeline partition. Reading your feed is a single in-memory Redis list read — instant. Writing a tweet causes fan-out writes to all followers' timelines.
 - **Shopify (MySQL with Rails):** uses well-normalized SQL with ActiveRecord. Shopify has heavily invested in indexing and query optimization to make normalized SQL scale to millions of merchants.
 - **MongoDB Atlas (document model):** e-commerce product catalogs benefit from embedding variant attributes (color, size) directly in the product document — each product has a flexible schema without needing joins.
 
@@ -361,7 +361,16 @@ flowchart LR
 
 - **DDIA Chapter 2** — Data Models and Query Languages (relational, document, graph).
 - [The DynamoDB Book](https://www.dynamodbbook.com/) — Alex DeBrie's guide to single-table design.
-- [Cassandra Data Modeling](https://cassandra.apache.org/doc/latest/cassandra/data_modeling/intro.html) — official access-pattern-first guide.
+- [Cassandra Data Modeling](https://cassandra.apache.org/doc/latest/cassandra/developing/data-modeling/intro.html) — official access-pattern-first guide.
 - [MongoDB Data Modeling](https://www.mongodb.com/docs/manual/core/data-modeling-introduction/)
 - [Use The Index, Luke — Data Structures](https://use-the-index-luke.com/sql/anatomy) — SQL schema design for performance.
-- Previous: [06 — Connection Pooling](../06-Connection-Pooling/README.md) · Back to [Level 02 Overview](../README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Connection Pooling](../06-Connection-Pooling/README.md) · 🏠 [Level 2 — The Data Layer](../README.md) · ➡️ **Next:** [Consistent Hashing](../08-Consistent-Hashing/README.md)
+
+🧩 **See it applied in:** [43 · Calendar & Scheduling System (Google Calendar)](../../Bonus-Real-World-Architectures/43-Calendar-and-Scheduling/README.md)
+
+<!-- nav:end -->

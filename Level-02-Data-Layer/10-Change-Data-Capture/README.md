@@ -134,7 +134,7 @@ flowchart TD
 ```
 - **Offsets = resumability.** The connector durably records its log position (binlog file+offset / Postgres LSN). Crash, restart, and it resumes exactly where it left off — the stenographer's transcript has page numbers.
 - **Ordering.** Events for a given row are emitted in commit order, and Kafka preserves order **per partition**. Rule of thumb: partition by primary key, so all events for row 42 are strictly ordered. *Global* cross-table order is not guaranteed — design consumers accordingly.
-- **At-least-once delivery.** After a crash, the connector may re-emit a few events it had already published (it replays from the last committed offset). Duplicates are possible; loss is not. Consumers must be **idempotent**: upserts keyed by primary key, versioned writes ("apply only if event version > stored version"), or dedup on a unique event ID. An upsert applied twice is a no-op — that's the whole trick.
+- **At-least-once delivery.** After a crash, the connector may re-emit a few events it had already published (it replays from the last committed offset). Duplicates are possible; loss is not. Consumers must be **[idempotent](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md)**: upserts keyed by primary key, versioned writes ("apply only if event version > stored version"), or dedup on a unique event ID. An upsert applied twice is a no-op — that's the whole trick.
 
 ### ⚠️ One trap worth its own paragraph
 
@@ -178,7 +178,7 @@ If the transaction aborts, no outbox row → no event (no ghost events). If the 
 
 ## 🔄 Schema Evolution & the Schema Registry
 
-Tables change: columns get added, renamed, retyped. Your CDC events must change with them — without breaking the 12 consumers downstream. The standard answer is a **schema registry** (e.g., Confluent Schema Registry) with **Avro** or **Protobuf** events:
+Tables change: columns get added, renamed, retyped. Your CDC events must change with them — without breaking the 12 consumers downstream. The standard answer is a **[schema registry](../../Level-03-Communication/09-Data-Serialization-and-Schema-Evolution/README.md)** (e.g., Confluent Schema Registry) with **Avro** or **Protobuf** events:
 
 - Each event carries a compact schema ID; the full schema lives in the registry.
 - The registry **enforces compatibility rules** on registration — e.g., *backward compatibility*: new-schema consumers can still read old events (add fields only with defaults; don't delete required fields; don't rename — add-and-deprecate instead).
@@ -287,7 +287,7 @@ Uber's DBEvents/uChange pipelines capture MySQL changes to keep their Hive/HDFS 
 The failure window is still there, just moved: the publish can *succeed* and then the DB commit can fail (or the process dies after commit but before publish — a rollback can't help because the code never runs). There is no atomic commit across Postgres and Kafka. The fix is the **transactional outbox**: write the order row and an outbox event row in one local ACID transaction, and let a relay (e.g., Debezium tailing the outbox table) publish it. Aborted transaction → no event; crashed relay → event still in the table, published on restart.
 </details>
 
-**2. Compare polling, trigger-based, and log-based CDC for syncing a `users` table to Elasticsearch, where GDPR deletions must propagate.**
+**2. Compare polling, trigger-based, and log-based CDC for syncing a `users` table to Elasticsearch, where [GDPR](../../Level-06-Scale-and-Reliability/09-Data-Privacy-and-Encryption/README.md) deletions must propagate.**
 
 <details><summary>Show answer</summary>
 
@@ -329,4 +329,8 @@ A logical replication slot (probably a dead or stalled CDC connector) hasn't ack
 
 ---
 
-⬅️ Previous: [09 — Object Storage](../09-Object-Storage/README.md) · ➡️ Next: [11 — Schema Migrations & Zero-Downtime Changes](../11-Schema-Migrations/README.md) · 🏠 [Level 2 index](../README.md)
+<!-- nav:start -->
+
+⬅️ **Previous:** [Object Storage](../09-Object-Storage/README.md) · 🏠 [Level 2 — The Data Layer](../README.md) · ➡️ **Next:** [Schema Migrations & Zero-Downtime Changes](../11-Schema-Migrations/README.md)
+
+<!-- nav:end -->

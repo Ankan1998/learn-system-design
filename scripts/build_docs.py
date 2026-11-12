@@ -44,6 +44,29 @@ LINK_RE = re.compile(r"(!?\[[^\]]*\])\(\s*([^)\s]+)\s*\)")
 H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "tel:", "#", "data:")
 
+# GitHub renders markdown inside <details>; Python-Markdown only does so when
+# the tag opts in. Without this, collapsible answers show literal **asterisks**.
+DETAILS_RE = re.compile(r"<details(?![^>]*\bmarkdown\b)([^>]*)>")
+
+# Footer written by scripts/update_nav.py. The Material theme already renders
+# previous/next buttons, so the site keeps only the "See it applied in" line.
+NAV_BLOCK_RE = re.compile(r"\n*(?:^---[ \t]*\n+)?<!-- nav:start -->(.*?)<!-- nav:end -->\s*\Z", re.S | re.M)
+NAV_ARROWS = ("⬅️", "🏠", "➡️", "🏁")
+
+
+def adapt_for_site(text: str) -> str:
+    """Apply the handful of GitHub-vs-MkDocs rendering differences."""
+    text = DETAILS_RE.sub(r'<details markdown="1"\1>', text)
+
+    def trim_nav(match: re.Match) -> str:
+        kept = [
+            line for line in match.group(1).strip().split("\n")
+            if line.strip() and not line.lstrip().startswith(NAV_ARROWS)
+        ]
+        return ("\n\n---\n\n" + "\n\n".join(kept) + "\n") if kept else "\n"
+
+    return NAV_BLOCK_RE.sub(trim_nav, text)
+
 
 def first_h1(path: Path) -> str | None:
     """Pull the page title out of the first markdown H1."""
@@ -141,7 +164,7 @@ def main() -> int:
     all_unresolved: list[tuple[str, str]] = []
 
     for src_rel, dest_rel in mapping.items():
-        text = (ROOT / src_rel).read_text(encoding="utf-8")
+        text = adapt_for_site((ROOT / src_rel).read_text(encoding="utf-8"))
         text, unresolved = rewrite_links(text, src_rel, dest_rel, mapping)
         all_unresolved.extend((src_rel, link) for link in unresolved)
 

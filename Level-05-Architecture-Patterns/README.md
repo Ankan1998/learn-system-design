@@ -62,7 +62,7 @@ flowchart TD
 | 09 | [Service Mesh](./09-Service-Mesh/README.md) | Sidecars, data vs control plane, Istio/Linkerd, mTLS, traffic splitting | 40 min |
 | 10 | [Multi-Tenancy & SaaS Architecture](./10-Multi-Tenancy/README.md) | Silo / pool / bridge, tenant isolation with RLS, noisy neighbors, shuffle sharding | 45 min |
 
-**Total estimated time: ~7.25 hours**
+**Total estimated time: ~7 hours**
 
 ---
 
@@ -70,10 +70,10 @@ flowchart TD
 
 Before diving in, you should be comfortable with:
 
-- **Level 01** — Fundamentals (latency, throughput, availability, CAP theorem)
-- **Level 02** — Data storage (databases, caching, replication)
-- **Level 03** — Communication basics: [Message Queues](../Level-03-Communication/04-Message-Queues/README.md) and [Pub-Sub](../Level-03-Communication/05-Pub-Sub/README.md)
-- **Level 04** — [Distributed Transactions](../Level-04-Distributed-Systems/04-Distributed-Transactions/README.md) and [Idempotency](../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md)
+- **[Level 0](../Level-00-Foundations/README.md) and [Level 1](../Level-01-Building-Blocks/README.md)** — latency and throughput, load balancing, caching, SQL vs NoSQL
+- **[Level 2](../Level-02-Data-Layer/README.md)** — data storage (replication, sharding, transactions)
+- **Level 3** — Communication basics: [Message Queues](../Level-03-Communication/04-Message-Queues/README.md) and [Pub-Sub](../Level-03-Communication/05-Pub-Sub/README.md)
+- **Level 4** — [CAP Theorem](../Level-04-Distributed-Systems/01-CAP-Theorem/README.md), [Distributed Transactions](../Level-04-Distributed-Systems/04-Distributed-Transactions/README.md) and [Idempotency](../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md)
 
 ---
 
@@ -96,8 +96,12 @@ By the end of this level you will be able to:
 
 ## 🔗 What Comes Next
 
-After this level, head to [Level 06 — Scale & Reliability](../Level-06-Scale-and-Reliability/01-Observability/README.md) where you'll learn observability (metrics, tracing, alerting) — the essential feedback loop for operating the architectures you just designed.
+After this level, head to [Level 6 — Scale & Reliability](../Level-06-Scale-and-Reliability/README.md). It opens with [Observability](../Level-06-Scale-and-Reliability/01-Observability/README.md) (metrics, tracing, alerting) — the essential feedback loop for operating the architectures you just designed.
 
 ---
 
-*Part of the [System Design Curriculum](../README.md)*
+<!-- nav:start -->
+
+⬅️ **Previous level:** [Level 4 — Distributed Systems](../Level-04-Distributed-Systems/README.md) · 🏠 [Curriculum home](../README.md) · ➡️ **Start this level:** [Monolith vs Microservices](01-Monolith-vs-Microservices/README.md)
+
+<!-- nav:end -->

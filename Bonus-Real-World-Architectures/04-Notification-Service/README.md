@@ -46,7 +46,7 @@ You are asked to design the notification service that sits behind apps like Uber
 3. **User Preferences** — users can opt out globally, per channel, or per notification type (e.g., "no marketing emails but yes transactional SMS").
 4. **Template Engine** — notifications are rendered from versioned templates (Handlebars/Mustache) with per-locale variants.
 5. **Device Token Management** — register/deregister tokens; handle token invalidation from APNS/FCM feedback services.
-6. **Priority Tiers** — `CRITICAL` (OTP, security alerts), `TRANSACTIONAL` (order updates), `MARKETING` (promotions) — processed in strict priority order.
+6. **Priority Tiers** — `CRITICAL` (OTP, security alerts), `TRANSACTIONAL` (order updates), `MARKETING` (promotions) — higher tiers are served first, by weight, so lower tiers are slowed but never starved.
 7. **Delivery Receipts** — track sent, delivered, opened, clicked, failed, bounced per notification per channel.
 8. **Deduplication** — callers supply an idempotency key; the same key is never delivered more than once.
 
@@ -56,12 +56,12 @@ You are asked to design the notification service that sits behind apps like Uber
 |---|---|
 | Scale | 100M DAU, 1B notifications/day |
 | Throughput | ~11,500 notifications/sec sustained; 50k/sec burst |
-| Latency | CRITICAL notifications dispatched to gateway <1 s P99 |
+| Latency | CRITICAL notifications dispatched to gateway <1 s [P99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) |
 | Availability | 99.99% ingestion API uptime; delivery is best-effort per channel |
 | Durability | No notification lost once accepted by ingestion API |
 | Idempotency | At-most-once visible delivery per user per notification |
 | Preference propagation | Opt-outs respected within 60 seconds |
-| Observability | Per-channel delivery rate, latency, DLQ depth dashboards |
+| [Observability](../../Level-06-Scale-and-Reliability/01-Observability/README.md) | Per-channel delivery rate, latency, DLQ depth dashboards |
 
 ---
 
@@ -196,7 +196,7 @@ POST /v1/notifications/{id}/events  // client-side open/click events
 |---|---|---|
 | `notification_id` | UUID PK | |
 | `idempotency_key` | VARCHAR(256) UNIQUE | Dedup fence |
-| `recipient_id` | VARCHAR(64) | Shard key |
+| `recipient_id` | VARCHAR(64) | [Shard key](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md) |
 | `notification_type` | VARCHAR(64) | e.g. `ORDER_SHIPPED` |
 | `priority` | ENUM | `CRITICAL`, `TRANSACTIONAL`, `MARKETING` |
 | `template_id` | VARCHAR(64) | FK to templates |
@@ -358,6 +358,8 @@ flowchart TD
     style QDLQ fill:#fee2e2,color:#000,stroke:#fca5a5
 ```
 
+*Caption: Notice that dedup, preference filtering, and template rendering all happen before Kafka, so channel workers only dispatch fully rendered, permitted messages through circuit breakers.*
+
 ### Request Flow Walk-through
 
 1. **Upstream service** calls `POST /v1/notifications` with an `idempotency_key`, recipient ID, type, and template data.
@@ -403,17 +405,19 @@ flowchart LR
     D -->|inserted| F
 ```
 
+*Caption: Notice the two fences — Redis SET NX catches most duplicates fast, and the database unique insert catches anything Redis missed.*
+
 **At the worker level**, before dispatching to the gateway, the worker checks whether a `SENT` receipt already exists for this `(notification_id, channel)` pair. If yes, skip — don't call the gateway again. This covers the Kafka duplicate case.
 
-**Gateway-level idempotency:** FCM supports a `message_id` that is idempotent within a 24h window. APNS does not — so APNS dedup relies entirely on the worker-level receipt check.
+**Gateway-level idempotency:** neither FCM nor APNs accepts an idempotency key, so a retry after a timeout can produce a second push. What both offer is *collapsing*: send the retry with the same `collapse_key` (FCM) or `apns-collapse-id` (APNs) and the device shows one notification instead of two. Everything else relies on the worker-level check.
 
-**The tricky window:** there is a brief race between a worker checking for an existing receipt and writing a new one. You close this with a DB-level unique index on `(notification_id, channel, attempt_number)` and catching the constraint violation.
+**The tricky window:** there is a brief race between a worker checking for an existing receipt and writing a new one. You close this with a small `send_claims` table whose primary key is `(notification_id, channel, token_id)`: the worker inserts its claim *before* calling the gateway and skips the send if the insert hits the constraint. A failed attempt releases its claim so the retry can proceed. (A unique index that included `attempt_number` would not help — the duplicate could simply arrive with a different attempt number.)
 
 ### 7.2 Third-Party Gateway Failures & Circuit Breaker
 
 Every gateway has its own failure personality:
 - **FCM**: 500s under load, 401 for expired credentials, 400 for invalid tokens
-- **APNS**: connection drops (HTTP/2 persistent), 410 Gone for unregistered tokens
+- **APNS**: connection drops ([HTTP/2](../../Level-00-Foundations/06-HTTP-and-HTTPS/README.md) persistent), 410 Gone for unregistered tokens
 - **Twilio**: 429 rate-limit with `Retry-After`, 400 for invalid numbers
 - **SES**: daily sending quota, bounce rate thresholds that suspend your account
 
@@ -437,6 +441,8 @@ stateDiagram-v2
     }
 ```
 
+*Caption: Notice that retries and DLQ hand-off happen only while the breaker is Closed; once Open, calls fail fast until a Half-Open probe succeeds.*
+
 **Retry schedule with jitter** (prevents thundering herd after an outage clears):
 
 ```
@@ -447,7 +453,7 @@ attempt 4: 8s + jitter
 attempt 5: 16s + jitter   ← max; then DLQ
 ```
 
-Jitter formula: `sleep = min(cap, base * 2^attempt) + random(0, base)`
+Jitter formula: `sleep = min(cap, base * 2^(attempt-2)) + random(0, base)`
 
 **DLQ strategy:** messages in the DLQ trigger a PagerDuty alert. An on-call engineer either re-fans (if the gateway recovered) or marks the notification as permanently failed. CRITICAL tier DLQ messages page immediately; MARKETING tier are reviewed daily.
 
@@ -457,7 +463,7 @@ Two dimensions of rate limiting:
 1. **Per-upstream-service** — order-service can't accidentally flood notifications
 2. **Per-user** — prevent a bug from spamming a single user 1000x in 10 seconds
 
-Priority queues in Kafka are implemented with **separate topics** and a consumer that polls `CRITICAL` topic first, then `TRANSACTIONAL`, then `MARKETING` (weighted round-robin, not strict starvation).
+Priority queues in Kafka are implemented with **separate topics** and a consumer that splits every poll cycle across them by weight — for example 70% `CRITICAL`, 25% `TRANSACTIONAL`, 5% `MARKETING` — and hands any unused share to the next tier down. Critical traffic always gets the most capacity, but marketing is never starved outright.
 
 ```mermaid
 flowchart TD
@@ -472,14 +478,16 @@ flowchart TD
 
     W["Priority-Aware<br/>Consumer Worker"]:::worker
 
-    C -->|"poll first (always)"| W
-    T -->|"poll if CRITICAL empty"| W
-    M -->|"poll if TRANSACTIONAL empty"| W
+    C -->|"about 70% of each poll cycle"| W
+    T -->|"about 25%, plus unused CRITICAL share"| W
+    M -->|"about 5%, never zero"| W
 
     W -->|"per-user rate check<br/>Redis sliding window"| GW["Gateway<br/>Dispatch"]:::worker
     GW -->|"too many for user"| DROP["Drop + log<br/>(MARKETING only)"]:::mktg
     GW -->|"within limit"| SEND["Send to gateway"]:::worker
 ```
+
+*Caption: One worker serves all three topics by weight, so critical messages get most of the capacity while marketing still trickles through, and the per-user limit can only ever drop marketing.*
 
 Per-user rate limits (examples):
 
@@ -500,8 +508,8 @@ Push notifications fail silently if you have stale tokens. Token hygiene is crit
 
 **APNS/FCM feedback:**
 - APNS returns a `410 Gone` with `timestamp` when a token has been unregistered; set `valid=false` in the token table if the `timestamp` is newer than `registered_at`
-- FCM returns `registration.not_registered` in the response body; same invalidation logic
-- A nightly **token audit job** queries FCM's batch endpoint for all tokens and marks stale ones
+- FCM returns an `UNREGISTERED` error (HTTP v1 API; `NotRegistered` in the legacy API); same invalidation logic
+- A nightly **token audit job** marks tokens the app has not refreshed in one to two months as stale (FCM itself expires Android tokens after 270 days of inactivity)
 
 **Multi-device fan-out:** a user with 3 valid push tokens gets 3 push attempts — you write 3 separate Kafka messages with the same `notification_id` but different `token_id`. Receipts are per-token, but the notification is considered `DELIVERED` if at least one token succeeds.
 
@@ -511,7 +519,7 @@ Push notifications fail silently if you have stale tokens. Token hygiene is crit
 
 ### Scaling the Ingestion API
 
-The ingestion API is stateless — scale horizontally behind the API Gateway. The main write path is a Redis `SET NX` (dedup check) + a DB insert. At 11,500/sec the DB is the chokepoint: shard the `notifications` table by `recipient_id` across 32+ MySQL shards or use a NewSQL DB (CockroachDB, TiDB).
+The ingestion API is [stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md) — scale horizontally behind the [API Gateway](../../Level-05-Architecture-Patterns/05-API-Gateway/README.md). The main write path is a Redis `SET NX` (dedup check) + a DB insert. At 11,500/sec the DB is the chokepoint: shard the `notifications` table by `recipient_id` across 32+ MySQL shards or use a [NewSQL](../../Level-07-Big-Data-and-Specialized/08-Specialized-Databases/README.md) DB (CockroachDB, TiDB).
 
 ### Kafka Partitioning
 
@@ -529,7 +537,7 @@ Workers are K8s Deployments with HPA driven by **consumer lag** (via KEDA or a c
 | Preference cache invalidation | Stale opt-out delivered | Pub/sub invalidation on preference write + short TTL (300s) |
 | Gateway rate limits (Twilio) | SMS backed up | Multiple Twilio accounts (sub-accounts), round-robin |
 | APNS HTTP/2 connection pool | Connection exhaustion | Maintain persistent connection pool; reconnect with backoff |
-| DB shard hotspot | Power user with 1000 devices | Notifications table: shard by `notification_id` not `recipient_id` for write path; separate read path |
+| DB shard hotspot | One recipient receiving a flood (or a power user with 1000 devices) | Keep sharding by `recipient_id` (the inbox read path needs it), but cap devices per user, rate-limit per recipient, and split oversized fan-outs into batches |
 
 ### Failure Modes
 
@@ -583,19 +591,19 @@ Kafka consumers with `enable.auto.commit=true` give at-most-once (message can be
 
 Real companies have published heavily on this problem:
 
-- **Uber** runs a service called "Motif" (now open-sourced concepts in various posts). Their challenge was multi-region delivery with local compliance (EU SMS must route through EU gateways). They use a priority queue with per-user rate limiting enforced at the consumer level.
+- **Uber** built a Consumer Communication Gateway that sits between its marketing systems and the push providers. It buffers pushes per user, scores them with ML, enforces per-user frequency caps, and picks a send time, so that several teams cannot message the same rider in the same hour.
 
-- **Airbnb** described their notification platform on the Airbnb Engineering blog. They migrated from a monolithic email service to a fan-out architecture using Kafka and per-channel microservices, reducing end-to-end latency for transactional emails from ~30s to <5s.
+- **LinkedIn** routes every notification from every team through a system it calls Air Traffic Controller. It decides, per member, which channel to use, when to send, and whether to send at all, enforcing frequency caps and quiet hours in one place.
 
-- **Slack** handles real-time notifications (WebSocket push) separately from async notifications (email digests). Their "Flannel" edge caching layer absorbs presence reads so the notification path stays fast.
+- **Slack** handles real-time notifications over its WebSocket connection separately from async ones (mobile push, email digests). Its published "should we send a notification?" flowchart — channel preferences, do-not-disturb, mentions, thread subscriptions, presence — is a reminder that the preference check is the most intricate part of the pipeline.
 
-- **Meta (Push)** uses a custom push delivery system called "Iris" that maintains persistent connections to APNS and FCM, batching tokens in a single HTTP/2 request frame. They coalesce multiple notifications to the same device into one push to reduce battery drain.
+- **APNs and FCM themselves** expect long-lived HTTP/2 connections carrying many multiplexed requests, not one connection per push. Apple explicitly warns that rapidly opening and closing connections is treated as a denial-of-service attack.
 
 - **AWS SNS** is essentially a managed version of this architecture: topics, subscriptions per channel, fan-out. SNS's Mobile Push service manages APNS/FCM connections. The gap vs. building your own: SNS lacks per-user preference enforcement, dedup across channels, and custom retry policies — you'd bolt those on.
 
-- **Twilio's best practices** (twilio.com/docs) cover exactly-once SMS: supply a unique `MessagingServiceSid` + your own idempotency key and Twilio will de-duplicate on their end within a 4-hour window.
+- **Twilio's Messages API** has no client idempotency key, so a retried request can send a second SMS; your own dedup fence in front of the gateway is what prevents it. Twilio reports the outcome asynchronously through status callbacks (`queued` → `sent` → `delivered`, or `undelivered` / `failed`), which is how the delivery receipts get filled in.
 
-- **FCM documentation** covers token management, topic messaging (for broadcast), and the feedback service for stale tokens. Their recommendation: always check `registration.not_registered` responses and prune immediately.
+- **FCM documentation** covers token management, topic messaging (for broadcast), and the feedback service for stale tokens. Their recommendation: always check `UNREGISTERED` responses and prune immediately.
 
 ---
 
@@ -621,3 +629,11 @@ Four genuinely difficult sub-problems collide:
 - **Priority without starvation** — MARKETING notifications must eventually be delivered (or explicitly dropped), not silently queued forever behind CRITICAL; the weighted consumer + per-tier DLQ handling closes that loop
 
 Master these four and you have a genuinely production-grade notification service.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [03 · Rate Limiter](../03-Rate-Limiter/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [05 · Web Crawler](../05-Web-Crawler/README.md)
+
+<!-- nav:end -->

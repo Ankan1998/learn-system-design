@@ -4,7 +4,7 @@
 
 ---
 
-**Level:** 7 · **Topic:** 2 of 6 · **Prerequisites:** [01 — Batch Processing](../01-Batch-Processing/README.md) · [Level 03 — Pub-Sub](../../Level-03-Communication/05-Pub-Sub/README.md) · [Level 04 — Idempotency & Exactly-Once](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md)
+**Level:** 7 · **Topic:** 2 of 9 · **Prerequisites:** [01 — Batch Processing](../01-Batch-Processing/README.md) · [Level 3 — Pub-Sub](../../Level-03-Communication/05-Pub-Sub/README.md) · [Level 4 — Idempotency & Exactly-Once](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md)
 
 ---
 
@@ -112,25 +112,25 @@ Since streams never end, we slice time into windows to compute aggregations.
 flowchart LR
     subgraph EVENTS["Event Stream (time flows right →)"]
         direction LR
-        E1["e1<br/>t=1"] --- E2["e2<br/>t=2"] --- E3["e3<br/>t=4"] --- E4["e4<br/>t=5"] --- E5["e5<br/>t=7"] --- E6["e6<br/>t=9"] --- E7["e7<br/>t=11"] --- E8["e8<br/>t=12"]
+        E1["e1<br/>t=1"] --- E2["e2<br/>t=2"] --- E3["e3<br/>t=4"] --- E4["e4<br/>t=5"] --- E5["e5<br/>t=8"] --- E6["e6<br/>t=9"] --- E7["e7<br/>t=12"] --- E8["e8<br/>t=13"]
     end
 
     subgraph TUMBLING["Tumbling Windows (size=5, no overlap)"]
-        TW1["Window 1<br/>t=0–5<br/>e1,e2,e3,e4"]
-        TW2["Window 2<br/>t=5–10<br/>e4⚠️,e5,e6"]
+        TW1["Window 1<br/>t=0–5<br/>e1,e2,e3"]
+        TW2["Window 2<br/>t=5–10<br/>e4,e5,e6"]
         TW3["Window 3<br/>t=10–15<br/>e7,e8"]
     end
 
     subgraph SLIDING["Sliding Windows (size=6, slide=3)"]
-        SW1["Window A<br/>t=0–6<br/>e1,e2,e3,e4,e5"]
-        SW2["Window B<br/>t=3–9<br/>e3,e4,e5,e6"]
-        SW3["Window C<br/>t=6–12<br/>e5,e6,e7,e8"]
+        SW1["Window A<br/>t=0–6<br/>e1,e2,e3,e4"]
+        SW2["Window B<br/>t=3–9<br/>e3,e4,e5"]
+        SW3["Window C<br/>t=6–12<br/>e5,e6"]
     end
 
     subgraph SESSION["Session Windows (gap=3)"]
         SEW1["Session 1<br/>t=1–5<br/>e1,e2,e3,e4"]
-        SEW2["Session 2<br/>t=7–9<br/>e5,e6"]
-        SEW3["Session 3<br/>t=11–12<br/>e7,e8"]
+        SEW2["Session 2<br/>t=8–9<br/>e5,e6"]
+        SEW3["Session 3<br/>t=12–13<br/>e7,e8"]
     end
 
     EVENTS --> TUMBLING
@@ -191,6 +191,8 @@ flowchart TD
     style KAPPA fill:#e8f8f0,color:#000
 ```
 
+*Caption: Lambda keeps two pipelines, an accurate batch one and a fast streaming one, and merges their results, while Kappa keeps a single streaming pipeline and replays the log when the logic changes.*
+
 | Architecture | Pros | Cons |
 |-------------|------|------|
 | **Lambda** | Accurate batch view corrects stream approximations | Two codebases (batch + stream) → maintenance nightmare |
@@ -220,7 +222,7 @@ See also: [Idempotency & Exactly-Once](../../Level-04-Distributed-Systems/07-Ide
 LinkedIn built Kafka in 2010 to handle their activity streams (page views, likes, messages) — **1.4 trillion messages per day** at peak. The key insight: treat the log as the source of truth. Open-sourced in 2011, it's now the de facto standard for streaming infrastructure. LinkedIn uses Kafka as the backbone connecting 1,000+ microservices.
 
 ### Uber — Real-Time Surge Pricing
-Uber's **uReplicator** (a Kafka mirroring system) replicates streams across data centers. Flink jobs process GPS location events from millions of drivers to compute supply/demand in each geohash cell every 5 seconds — feeding the surge pricing model. Processing latency: under 100 ms end-to-end.
+Uber's **uReplicator** (a Kafka mirroring system) replicates streams across data centers. Flink jobs process GPS location events from millions of drivers to compute supply and demand in each H3 hexagon every few seconds — feeding the surge pricing model. The pipeline has to react within seconds, because a stale surge multiplier is worse than none.
 
 ### Netflix Keystone
 Netflix's **Keystone** platform processes **2 trillion+ events per day** — playback quality, A/B test signals, error logs. It uses Kafka as the backbone and Flink for stateful processing. A key use case: if video quality drops for >1% of streams in a region within a 30-second window, Keystone triggers an automatic alert to the CDN operations team within seconds.
@@ -292,7 +294,7 @@ Netflix's **Keystone** platform processes **2 trillion+ events per day** — pla
 ## 🧪 Test Yourself
 
 1. A sensor sends GPS coordinates every second. You want the average speed in each 1-minute window. What window type do you use, and why?
-2. An event has `event_time=14:59:58` but arrives at your Flink job at `15:00:05` — 2 seconds after the 15:00:00 window closed. How do you handle this?
+2. An event has `event_time=14:59:58` but arrives at your Flink job at `15:00:05` — 5 seconds after the 15:00:00 window closed. How do you handle this?
 3. Your Kafka topic has 12 partitions. You have a consumer group with 15 consumers. How many consumers are actually doing work? Why?
 4. Describe the difference between "at-least-once" and "exactly-once" in Kafka. What mechanisms enable exactly-once?
 5. You're computing a rolling count of unique users in the last 5 minutes, updating every 30 seconds. What window type is this? What's the challenge with "unique users"?
@@ -303,9 +305,18 @@ Netflix's **Keystone** platform processes **2 trillion+ events per day** — pla
 ## 📚 Further Reading
 
 - [Kafka: The Definitive Guide](https://www.confluent.io/resources/kafka-the-definitive-guide/) — Free from Confluent
-- [Apache Flink Documentation](https://flink.apache.org/docs/stable/) — Especially the "Stateful Stream Processing" section
+- [Apache Flink Documentation](https://nightlies.apache.org/flink/flink-docs-stable/) — Especially the "Stateful Stream Processing" section
 - [Questioning the Lambda Architecture](https://www.oreilly.com/radar/questioning-the-lambda-architecture/) — Jay Kreps (Kafka creator) on why Kappa is better
 - [Designing Data-Intensive Applications](https://dataintensive.net/) — Chapter 11 (Stream Processing) by Martin Kleppmann
 - Related: [Bonus 19 — Distributed Message Queue](../../Bonus-Real-World-Architectures/19-Distributed-Message-Queue/README.md)
 - Related: [Bonus 20 — Ad Click Aggregator](../../Bonus-Real-World-Architectures/20-Ad-Click-Aggregator/README.md)
-- Next: [03 — Data Warehouses & Lakes](../03-Data-Warehouses-and-Lakes/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Batch Processing](../01-Batch-Processing/README.md) · 🏠 [Level 7 — Big Data & Specialized Systems](../README.md) · ➡️ **Next:** [Data Warehouses & Lakes](../03-Data-Warehouses-and-Lakes/README.md)
+
+🧩 **See it applied in:** [06 · Twitter/X News Feed](../../Bonus-Real-World-Architectures/06-News-Feed-Twitter/README.md) · [21 · Distributed Job Scheduler](../../Bonus-Real-World-Architectures/21-Distributed-Job-Scheduler/README.md) · [22 · Google Search](../../Bonus-Real-World-Architectures/22-Google-Search/README.md) · [23 · Distributed Counter & Analytics](../../Bonus-Real-World-Architectures/23-Distributed-Counter-Analytics/README.md) · [25 · Live Streaming (Twitch / YouTube Live)](../../Bonus-Real-World-Architectures/25-Live-Streaming/README.md) · [32 · Gmail-Style Email Service](../../Bonus-Real-World-Architectures/32-Email-Service/README.md) · [34 · Distributed Logging & Monitoring](../../Bonus-Real-World-Architectures/34-Distributed-Logging-Monitoring/README.md) · [40 · A/B Testing (Experimentation) Platform](../../Bonus-Real-World-Architectures/40-Experimentation-Platform/README.md) · …and 1 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

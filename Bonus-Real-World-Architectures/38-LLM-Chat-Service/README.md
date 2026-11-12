@@ -11,7 +11,7 @@
 
 ## 1. 🎯 Problem & Scope
 
-We're building the serving side of a product like **ChatGPT / Claude.ai**: a user types a message, and a large language model streams back an answer word by word. Unlike a classic web service where a request costs microseconds of CPU, here every request occupies a slice of a GPU for **10–30 seconds**. Capacity is scarce, expensive, and can't be spun up on demand — H100s have waiting lists, not autoscaling groups.
+We're building the serving side of a product like **ChatGPT / Claude.ai**: a user types a message, and a large language model streams back an answer word by word. Unlike a classic web service where a request costs microseconds of CPU, here every request occupies a slice of a GPU for **10–30 seconds**. Capacity is scarce, expensive, and can't be spun up on demand — top-end GPUs are reserved months ahead, not pulled from autoscaling groups.
 
 **In scope:** streamed inference serving, conversation history, free/pro tiers with quotas, content moderation, model routing, multi-region capacity, graceful degradation.
 
@@ -47,7 +47,7 @@ This is where this problem diverges from every other design. Do the [back-of-the
 - 10 M DAU × 10 messages/day = **100 M messages/day** ≈ 1,200 msg/s average, **~3,500 msg/s peak** (×3)
 - Average reply ≈ **500 output tokens**; average context (history + system prompt) ≈ **2,000 input tokens**
 - Output volume: 100 M × 500 = **50 B output tokens/day**
-- Steady-state generation demand at peak (Little's law): 3,500 msg/s × 500 tokens = **1.75 M output tokens/s**
+- Steady-state generation demand at peak: 3,500 msg/s × 500 tokens = **1.75 M output tokens/s**
 
 **GPU memory — the real constraint**
 - Flagship model: 70 B parameters × 2 bytes (FP16) = **140 GB of weights** → doesn't fit one 80 GB H100 → tensor-parallel across **2 GPUs** (160 GB), leaving ~20 GB for KV cache
@@ -61,7 +61,7 @@ This is where this problem diverges from every other design. Do the [back-of-the
 
 **Why routing and caching are not optional**
 - Cost per 1 M output tokens: flagship ≈ $4/h ÷ 7.2 M tok/h ≈ **$0.55**; an 8B small model on one GPU does ~10,000 tok/s ≈ **$0.06** — a **9× difference**
-- Route 60% of (simple) traffic to the small model: flagship fleet shrinks to ~700 GPUs, small pool needs ~105 → **~1,000 GPUs total, half the bill**
+- Route 60% of (simple) traffic to the small model: flagship fleet shrinks to ~880 GPUs, small pool needs ~105 → **~1,000 GPUs total, half the bill**
 - Storage: 100 M msgs/day × 2 KB ≈ 200 GB/day ≈ **73 TB/year** — trivial next to GPU cost
 - Egress: 1.75 M tok/s × ~50 B per SSE event ≈ 90 MB/s ≈ **0.7 Gbps** — this system is compute-bound, not bandwidth-bound
 
@@ -152,6 +152,8 @@ erDiagram
     USER ||--o{ USAGE_LEDGER : "accrues"
 ```
 
+*Caption: Messages hang off a conversation, which also carries the rolling summary, while token usage is tracked separately per user per day for billing.*
+
 **Storage choices:**
 - **Conversations & messages → DynamoDB** (or partitioned Postgres): partition key `conversationId`, sort key `messageId` (KSUID = time-ordered). Fetching a whole conversation for model context is **one query on one partition**. A GSI on `userId + updatedAt` powers the sidebar list. Access pattern is pure key-value — no joins needed.
 - **Attachments → [object storage](../../Level-02-Data-Layer/09-Object-Storage/README.md)** via presigned URLs; the DB stores only the key.
@@ -203,6 +205,8 @@ flowchart TD
     class Client ext
 ```
 
+*Caption: Every request passes quota, moderation, and routing before reaching a GPU pool, and a semantic-cache hit skips the GPUs entirely.*
+
 **Walk-through (one user message):**
 1. Gateway authenticates, counts the input tokens exactly, **reserves** output tokens (up to `max_tokens`) against the user's Redis token bucket — reject with `429` + reset time if empty.
 2. Moderation pre-check classifies the input (~10 ms). Blocked → polite refusal, no GPU touched.
@@ -228,7 +232,7 @@ flowchart TD
 
 The user only receives; the next user message is just a new POST. So SSE wins on operational simplicity ([WebSockets & Realtime](../../Level-03-Communication/06-WebSockets-and-Realtime/README.md) covers the mechanics).
 
-**The critical trick: decouple generation from the connection.** The GPU writes tokens to a short-lived buffer (a Redis Stream keyed by `message_id`, TTL ~10 min); a stateless streamer relays buffer → SSE. If the phone hops from Wi-Fi to 5G mid-answer, generation never notices:
+**The critical trick: decouple generation from the connection.** The GPU writes tokens to a short-lived buffer (a Redis Stream keyed by `message_id`, TTL ~10 min); a [stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md) streamer relays buffer → SSE. If the phone hops from Wi-Fi to 5G mid-answer, generation never notices:
 
 ```mermaid
 sequenceDiagram
@@ -318,13 +322,15 @@ flowchart LR
     class D1,D2,D3,D4 ladder
 ```
 
+*Caption: Each step gives up a little more quality to keep the service answering, and paying users are the last to feel any of it.*
+
 Each rung trades answer quality for availability — degraded service beats an error page, and pro (the revenue) degrades last. This is exactly ChatGPT's real behavior: free users silently fall back to a mini model when the flagship quota is exhausted.
 
 ### 7.6 Moderation Pipeline
 
 Two checkpoints, because the *model's own output* can violate policy even on an innocent prompt:
 
-1. **Pre-input:** a small fast classifier (~10 ms) on the user message → `PASS` / `FLAG` (proceed + log) / `BLOCK` (refusal template, zero GPU spend).
+1. **Pre-input:** a small fast classifier (~10 ms) on the user message → `PASS` / `FLAG` (proceed + log) / `BLOCKED` (refusal template, zero GPU spend).
 2. **Streamed-output scanning:** a sliding window over generated text is re-classified every ~50 tokens, *in parallel* with streaming. On violation: **stop generation mid-stream**, send a replacement event (`{"type":"content_filtered"}`), redact the persisted message.
 
 **Fail-open or fail-closed when the moderation service is down?** Fail-closed (block all traffic) turns a classifier outage into a full product outage — hard to justify. Most consumer products fail-open for general traffic *with sampled async re-scanning*, but **fail-closed for high-risk surfaces** (minors, jurisdictions with legal exposure). Name this as a product/legal decision in the interview, not a purely technical one.
@@ -373,10 +379,10 @@ GPU supply dictates geography — you build where you *got* H100s, not where use
 ## 10. 🌐 How It's *Actually* Done
 
 - **OpenAI / ChatGPT:** streams over SSE (visible in the API); free tier silently falls back to a mini model when flagship quota runs out — the degradation ladder in production; Plus/Pro buy priority capacity; "at capacity" queueing pages in early viral days were rung 3 of the ladder.
-- **Anthropic:** the Claude API streams typed SSE events (`message_start`, `content_block_delta`, `message_stop`) — a clean public example of designing a resumable, structured token stream.
+- **Anthropic:** the Claude API streams typed SSE events (`message_start`, `content_block_delta`, `message_stop`) — a clean public example of a typed, structured token stream.
 - **vLLM / PagedAttention (SOSP '23):** the paper behind §7.2 — paging the KV cache cut memory waste to < 4% and delivered 2–4× throughput over prior systems (up to 24× over naive serving). Now the de-facto open-source serving standard.
 - **Character.AI:** published inference-optimization posts describing multi-query attention and int8 KV cache to shrink KV ~20×, and **cross-turn prefix caching with ~95% hit rate** — chat traffic is dominated by follow-up turns, so cached-prefix design reportedly cut their serving cost ~33× since launch.
-- **Perplexity:** runs its own vLLM-derived stack on H100s and treats TTFT as the flagship product metric — for search-style queries, first-token latency *is* the UX.
+- **vLLM, TGI, TensorRT-LLM:** the open-source serving engines most self-hosted stacks build on. Continuous batching, PagedAttention, and prefix caching from this chapter are their default behaviour, not exotic optimizations.
 
 ---
 
@@ -394,4 +400,10 @@ GPU supply dictates geography — you build where you *got* H100s, not where use
 
 The 30-second recap: **every design decision is a defense of the KV cache.** Meter tokens because tokens are GPU time; route so the flagship only sees queries that need it; batch continuously so decode never idles; page and share the KV cache so VRAM admits more streams; cache semantically so repeated questions cost nothing; and when demand still wins, degrade down a ladder instead of falling over.
 
-*More designs: [Real-World Architectures index](../README.md)*
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [37 · Distributed File System (GFS / HDFS)](../37-Distributed-File-System/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [39 · Distributed Coordination Service (ZooKeeper / etcd)](../39-Distributed-Coordination-Service/README.md)
+
+<!-- nav:end -->

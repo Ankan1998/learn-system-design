@@ -12,7 +12,7 @@ Every unit test passes. Integration tests pass. Staging is green. The release go
 
 - A downstream service isn't *down*, it's **slow** — 3-second responses instead of 30 ms. Thread pools fill, retries pile on, and the slowness spreads upstream until the whole site is timing out. Nothing actually crashed.
 - The cache cluster restarts during a routine upgrade. Every request misses at once and the database — sized for a 95% hit rate — collapses under twenty times its normal load.
-- A network blip between two availability zones makes the leader election flap. Two nodes both believe they're leader for eleven seconds. Both write.
+- A network blip between two availability zones makes the [leader election](../../Level-04-Distributed-Systems/05-Leader-Election/README.md) flap. Two nodes both believe they're leader for eleven seconds. Both write.
 - Black Friday brings 8× normal traffic. Nobody ever tested 8×. The bottleneck turns out to be a lock in a library nobody knew was single-threaded.
 - The backups were taken faithfully every night for three years. The first time anyone tries to *restore* one, it fails.
 
@@ -80,7 +80,7 @@ Tools: Chaos Monkey (Netflix's original), Gremlin, LitmusChaos, Chaos Mesh, AWS 
 
 "Strongly consistent" and "no data loss" are claims that need adversarial verification.
 
-- **Jepsen** (Kyle Kingsbury): a harness that runs a real cluster, drives concurrent clients, injects partitions and clock skew and process crashes with a "nemesis," records every operation, then checks the history against a formal model (linearizability, snapshot isolation). It has found serious bugs in nearly every distributed database on the market — MongoDB, Cassandra, Elasticsearch, etcd, Redis, CockroachDB, Kafka, PostgreSQL's replication — usually in exactly the guarantee the vendor advertised.
+- **Jepsen** (Kyle Kingsbury): a harness that runs a real cluster, drives concurrent clients, injects partitions and clock skew and process crashes with a "nemesis," records every operation, then checks the history against a formal model (linearizability, snapshot isolation). It has found serious bugs in nearly every distributed database on the market — MongoDB, Cassandra, Elasticsearch, etcd, Redis, CockroachDB, Kafka, even single-node PostgreSQL (a serializable-isolation bug in 12.3) — usually in exactly the guarantee the vendor advertised.
 - **Deterministic simulation testing:** FoundationDB runs its entire cluster as a single-threaded, deterministic simulation with a seeded random source, injecting every kind of fault, millions of times. Because runs are deterministic, any failure is exactly reproducible. TigerBeetle adopted the same approach; Antithesis offers it as a service.
 - **Formal methods:** Amazon used TLA+ to specify DynamoDB, S3, and other services and found subtle bugs that testing had missed — including one that required a sequence of 35 steps to trigger.
 - **Property-based testing** at the component level: generate random operation sequences and check invariants ("the ledger always balances").
@@ -230,7 +230,7 @@ flowchart LR
 ## 🏢 Real-World Examples
 
 ### Netflix — from Chaos Monkey to ChAP
-Netflix created Chaos Monkey in 2011 to randomly terminate production instances during business hours, forcing every team to build for instance loss. Chaos Kong later evacuated entire AWS regions. Their Chaos Automation Platform (ChAP) now runs experiments as canaries — a small slice of traffic gets a fault injected while a control slice doesn't, and Kayenta scores the difference automatically. The book *Chaos Engineering* (Basiri, Rosenthal et al.) documents the discipline they built around it.
+Netflix created Chaos Monkey in 2011 to randomly terminate production instances during business hours, forcing every team to build for instance loss. Chaos Kong later evacuated entire AWS regions. Their Chaos Automation Platform (ChAP) now runs experiments as canaries — a small slice of traffic gets a fault injected while a control slice doesn't, and Kayenta scores the difference automatically. The book *Chaos Engineering* (Rosenthal, Jones et al.) documents the discipline they built around it.
 
 ### Amazon — GameDays and TLA+
 Amazon has run GameDays since the early 2000s: deliberately taking down data centers and dependencies to see what breaks, with the retail site live. Separately, AWS engineers published "How Amazon Web Services Uses Formal Methods" (2015), describing how TLA+ specifications found design bugs in S3 and DynamoDB that no testing had caught — one required 35 steps to reproduce.
@@ -239,7 +239,7 @@ Amazon has run GameDays since the early 2000s: deliberately taking down data cen
 Google's Disaster Recovery Testing program, running since 2006, stages large-scale outages — a region lost, a headquarters "evacuated," key people unreachable — annually and for real. The lesson repeated in the SRE book: the failures found are usually organizational (who has access? which runbook?) rather than technical.
 
 ### Jepsen — the industry's bug finder
-Kyle Kingsbury's Jepsen analyses are commissioned by database vendors precisely because the harness finds what their own tests don't: lost writes in MongoDB under partitions, stale reads in etcd and Consul, split-brain in Elasticsearch. CockroachDB, FaunaDB, and others now run Jepsen continuously in CI. If a system claims a consistency level, the first question is "has it been Jepsen-tested?"
+Kyle Kingsbury's Jepsen analyses are commissioned by database vendors precisely because the harness finds what their own tests don't: lost writes in MongoDB under partitions, stale reads in etcd and Consul, split-brain in Elasticsearch. CockroachDB, TiDB, and others now run Jepsen-style tests continuously in CI. If a system claims a consistency level, the first question is "has it been Jepsen-tested?"
 
 ### FoundationDB and TigerBeetle — deterministic simulation
 FoundationDB's engineers have said they found more bugs in simulation than they ever saw in production — because the simulator runs billions of hours of simulated cluster time with fault injection, deterministically. TigerBeetle, a financial ledger database, was designed around the same technique from day one; Antithesis productized it for everyone else.
@@ -328,12 +328,21 @@ Twitter open-sourced Diffy to send the same production request to the old servic
 ## 📚 Further Reading
 
 - [Principles of Chaos Engineering](https://principlesofchaos.org/) — the one-page manifesto from the Netflix team.
-- [Chaos Engineering — Basiri, Rosenthal et al. (O'Reilly)](https://www.oreilly.com/library/view/chaos-engineering/9781492043850/) — the practice in depth, including ChAP and canary integration.
+- [Chaos Engineering — Rosenthal, Jones et al. (O'Reilly)](https://www.oreilly.com/library/view/chaos-engineering/9781492043850/) — the practice in depth, including ChAP and canary integration.
 - [Jepsen analyses](https://jepsen.io/analyses) — read one for a database you use; the methodology section of any report explains the harness.
 - [How Amazon Web Services Uses Formal Methods (CACM, 2015)](https://cacm.acm.org/research/how-amazon-web-services-uses-formal-methods/) — TLA+ finding real bugs in S3 and DynamoDB.
 - [Google SRE Book — Testing for Reliability](https://sre.google/sre-book/testing-reliability/) — and the DiRT write-up in *Weathering the Unexpected*.
 - [Automated Canary Analysis at Netflix with Kayenta](https://netflixtechblog.com/automated-canary-analysis-at-netflix-with-kayenta-3260bc7acc69) — the baseline-vs-canary design.
 - [How NOT to Measure Latency — Gil Tene](https://www.youtube.com/watch?v=lJ8ydIuPFeU) — coordinated omission explained by the person who named it.
 - [Testing Distributed Systems with Deterministic Simulation — Will Wilson (FoundationDB)](https://www.youtube.com/watch?v=4fFDFbi3toc) — why simulation finds more bugs than production.
-- Previous: [07 — Containers & Orchestration](../07-Containers-and-Orchestration/README.md) · Next: [09 — Data Privacy, Encryption & Compliance](../09-Data-Privacy-and-Encryption/README.md) · Back to [Level 06 Overview](../README.md)
 - See also: [Resilience Patterns](../../Level-05-Architecture-Patterns/06-Resilience-Patterns/README.md) · [Deployment Strategies](../04-Deployment-Strategies/README.md) · [Capacity Planning](../02-Capacity-Planning-and-Estimation/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Containers and Orchestration](../07-Containers-and-Orchestration/README.md) · 🏠 [Level 6 — Scale & Reliability](../README.md) · ➡️ **Next:** [Data Privacy, Encryption & Compliance](../09-Data-Privacy-and-Encryption/README.md)
+
+🧩 **See it applied in:** [09 · YouTube / Netflix](../../Bonus-Real-World-Architectures/09-YouTube-Netflix-Streaming/README.md) · [45 · Real-Time Fraud Detection System (Stripe Radar)](../../Bonus-Real-World-Architectures/45-Fraud-Detection-System/README.md) · [46 · Distributed SQL Database (Spanner / CockroachDB)](../../Bonus-Real-World-Architectures/46-Distributed-SQL-Database/README.md)
+
+<!-- nav:end -->

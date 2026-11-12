@@ -4,7 +4,7 @@ By this point you have built a solid foundation in distributed systems, data man
 
 ---
 
-## Learning Outcomes
+## 🎯 Learning Outcomes
 
 After completing this level you will be able to:
 
@@ -20,23 +20,27 @@ After completing this level you will be able to:
 
 ---
 
-## Topics
+## 📚 Topics
 
 Work through these in order — each one builds on the concepts introduced before it:
 
-1. [Observability](./01-Observability/README.md)
-2. [Capacity Planning and Estimation](./02-Capacity-Planning-and-Estimation/README.md)
-3. [High Availability and Disaster Recovery](./03-High-Availability-and-DR/README.md)
-4. [Deployment Strategies](./04-Deployment-Strategies/README.md)
-5. [Security at Scale](./05-Security-at-Scale/README.md)
-6. [Multi-Region and Geo-Distribution](./06-Multi-Region-and-Geo-Distribution/README.md)
-7. [Containers and Orchestration](./07-Containers-and-Orchestration/README.md)
-8. [Testing Distributed Systems — Load, Chaos & Canary](./08-Testing-Distributed-Systems/README.md)
-9. [Data Privacy, Encryption & Compliance](./09-Data-Privacy-and-Encryption/README.md)
+| # | Topic | What You'll Learn | Est. Time |
+|---|-------|-------------------|-----------|
+| 01 | [Observability](./01-Observability/README.md) | Metrics, logs, and traces; RED and USE methods; alerting on SLOs | 45 min |
+| 02 | [Capacity Planning and Estimation](./02-Capacity-Planning-and-Estimation/README.md) | Back-of-envelope math for QPS, storage, bandwidth, and cache size | 50 min |
+| 03 | [High Availability and Disaster Recovery](./03-High-Availability-and-DR/README.md) | Nines, redundancy, failover, RPO/RTO, DR strategies | 45 min |
+| 04 | [Deployment Strategies](./04-Deployment-Strategies/README.md) | Rolling, blue-green, canary, feature flags, safe rollbacks | 40 min |
+| 05 | [Security at Scale](./05-Security-at-Scale/README.md) | Zero trust, OAuth flows, encryption, DDoS defense, secrets management | 45 min |
+| 06 | [Multi-Region and Geo-Distribution](./06-Multi-Region-and-Geo-Distribution/README.md) | Active-passive vs active-active, replication lag, geo-routing, data residency | 50 min |
+| 07 | [Containers and Orchestration](./07-Containers-and-Orchestration/README.md) | Containers vs VMs, the Kubernetes control loop, self-healing, autoscaling | 45 min |
+| 08 | [Testing Distributed Systems — Load, Chaos & Canary](./08-Testing-Distributed-Systems/README.md) | Load tests, chaos experiments, Jepsen, canary analysis, DR drills | 45 min |
+| 09 | [Data Privacy, Encryption & Compliance](./09-Data-Privacy-and-Encryption/README.md) | Envelope encryption, KMS, crypto-shredding, tokenization, deletion, residency | 45 min |
+
+**Total reading time: ~7 hours**
 
 ---
 
-## Roadmap
+## 🗺️ Roadmap
 
 ```mermaid
 flowchart TD
@@ -62,7 +66,7 @@ flowchart TD
 
 ---
 
-## Prerequisites
+## 📋 Prerequisites
 
 You should be comfortable with the material in these earlier levels before starting here:
 
@@ -75,6 +79,14 @@ If any of those topics feel shaky, revisit them first — the concepts here assu
 
 ---
 
-## Estimated Time
+## ⏱️ Estimated Time
 
-**10 – 12 hours** across all nine topics, depending on how deeply you explore the hands-on exercises and external references in each section.
+**10–12 hours** across all nine topics: about 7 hours of reading, plus the hands-on exercises and external references in each section.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous level:** [Level 5 — Architecture Patterns](../Level-05-Architecture-Patterns/README.md) · 🏠 [Curriculum home](../README.md) · ➡️ **Start this level:** [Observability](01-Observability/README.md)
+
+<!-- nav:end -->

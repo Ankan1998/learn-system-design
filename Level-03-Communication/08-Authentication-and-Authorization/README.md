@@ -60,7 +60,7 @@ flowchart LR
 Passwords are the oldest AuthN factor. The rules are short and non-negotiable:
 
 - **Never store plaintext or fast hashes** (MD5, SHA-256 alone). Attackers with a leaked DB can brute-force billions of SHA-256 guesses per second on a GPU.
-- **Use a slow, salted, memory-hard hash:** **bcrypt** (battle-tested) or **argon2id** (modern winner of the Password Hashing Competition). Both bake in a random **salt** per password, so two users with `hunter2` get different hashes and precomputed rainbow tables are useless.
+- **Use a slow, salted hash:** **bcrypt** (battle-tested) or the memory-hard **argon2id** (modern winner of the Password Hashing Competition). Both bake in a random **salt** per password, so two users with `hunter2` get different hashes and precomputed rainbow tables are useless.
 - Tune the cost factor so one hash takes ~100–500 ms — trivial for a login, ruinous for a brute-forcer. Pair with [rate limiting](../07-Rate-Limiting/README.md) on the login endpoint.
 - Add **MFA** (TOTP codes, passkeys/WebAuthn) — a stolen password alone shouldn't be enough.
 
@@ -178,7 +178,7 @@ sequenceDiagram
 Other flows worth knowing:
 
 - **Client Credentials flow** — no user at all; a backend service authenticates *as itself* (client ID + secret) to call another service. The standard machine-to-machine flow.
-- **Implicit flow is dead.** It returned tokens directly in the URL fragment — leaking them into browser history, logs, and referrer headers, with no client verification. PKCE made it obsolete; [OAuth 2.0 Security Best Current Practice](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-security-topics) formally deprecates it.
+- **Implicit flow is dead.** It returned tokens directly in the URL fragment — leaking them into browser history, logs, and referrer headers, with no client verification. PKCE made it obsolete; [OAuth 2.0 Security Best Current Practice (RFC 9700)](https://datatracker.ietf.org/doc/html/rfc9700) formally deprecates it.
 
 ### OIDC — the identity layer on top
 
@@ -272,7 +272,7 @@ flowchart TB
 - **Classic server-rendered web app?** ✅ Sessions in `HttpOnly` cookies + CSRF tokens. ❌ Don't reach for JWTs "because modern."
 - **Public API / mobile backend / microservices?** ✅ Short-lived JWT access tokens + rotating refresh tokens, issued via OAuth/OIDC.
 - **Third-party developers calling your API?** ✅ Scoped, prefixed API keys (or OAuth client credentials for bigger partners).
-- **Service-to-service inside your infra?** ✅ mTLS via a service mesh, or client-credentials tokens.
+- **Service-to-service inside your infra?** ✅ mTLS via a [service mesh](../../Level-05-Architecture-Patterns/09-Service-Mesh/README.md), or client-credentials tokens.
 - **"Sign in with X"?** ✅ OIDC Authorization Code + PKCE. ❌ Never the implicit flow; never roll your own federation.
 - **Building auth from scratch when Auth0/Okta/Cognito/Keycloak exists?** ❌ Only with a dedicated security team and a strong reason.
 
@@ -373,4 +373,10 @@ They have different audiences and purposes. The ID token is addressed to the *cl
 
 ---
 
-⬅️ Previous: [Rate Limiting](../07-Rate-Limiting/README.md) · ➡️ Next: [09 — Data Serialization & Schema Evolution](../09-Data-Serialization-and-Schema-Evolution/README.md) · 🏠 [Level 3 Index](../README.md)
+<!-- nav:start -->
+
+⬅️ **Previous:** [Rate Limiting](../07-Rate-Limiting/README.md) · 🏠 [Level 3 — Communication](../README.md) · ➡️ **Next:** [Data Serialization & Schema Evolution](../09-Data-Serialization-and-Schema-Evolution/README.md)
+
+🧩 **See it applied in:** [44 · Identity & Access Management Service (Auth0 / Okta)](../../Bonus-Real-World-Architectures/44-Identity-and-Access-Service/README.md) · [07 · Instagram](../../Bonus-Real-World-Architectures/07-Instagram/README.md) · [13 · Airbnb Booking](../../Bonus-Real-World-Architectures/13-Airbnb-Booking/README.md) · [14 · Google Drive / Dropbox](../../Bonus-Real-World-Architectures/14-Google-Drive-Dropbox/README.md) · [16 · Ticketmaster](../../Bonus-Real-World-Architectures/16-Ticketmaster/README.md) · [30 · Video Conferencing (Zoom / Google Meet)](../../Bonus-Real-World-Architectures/30-Video-Conferencing/README.md) · [36 · Webhook Delivery Service](../../Bonus-Real-World-Architectures/36-Webhook-Delivery-Service/README.md)
+
+<!-- nav:end -->

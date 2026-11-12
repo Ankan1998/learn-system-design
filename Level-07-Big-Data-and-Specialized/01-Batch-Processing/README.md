@@ -4,7 +4,7 @@
 
 ---
 
-**Level:** 7 · **Topic:** 1 of 6 · **Prerequisites:** [Level 04 — Distributed Systems](../../Level-04-Distributed-Systems/README.md) · [Level 02 — Data Layer](../../Level-02-Data-Layer/README.md)
+**Level:** 7 · **Topic:** 1 of 9 · **Prerequisites:** [Level 4 — Distributed Systems](../../Level-04-Distributed-Systems/README.md) · [Level 2 — Data Layer](../../Level-02-Data-Layer/README.md)
 
 ---
 
@@ -99,7 +99,7 @@ Hadoop Distributed File System stores each file split into **128 MB blocks**, re
 
 ```mermaid
 flowchart LR
-    CLIENT["Client"] -->|"write 500 MB file"| NN["NameNode<br/>(metadata only)"]
+    CLIENT["Client"] -->|"write 384 MB file"| NN["NameNode<br/>(metadata only)"]
     NN -->|"block locations"| CLIENT
     CLIENT -->|"block 1<br/>(128 MB)"| DN1["DataNode 1"]
     CLIENT -->|"block 2<br/>(128 MB)"| DN2["DataNode 2"]
@@ -177,13 +177,13 @@ flowchart LR
 ## 🏢 Real-World Examples
 
 ### Google — The Origin Story
-Google published the MapReduce paper in 2004 describing how they rebuilt their web index. A single MapReduce job processed **20 TB** of web crawl data across 2,000 machines in under 5 minutes — something previously impossible. The paper spawned Hadoop and the entire big data ecosystem.
+Google published the MapReduce paper in 2004 describing how they rebuilt their web index. The indexing pipeline processed **20+ TB** of web crawl data as a sequence of MapReduce jobs, and a benchmark job scanned 1 TB across ~1,800 machines in about 150 seconds. The paper spawned Hadoop and the entire big data ecosystem.
 
 ### Spotify — Daily Recommendation Pipeline
 Spotify runs massive nightly Spark jobs to compute the "Discover Weekly" playlist for 600M+ users. The job ingests hundreds of TB of listening history, computes collaborative filtering signals, and writes personalized playlist seeds — ready before Monday morning. Total runtime: a few hours on thousands of Spark executors.
 
 ### Netflix — Spark for Data Science
-Netflix processes ~700 billion events per day. Their data science teams use Spark (running on AWS EMR) to train recommendation models, compute A/B test results, and generate content performance dashboards. Jobs that once took 24 hours on Hadoop now finish in under 2 hours on Spark.
+Netflix processes ~700 billion events per day. Their data science teams use Spark (on Netflix's own S3-backed data platform) to train recommendation models, compute A/B test results, and generate content performance dashboards. Jobs that took many hours on Hadoop MapReduce typically finish several times faster on Spark, because intermediate data stays in memory instead of being written to disk between stages.
 
 ---
 
@@ -219,10 +219,10 @@ Netflix processes ~700 billion events per day. Their data science teams use Spar
 ## ⚠️ Common Pitfalls
 
 1. **Data skew.** One reducer key has 10× more data than others → that one reducer becomes the bottleneck. Fix: salting, custom partitioners.
-2. **Shuffle spills to disk.** If intermediate shuffle data exceeds executor memory, Spark spills to disk, killing performance. Fix: increase `spark.executor.memory`, reduce shuffle partitions.
+2. **Shuffle spills to disk.** If intermediate shuffle data exceeds executor memory, Spark spills to disk, killing performance. Fix: increase `spark.executor.memory`, increase the number of shuffle partitions (smaller partitions).
 3. **Small files problem.** HDFS/S3 performs poorly with millions of tiny files. Each file = one HDFS block entry, one Spark task. Fix: compact files before processing; use Parquet with large row groups.
 4. **Ignoring late data.** Batch jobs with daily partitions silently drop events that arrive after the partition close time. Fix: define a late data window and re-run or merge.
-5. **Reprocessing without idempotency.** If a job fails mid-write, partial output can corrupt the partition. Fix: write to a temp location, then atomic rename.
+5. **Reprocessing without [idempotency](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md).** If a job fails mid-write, partial output can corrupt the partition. Fix: write to a temp location, then atomic rename.
 
 ---
 
@@ -263,5 +263,14 @@ Netflix processes ~700 billion events per day. Their data science teams use Spar
 - [Apache Spark Documentation](https://spark.apache.org/docs/latest/) — RDDs, DataFrames, DAG scheduler
 - [The Google File System](https://research.google/pubs/pub51/) — Foundation for HDFS
 - [Designing Data-Intensive Applications](https://dataintensive.net/) — Chapter 10 (Batch Processing) by Martin Kleppmann
-- Next: [02 — Stream Processing](../02-Stream-Processing/README.md) — when batch latency is too slow
 - Related: [03 — Data Warehouses & Lakes](../03-Data-Warehouses-and-Lakes/README.md) — where batch output lands
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Level 7 — Big Data & Specialized Systems (overview)](../README.md) · ➡️ **Next:** [Stream Processing](../02-Stream-Processing/README.md)
+
+🧩 **See it applied in:** [22 · Google Search](../../Bonus-Real-World-Architectures/22-Google-Search/README.md) · [37 · Distributed File System (GFS / HDFS)](../../Bonus-Real-World-Architectures/37-Distributed-File-System/README.md)
+
+<!-- nav:end -->

@@ -71,7 +71,7 @@ flowchart LR
 
 | Limit (typical, check current docs) | AWS Lambda | Google Cloud Run functions | Azure Functions (Consumption) |
 |---|---|---|---|
-| Max duration | 15 min | 60 min (HTTP) / 10 min (event) | 10 min (30+ min on Premium) |
+| Max duration | 15 min | 60 min (HTTP) / 9 min (event) | 10 min (30+ min on Premium) |
 | Memory | 128 MB – 10 GB | up to 32 GB | 1.5 GB (more on Premium) |
 | Sync payload | 6 MB | 32 MB | ~100 MB |
 | Default concurrency | 1,000/account (soft) | per-revision limits | dynamic |
@@ -267,7 +267,7 @@ Netflix runs its heavy encoding on huge container/VM farms — but uses Lambda f
 | Automatic, near-instant scale-out per request | Hard limits: 15 min runtime, payload and memory caps |
 | Pay-per-use maps cost to actual value delivered | Statelessness forced — all state must be external |
 | Built-in per-function isolation and metrics | Vendor lock-in: triggers, IAM, orchestration are provider-specific |
-| Tiny idea-to-production time for event glue | Harder local testing, debugging, and distributed tracing |
+| Tiny idea-to-production time for event glue | Harder local testing, debugging, and [distributed tracing](../../Level-06-Scale-and-Reliability/01-Observability/README.md) |
 | Per-function security surface (least privilege IAM) | Concurrency spikes can DDoS downstream DBs (connection storms) |
 
 ---
@@ -313,7 +313,7 @@ flowchart TD
 
 1. **DB connection storms.** 1,000 concurrent Lambdas × 1 connection each melts a Postgres that allows 100 connections. Use RDS Proxy, DynamoDB, or HTTP-based DB access.
 2. **Heavy init inside the handler.** Creating SDK clients/DB pools *inside* the handler repeats the cost every call; do it in global scope so warm starts reuse it.
-3. **Forgetting idempotency.** Async triggers (S3, SQS) deliver **at-least-once** — a retried Lambda that isn't idempotent double-charges a customer.
+3. **Forgetting [idempotency](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md).** Async triggers (S3, SQS) deliver **at-least-once** — a retried Lambda that isn't idempotent double-charges a customer.
 4. **Lambda pinball.** Functions synchronously calling functions calling functions: you pay for all the waiting layers, and one cold start stacks on another. Use queues or a state machine instead.
 5. **Ignoring the orchestration bill.** Step Functions' per-transition pricing punishes chatty, high-volume workflows (see Prime Video).
 6. **Unbounded concurrency as a self-DDoS.** A poison-pill S3 bucket event or a replayed stream can fan out to thousands of executions. Set reserved-concurrency ceilings.
@@ -399,4 +399,10 @@ Their quality-monitoring pipeline used Step Functions orchestrating many Lambda 
 
 ---
 
-**⬅️ Previous:** [Saga & Orchestration](../07-Saga-and-Orchestration/README.md) · **➡️ Next:** [Service Mesh](../09-Service-Mesh/README.md) · **🏠 Level 5 Index:** [Architecture Patterns](../README.md)
+<!-- nav:start -->
+
+⬅️ **Previous:** [Saga and Orchestration](../07-Saga-and-Orchestration/README.md) · 🏠 [Level 5 — Architecture Patterns](../README.md) · ➡️ **Next:** [Service Mesh](../09-Service-Mesh/README.md)
+
+🧩 **See it applied in:** [01 · URL Shortener](../../Bonus-Real-World-Architectures/01-URL-Shortener/README.md) · [09 · YouTube / Netflix](../../Bonus-Real-World-Architectures/09-YouTube-Netflix-Streaming/README.md) · [21 · Distributed Job Scheduler](../../Bonus-Real-World-Architectures/21-Distributed-Job-Scheduler/README.md) · [35 · Gaming Leaderboard](../../Bonus-Real-World-Architectures/35-Gaming-Leaderboard/README.md) · [41 · Online Code Judge (LeetCode / HackerRank)](../../Bonus-Real-World-Architectures/41-Online-Code-Judge/README.md)
+
+<!-- nav:end -->

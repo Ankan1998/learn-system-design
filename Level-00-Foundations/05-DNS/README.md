@@ -207,7 +207,7 @@ sequenceDiagram
 
 **Caption:** Full DNS resolution for `google.com`. The recursive resolver (1.1.1.1) walks the hierarchy — root → TLD → authoritative — to find the IP. It then caches the result for 300 seconds (TTL). Your browser never talks to the hierarchy directly; the recursive resolver does all the work.
 
-On a **cache hit** (second visit within 300 seconds), steps 2–5 are skipped entirely. The resolver answers immediately from its cache.
+On a **cache hit** (second visit within 300 seconds), the root, TLD, and authoritative queries are skipped entirely. The resolver answers immediately from its cache.
 
 ---
 
@@ -287,9 +287,9 @@ A startup deploying globally can use Route 53 to ensure users always hit the clo
 
 ### Netflix — DNS to Direct Users to CDN
 
-Netflix uses DNS as part of its content delivery strategy. When your device requests `api.netflix.com` or a video chunk URL, Netflix's DNS infrastructure routes you to the nearest CDN (Content Delivery Network) node.
+Netflix runs its own CDN, Open Connect: thousands of cache servers placed inside ISP networks and internet exchange points. When you press play, Netflix's control plane (running in AWS) picks the best few caches for your network and hands your device their hostnames; DNS then resolves those names to the cache servers' IP addresses.
 
-If you are in Sydney, your DNS query returns the IP of a Sydney CDN node rather than one in Los Angeles. The video data travels a shorter path, reducing buffering and improving quality. Netflix uses a combination of OpenConnect (their CDN) and DNS-based routing to make this work at scale.
+If you are in Sydney, your video comes from a cache in Sydney (often inside your own ISP) rather than one in Los Angeles. The data travels a shorter path, reducing buffering and improving quality. Many other CDNs do the steering in DNS itself: the same hostname resolves to a different IP depending on where the query comes from (GeoDNS).
 
 ### Google — Anycast for Global DNS
 
@@ -376,7 +376,7 @@ Developers sometimes forget that DNS lookup itself takes time. On a **cache miss
 - After TTL expiration
 - When changing networks (mobile switching from WiFi to cell)
 
-In a web page that loads 50 assets from 10 different domains, you could have 10 DNS lookups adding up to 1,000ms+ of latency before even a single byte of content is fetched.
+In a web page that loads 50 assets from 10 different domains, you could have 10 separate DNS lookups, each costing 20–120ms on a cold cache. Browsers run several in parallel, but every new domain still delays the assets served from it.
 
 **Mitigations:**
 - Use DNS prefetching in HTML: `<link rel="dns-prefetch" href="//cdn.example.com">`
@@ -430,3 +430,13 @@ DNS is step 1. Walk through the full hierarchy: browser cache → OS cache → r
 - **RFC 1035** — The original DNS specification from 1987. Surprisingly readable. Defines the wire format and query/response protocol. Good for understanding DNS at a deep level.
 - **RFC 4033 / 4034 / 4035** — DNSSEC specification, if you want to understand how DNS records are cryptographically signed and verified.
 - **"The 1.1.1.1" blog post by Cloudflare** — Explains how they built the world's fastest recursive resolver using anycast.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Network Protocols: TCP, UDP, and IP](../04-Network-Protocols/README.md) · 🏠 [Level 0 — Foundations](../README.md) · ➡️ **Next:** [HTTP and HTTPS — The Language of the Web](../06-HTTP-and-HTTPS/README.md)
+
+🧩 **See it applied in:** [02 · Pastebin](../../Bonus-Real-World-Architectures/02-Pastebin/README.md) · [03 · Rate Limiter](../../Bonus-Real-World-Architectures/03-Rate-Limiter/README.md) · [05 · Web Crawler](../../Bonus-Real-World-Architectures/05-Web-Crawler/README.md) · [09 · YouTube / Netflix](../../Bonus-Real-World-Architectures/09-YouTube-Netflix-Streaming/README.md) · [25 · Live Streaming (Twitch / YouTube Live)](../../Bonus-Real-World-Architectures/25-Live-Streaming/README.md) · [30 · Video Conferencing (Zoom / Google Meet)](../../Bonus-Real-World-Architectures/30-Video-Conferencing/README.md) · [32 · Gmail-Style Email Service](../../Bonus-Real-World-Architectures/32-Email-Service/README.md) · [33 · Content Delivery Network (CDN)](../../Bonus-Real-World-Architectures/33-Content-Delivery-Network/README.md) · …and 1 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

@@ -143,10 +143,10 @@ flowchart TD
 |-----------|-------------|----------|-----------|
 | **Round Robin** | Requests go to servers 1→2→3→1→2→3... | Uniform request weight | Bad if some requests are 100x heavier |
 | **Weighted Round Robin** | Same, but Server 1 gets 2x the requests of Server 2 | Mixed server sizes | Weights need tuning as fleet changes |
-| **Least Connections** | Route to the server with the fewest open connections | Long-lived connections (streaming, WebSocket) | Slight overhead to track connection counts |
+| **Least Connections** | Route to the server with the fewest open connections | Long-lived connections (streaming, [WebSocket](../../Level-03-Communication/06-WebSockets-and-Realtime/README.md)) | Slight overhead to track connection counts |
 | **Least Response Time** | Route to the server that replies fastest | Latency-sensitive APIs | Adds monitoring overhead |
 | **IP Hashing** | Hash client IP → always the same server | Stateful servers (avoid sticky sessions) | Poor distribution if many clients share a NAT IP |
-| **Consistent Hashing** | Hash a key (user ID, URL) to a point on a ring | Caches, stateful routing, minimal redistribution on resize | More complex to implement |
+| **[Consistent Hashing](../../Level-02-Data-Layer/08-Consistent-Hashing/README.md)** | Hash a key (user ID, URL) to a point on a ring | Caches, stateful routing, minimal redistribution on resize | More complex to implement |
 | **Random** | Pick a random server | Simple, surprisingly effective | No awareness of load |
 
 ### L4 vs L7 Comparison
@@ -237,7 +237,7 @@ AWS offers three tiers:
 
 1. **The load balancer as a single point of failure:** A load balancer that isn't itself redundant (active-passive or active-active pair) just moves the SPOF from the app server to the LB. Always deploy LBs in pairs.
 
-2. **Health checks that are too shallow:** A health check that only tests TCP connect (`200 OK`) might return success even if the app is in a broken state (DB connections exhausted, deadlock). Use a `/health` endpoint that checks real dependencies.
+2. **Health checks that are too shallow:** A health check that only tests TCP connect (or returns a static `200 OK`) might return success even if the app is in a broken state (DB connections exhausted, deadlock). Use a `/health` endpoint that checks real dependencies.
 
 3. **Sticky sessions hiding state problems:** If you're using sticky sessions because your app is stateful, you've papered over the problem. When that server goes down, those users lose their sessions anyway.
 
@@ -279,7 +279,16 @@ AWS offers three tiers:
 
 ## 📚 Further Reading
 
-- [HAProxy Documentation — Load Balancing Algorithms](https://www.haproxy.com/documentation/hapee/latest/load-balancing/algorithms/)
+- [HAProxy — Load Balancing and the Right Distribution Algorithm for You](https://www.haproxy.com/blog/fundamentals-load-balancing-and-the-right-distribution-algorithm-for-you)
 - [Nginx Load Balancing Guide](https://docs.nginx.com/nginx/admin-guide/load-balancer/http-load-balancer/)
 - [AWS: Choosing a Load Balancer](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/load-balancer-types.html)
-- Previous: [Scalability](../01-Scalability/README.md) · Next: [Caching](../03-Caching/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Scalability](../01-Scalability/README.md) · 🏠 [Level 1 — Building Blocks](../README.md) · ➡️ **Next:** [Caching](../03-Caching/README.md)
+
+🧩 **See it applied in:** [01 · URL Shortener](../../Bonus-Real-World-Architectures/01-URL-Shortener/README.md) · [07 · Instagram](../../Bonus-Real-World-Architectures/07-Instagram/README.md) · [08 · WhatsApp](../../Bonus-Real-World-Architectures/08-WhatsApp-Chat/README.md) · [14 · Google Drive / Dropbox](../../Bonus-Real-World-Architectures/14-Google-Drive-Dropbox/README.md) · [15 · Google Maps](../../Bonus-Real-World-Architectures/15-Google-Maps/README.md) · [26 · Unique ID Generator](../../Bonus-Real-World-Architectures/26-Unique-ID-Generator/README.md) · [30 · Video Conferencing (Zoom / Google Meet)](../../Bonus-Real-World-Architectures/30-Video-Conferencing/README.md)
+
+<!-- nav:end -->

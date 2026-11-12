@@ -14,7 +14,7 @@ You're building a social network. You need to store:
 - "Who follows whom" relationships (graph-like)
 - Session tokens (key → value, expire in 30 min)
 
-No single database type does all four optimally. The wrong choice means: painfully slow queries, inability to scale, or impossibly complex schema migrations down the road. You need to understand what each type is designed for — and when to use multiple databases in the same system (**polyglot persistence**).
+No single database type does all four optimally. The wrong choice means: painfully slow queries, inability to scale, or impossibly complex [schema migrations](../../Level-02-Data-Layer/11-Schema-Migrations/README.md) down the road. You need to understand what each type is designed for — and when to use multiple databases in the same system (**polyglot persistence**).
 
 ---
 
@@ -26,7 +26,7 @@ No single database type does all four optimally. The wrong choice means: painful
 - A **key-value store** is a simple coat check: give a ticket, get back a coat.
 - A **document store** is a folder where each document can have a different format — no template required.
 - A **wide-column store** is a spreadsheet where each row can have completely different columns.
-- A **graph database** is a cork board with pins and strings — relationships *are* the data.
+- A **[graph database](../../Level-07-Big-Data-and-Specialized/08-Specialized-Databases/README.md)** is a cork board with pins and strings — relationships *are* the data.
 
 ---
 
@@ -216,11 +216,11 @@ One system, four databases, each chosen for its strength.
 
 ### Amazon DynamoDB
 
-DynamoDB is a key-value + document NoSQL database designed by Amazon for extreme scale. Amazon's shopping cart originally ran on Oracle SQL — it couldn't handle Prime Day traffic spikes. The team re-architected using DynamoDB (described in the famous 2007 Dynamo paper). DynamoDB is now the backbone for Amazon's retail site and many AWS services, handling millions of requests per second with single-digit millisecond latency.
+DynamoDB is a key-value + document NoSQL database designed by Amazon for extreme scale. Amazon's shopping cart originally ran on Oracle SQL — it couldn't handle holiday-season traffic spikes. The team re-architected using Dynamo (described in the famous 2007 Dynamo paper), whose ideas later shaped DynamoDB (launched 2012). DynamoDB is now the backbone for Amazon's retail site and many AWS services, handling millions of requests per second with single-digit millisecond latency.
 
 ### LinkedIn — Graph at Scale
 
-LinkedIn's "People You May Know" feature and connection graph use a purpose-built graph engine. The LinkedIn social graph has 900 million+ members and billions of connections. Traditional SQL JOIN-based graph traversal gets exponentially slower at each hop (friend → friend's friend → friend's friend's friend). A graph database handles this in O(edges traversed) time rather than O(table cross-product) time.
+LinkedIn's "People You May Know" feature and connection graph use a purpose-built graph engine. The LinkedIn social graph has over 1 billion members and many billions of connections. Traditional SQL JOIN-based graph traversal gets exponentially slower at each hop (friend → friend's friend → friend's friend's friend). A graph database handles this in O(edges traversed) time rather than O(table cross-product) time.
 
 ---
 
@@ -314,7 +314,16 @@ LinkedIn's "People You May Know" feature and connection graph use a purpose-buil
 ## 📚 Further Reading
 
 - [Amazon Dynamo Paper (2007)](https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf) — the paper that sparked the NoSQL movement
-- [MongoDB vs PostgreSQL comparison](https://www.postgresql.org/about/advantages/)
+- [About PostgreSQL — features and guarantees](https://www.postgresql.org/about/)
 - [Martin Fowler — NoSQL Distilled](https://martinfowler.com/books/nosql.html) (book)
 - [CAP Theorem — Brewer's original talk](https://people.eecs.berkeley.edu/~brewer/cs262b-2004/PODC-keynote.pdf)
-- Previous: [Caching](../03-Caching/README.md) · Next: [Proxies](../05-Proxies/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Caching](../03-Caching/README.md) · 🏠 [Level 1 — Building Blocks](../README.md) · ➡️ **Next:** [Proxies](../05-Proxies/README.md)
+
+🧩 **See it applied in:** [01 · URL Shortener](../../Bonus-Real-World-Architectures/01-URL-Shortener/README.md) · [06 · Twitter/X News Feed](../../Bonus-Real-World-Architectures/06-News-Feed-Twitter/README.md) · [13 · Airbnb Booking](../../Bonus-Real-World-Architectures/13-Airbnb-Booking/README.md)
+
+<!-- nav:end -->

@@ -51,7 +51,7 @@ What reverse proxies do:
 - **Caching:** Cache responses and serve them without hitting the backend
 - **Compression:** gzip/brotli responses before sending to client
 - **Request routing:** Route `/api` to API servers, `/static` to file servers
-- **Security:** Hide backend IPs; block malicious requests; rate limiting; WAF (Web Application Firewall)
+- **Security:** Hide backend IPs; block malicious requests; [rate limiting](../../Level-03-Communication/07-Rate-Limiting/README.md); WAF (Web Application Firewall)
 - **Health checking:** Remove unhealthy backends from rotation
 
 Examples: Nginx, HAProxy, Caddy, AWS CloudFront, Cloudflare
@@ -150,7 +150,7 @@ sequenceDiagram
 |-----------|--------------|---------------|
 | **Represents** | Clients | Servers |
 | **Configured on** | Client (browser/OS proxy settings) | Server side (DNS points to proxy) |
-| **Who knows about it** | Clients (they route to it explicitly) | Clients (transparent — they just see one address) |
+| **Who knows about it** | Clients (they route to it explicitly) | Server operators (transparent to clients — they just see one address) |
 | **Primary users** | Enterprises, VPNs, privacy tools | Web applications, APIs, CDNs |
 | **Key capabilities** | Filtering, anonymity, client-side caching | LB, SSL termination, server-side caching, security |
 | **Examples** | Squid, Zscaler, corporate proxies | Nginx, HAProxy, Cloudflare, AWS ALB |
@@ -164,7 +164,7 @@ sequenceDiagram
 | Response caching | Yes | Limited | Yes | No |
 | WAF | Yes (Nginx+) | Limited | Yes | Yes (AWS WAF) |
 | HTTP/2 | Yes | Yes | Yes | Yes |
-| WebSocket | Yes | Yes | Yes | Yes |
+| [WebSocket](../../Level-03-Communication/06-WebSockets-and-Realtime/README.md) | Yes | Yes | Yes | Yes |
 | Rate limiting | Yes | Yes | Yes | Yes (via WAF) |
 
 ### Proxy vs Load Balancer vs CDN
@@ -248,7 +248,7 @@ Large enterprises (banks, law firms) route all employee internet traffic through
 
 1. **Trusting X-Forwarded-For blindly:** When a reverse proxy forwards requests, it adds an `X-Forwarded-For` header with the client's real IP. But an attacker can spoof this header if the proxy doesn't sanitize it. Only trust this header from known proxy IPs.
 
-2. **Forgetting to proxy WebSockets:** Many reverse proxy configurations default to HTTP/1.1 without the `Upgrade` header needed for WebSocket connections. Missing this causes persistent connection failures for real-time apps.
+2. **Forgetting to proxy WebSockets:** Many reverse proxy configurations default to HTTP/1.0 or don't forward the `Upgrade` header needed for WebSocket connections. Missing this causes persistent connection failures for real-time apps.
 
 3. **SSL termination with unencrypted backend traffic on untrusted networks:** Terminating SSL at the proxy and sending plain HTTP to backends is fine inside a private VPC. It's a security risk if the backend is on a different cloud or public network.
 
@@ -293,4 +293,11 @@ Large enterprises (banks, law firms) route all employee internet traffic through
 - [Nginx Reverse Proxy Guide](https://docs.nginx.com/nginx/admin-guide/web-server/reverse-proxy/)
 - [HAProxy Configuration Manual](https://www.haproxy.org/download/2.8/doc/configuration.txt)
 - [Cloudflare: How Cloudflare Works](https://www.cloudflare.com/learning/what-is-cloudflare/)
-- Previous: [Databases — SQL vs NoSQL](../04-Databases-SQL-vs-NoSQL/README.md) · Next: [CDN](../06-CDN/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Databases — SQL vs NoSQL](../04-Databases-SQL-vs-NoSQL/README.md) · 🏠 [Level 1 — Building Blocks](../README.md) · ➡️ **Next:** [CDN (Content Delivery Network)](../06-CDN/README.md)
+
+<!-- nav:end -->

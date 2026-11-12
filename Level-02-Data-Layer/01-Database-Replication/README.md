@@ -137,7 +137,7 @@ flowchart LR
 **The big problem:** **write conflicts**. If two leaders both accept writes to the same row simultaneously, you have a conflict. Conflict resolution strategies:
 
 - **Last-write-wins (LWW):** the write with the higher timestamp wins. Simple but can silently discard data.
-- **Application-level merge:** the app defines how to merge conflicting versions (CRDTs, custom logic).
+- **Application-level merge:** the app defines how to merge conflicting versions ([CRDTs](../../Level-04-Distributed-Systems/09-CRDTs-and-Conflict-Resolution/README.md), custom logic).
 - **Avoid conflicts:** route all writes for a given user/entity to the same leader.
 
 ---
@@ -198,8 +198,8 @@ flowchart LR
 *Caption: Automated failover in a leader-follower cluster.*
 
 **Risks during failover:**
-- **Split-brain:** two nodes both think they're the leader. Writes diverge. Solution: fencing — the old leader is forcibly killed (STONITH) before the new leader is promoted.
-- **Lost writes:** if async replication was used, the new leader may be missing the last few writes the old leader accepted. Systems like Postgres handle this with a "replication slot" to track exactly where each follower is.
+- **[Split-brain](../../Level-04-Distributed-Systems/05-Leader-Election/README.md):** two nodes both think they're the leader. Writes diverge. Solution: fencing — the old leader is forcibly killed (STONITH) before the new leader is promoted.
+- **Lost writes:** if async replication was used, the new leader may be missing the last few writes the old leader accepted. Those writes are gone unless at least one follower was replicating synchronously. When the old leader returns it must discard them and rejoin as a follower (Postgres ships `pg_rewind` for exactly this).
 
 ---
 
@@ -302,4 +302,13 @@ flowchart LR
 - [PostgreSQL Replication Docs](https://www.postgresql.org/docs/current/high-availability.html)
 - [Cassandra Replication Strategy](https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html)
 - [AWS RDS Multi-AZ vs Read Replicas](https://aws.amazon.com/rds/features/multi-az/)
-- Next: [02 — Sharding and Partitioning](../02-Sharding-and-Partitioning/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Level 2 — The Data Layer (overview)](../README.md) · ➡️ **Next:** [Sharding and Partitioning](../02-Sharding-and-Partitioning/README.md)
+
+🧩 **See it applied in:** [01 · URL Shortener](../../Bonus-Real-World-Architectures/01-URL-Shortener/README.md) · [09 · YouTube / Netflix](../../Bonus-Real-World-Architectures/09-YouTube-Netflix-Streaming/README.md) · [18 · Distributed Cache](../../Bonus-Real-World-Architectures/18-Distributed-Cache/README.md) · [27 · Distributed Key-Value Store](../../Bonus-Real-World-Architectures/27-Key-Value-Store/README.md) · [37 · Distributed File System (GFS / HDFS)](../../Bonus-Real-World-Architectures/37-Distributed-File-System/README.md) · [42 · Social Graph Store (Facebook TAO)](../../Bonus-Real-World-Architectures/42-Social-Graph-Store/README.md) · [46 · Distributed SQL Database (Spanner / CockroachDB)](../../Bonus-Real-World-Architectures/46-Distributed-SQL-Database/README.md) · [03 · Rate Limiter](../../Bonus-Real-World-Architectures/03-Rate-Limiter/README.md) · …and 3 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

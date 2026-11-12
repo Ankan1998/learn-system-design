@@ -2,7 +2,7 @@
 
 > One repeatable, 45-minute framework that works for **any** design question — from "design a URL shortener" to "design Uber." Learn it once, apply it forever.
 
-**Read this after:** [What is System Design?](./Level-00-Foundations/01-What-is-System-Design/README.md) · **Pairs with:** [Capacity Planning & Estimation](./Level-06-Scale-and-Reliability/02-Capacity-Planning-and-Estimation/README.md) · **Practice on:** [the 34 real-world designs](./Bonus-Real-World-Architectures/README.md)
+**Read this after:** [What is System Design?](./Level-00-Foundations/01-What-is-System-Design/README.md) · **Pairs with:** [Capacity Planning & Estimation](./Level-06-Scale-and-Reliability/02-Capacity-Planning-and-Estimation/README.md) · **Practice on:** [the real-world designs](./Bonus-Real-World-Architectures/README.md)
 
 ---
 
@@ -202,7 +202,7 @@ Same question, different bar. Know which bar you're being measured against.
 
 ## 🧱 The Universal Building-Blocks Checklist
 
-Almost every design is assembled from the same eight blocks — walk this path mentally and check what the problem actually needs.
+Almost every design is assembled from the same handful of blocks — walk this path mentally and check what the problem actually needs.
 
 ```mermaid
 flowchart LR

@@ -10,7 +10,7 @@
 
 You have two servers. Server A handles a user's "update profile" request and writes it at time 10:00:00.100. Server B handles a "delete account" request and writes it at 10:00:00.099.
 
-Server B's clock shows 10:00:00.099, but its system clock runs 1ms slow. In reality, the "delete account" happened *after* the profile update. But a naive "sort by timestamp" would process the profile update last — potentially updating an already-deleted account.
+Server B's clock shows 10:00:00.099, but its system clock runs 2ms slow. In reality, the "delete account" happened *after* the profile update. But a naive "sort by timestamp" would process the profile update last — potentially updating an already-deleted account.
 
 Wall clocks in distributed systems:
 - Are synchronized via NTP, but NTP only gets you to ~1–100ms accuracy
@@ -58,18 +58,18 @@ sequenceDiagram
 
     Note over P1: counter=1 (event a)
     Note over P1: counter=2 (event b)
-    P1->>P2: send(counter=2) [event c]
+    P1->>P2: send(counter=3) [event c]
 
     Note over P2: counter=1 (event d — happened before receive)
-    Note over P2: counter=max(1,2)+1=3 [receive]
-    Note over P2: counter=4 (event e)
-    P2->>P3: send(counter=4) [event f]
+    Note over P2: counter=max(1,3)+1=4 [receive]
+    Note over P2: counter=5 (event e)
+    P2->>P3: send(counter=6) [event f]
 
     Note over P3: counter=1 (event g — concurrent with P1,P2)
-    Note over P3: counter=max(1,4)+1=5 [receive]
-    Note over P3: counter=6 (event h)
+    Note over P3: counter=max(1,6)+1=7 [receive]
+    Note over P3: counter=8 (event h)
 
-    Note over P1,P3: Ordering: a(1) < b(2) < c(2) < d(3) < e(4) < f(4) < g(5) < h(6)
+    Note over P1,P3: Causal chain: a(1) < b(2) < c(3) < recv(4) < e(5) < f(6) < recv(7) < h(8)
     Note over P1,P3: (concurrent events get equal or nearby timestamps)
 ```
 
@@ -173,6 +173,8 @@ sequenceDiagram
     Note over T: Transaction visible to clients
 ```
 
+*Caption: Spanner picks the latest possible time as the commit timestamp and then waits until that moment has certainly passed everywhere before making the transaction visible.*
+
 ### Commit Wait
 
 The key insight: after choosing a commit timestamp, Spanner **waits** until `TT.after(commit_timestamp)` is true before making the transaction visible. This guarantees that when you read data committed by this transaction, TrueTime's current interval is entirely after the commit timestamp.
@@ -206,6 +208,8 @@ flowchart LR
     classDef best fill:#d1fae5,stroke:#059669,color:#000
 ```
 
+*Caption: Moving left to right, each approach fixes the previous one's weakness: logical clocks give safe ordering, and bounded-uncertainty clocks add real-time guarantees at hardware cost.*
+
 ---
 
 ## 🔧 Types / Variations / Strategies
@@ -215,9 +219,9 @@ flowchart LR
 | Mechanism | Concurrency Detection | Real-Time Bounds | Cost | Used In |
 |---|---|---|---|---|
 | Wall clock (NTP) | No | No (±100ms drift) | Cheap | Logging, monitoring (not ordering) |
-| Lamport clock | No | No | Very cheap | Cassandra timestamps, simple ordering |
+| Lamport clock | No | No | Very cheap | Simple ordering, total-order tie-breaking |
 | Vector clocks | Yes | No | O(N) per message | Amazon Dynamo (historically) |
-| Version vectors | Partial | No | O(N) per object | Git, Riak |
+| Version vectors | Yes (between replica versions of an object) | No | O(N) per object | Riak |
 | HLC | Partial | Bounded by NTP | Cheap | CockroachDB, YugabyteDB |
 | TrueTime | No (but bounded) | Yes (±7ms) | Expensive (GPS hardware) | Google Spanner |
 
@@ -237,7 +241,7 @@ flowchart LR
 ### Amazon Dynamo — Vector Clocks
 Dynamo used vector clocks to track version history of each object. When two clients concurrently write to the same key, Dynamo keeps both versions and marks them "siblings." The next read returns both, and the client or application merges them. The famous shopping cart example: two browser windows both add items → both additions are kept, not one overwriting the other.
 
-In practice, vector clocks grew large (each client update added an entry). Amazon found that after a few hundred updates, most clock entries were ancient and pruned them with a time-based truncation — sacrificing theoretical correctness for practicality.
+In practice, vector clocks could grow large (each coordinating node that handled a write added an entry). Dynamo capped their size: once a clock reached a threshold (e.g., 10 entries), the oldest entry by timestamp was dropped — sacrificing theoretical correctness for practicality.
 
 ### Google Spanner — TrueTime
 Spanner uses TrueTime for externally consistent transactions. Every Spanner commit performs commit-wait (waiting for TrueTime uncertainty to pass). This is how Spanner can guarantee that if transaction T1 commits before T2 in real time, T1's timestamp is lower. Used for Google's global financial systems, F1 (ad backend), and others.
@@ -245,7 +249,7 @@ Spanner uses TrueTime for externally consistent transactions. Every Spanner comm
 ### CockroachDB — Hybrid Logical Clocks
 CockroachDB uses HLC for MVCC timestamps. Each transaction gets an HLC timestamp. Reads at a given timestamp see all committed writes with lower HLC timestamps. HLC's monotonicity guarantee ensures timestamps never go backward, which would break MVCC.
 
-### Apache Cassandra — Lamport-Style Timestamps
+### Apache Cassandra — Last-Write-Wins on Wall-Clock Timestamps
 Cassandra uses client-supplied timestamps (wall clock, typically) for conflict resolution (last-write-wins). This is why clock skew in Cassandra clients causes "mysterious" data overwrites — a slow-clock client's writes look older and get overwritten by a fast-clock client even if the slow-clock writes were logically later. A real operational hazard.
 
 ---
@@ -266,7 +270,7 @@ Cassandra uses client-supplied timestamps (wall clock, typically) for conflict r
 
 ### Use Logical Clocks (Lamport/Vector) When:
 - You need causal ordering but don't care about real time
-- Building event sourcing, CRDT systems, or distributed logs
+- Building [event sourcing](../../Level-05-Architecture-Patterns/03-CQRS-and-Event-Sourcing/README.md), [CRDT](../09-CRDTs-and-Conflict-Resolution/README.md) systems, or distributed logs
 - Your system is small enough that O(N) vector entries don't hurt
 
 ### Use HLC When:
@@ -277,11 +281,11 @@ Cassandra uses client-supplied timestamps (wall clock, typically) for conflict r
 ### Use TrueTime When:
 - You need **externally consistent** global transactions
 - You have the infrastructure budget for GPS receivers
-- You're Google (literally — no one else has deployed this at scale)
+- You're Google, or you rent the equivalent: cloud providers now expose tightly bounded clocks (AWS's Time Sync Service with ClockBound is what Aurora DSQL builds on)
 
 ### Don't Use Wall Clocks For:
 - Ordering distributed events (use logical or hybrid clocks)
-- Fencing tokens (use monotonic counters instead)
+- [Fencing tokens](../08-Distributed-Locking/README.md) (use monotonic counters instead)
 - Anything where "last write wins by timestamp" can be gamed (Cassandra clients with adjustable clocks)
 
 ---
@@ -337,9 +341,19 @@ Cassandra uses client-supplied timestamps (wall clock, typically) for conflict r
 ## 📚 Further Reading
 
 - **Lamport (1978):** "Time, Clocks, and the Ordering of Events in a Distributed System" — Leslie Lamport — Communications of the ACM — the foundational paper; short and worth reading
-- **Vector clocks:** "Detecting Causal Relationships in Distributed Computations" — Mattern (1988) / Fidge (1988) — two independent discoverers
+- **Vector clocks:** "Virtual Time and Global States of Distributed Systems" — Mattern (1988) / "Timestamps in Message-Passing Systems That Preserve the Partial Ordering" — Fidge (1988) — two independent discoverers
 - **Dynamo (2007):** "Dynamo: Amazon's Highly Available Key-Value Store" — SOSP — Section 4 covers vector clocks in detail
 - **Spanner (2012):** "Spanner: Google's Globally Distributed Database" — OSDI — Section 3 on TrueTime and Section 4 on transactions
 - **HLC (2014):** "Logical Physical Clocks and Consistent Snapshots in Globally Distributed Databases" — Kulkarni et al. — the HLC paper
 - **DDIA Chapter 8:** *Designing Data-Intensive Applications* — "The Trouble with Distributed Systems" — excellent practical coverage of clock unreliability
-- **"There is No Now" (2013):** Justin Sheehy — ACM Queue — beautiful essay on why clocks in distributed systems are fundamentally broken
+- **"There is No Now" (2015):** Justin Sheehy — ACM Queue — beautiful essay on why clocks in distributed systems are fundamentally broken
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Leader Election](../05-Leader-Election/README.md) · 🏠 [Level 4 — Distributed Systems](../README.md) · ➡️ **Next:** [Idempotency and Exactly-Once Processing](../07-Idempotency-and-Exactly-Once/README.md)
+
+🧩 **See it applied in:** [24 · Stock Exchange](../../Bonus-Real-World-Architectures/24-Stock-Exchange/README.md) · [27 · Distributed Key-Value Store](../../Bonus-Real-World-Architectures/27-Key-Value-Store/README.md) · [46 · Distributed SQL Database (Spanner / CockroachDB)](../../Bonus-Real-World-Architectures/46-Distributed-SQL-Database/README.md) · [43 · Calendar & Scheduling System (Google Calendar)](../../Bonus-Real-World-Architectures/43-Calendar-and-Scheduling/README.md)
+
+<!-- nav:end -->

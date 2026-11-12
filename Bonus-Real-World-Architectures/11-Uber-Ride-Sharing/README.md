@@ -8,14 +8,14 @@
 
 ## 1. 🎯 Problem & Scope
 
-You're designing the core of a ride-sharing platform like Uber. At its heart, the problem sounds simple: a rider requests a trip, you find a nearby driver, they pick the rider up, and everyone pays. But at Uber's actual scale — 5 million trips per day, 100+ countries, 5 million active drivers — nearly every piece of that flow becomes a hard distributed systems problem.
+You're designing the core of a ride-sharing platform like Uber. At its heart, the problem sounds simple: a rider requests a trip, you find a nearby driver, they pick the rider up, and everyone pays. But at Uber's actual scale — tens of millions of trips per day, 70+ countries, millions of active drivers — nearly every piece of that flow becomes a hard distributed systems problem.
 
 **What we're building:**
 - Rider requests a trip from location A to B
 - System finds available drivers in the area using geospatial indexing
 - Matching algorithm dispatches the best driver
 - Real-time location tracking streams driver position to rider over WebSockets
-- Trip state machine transitions from `REQUESTED` → `MATCHED` → `EN_ROUTE` → `ARRIVED` → `IN_TRIP` → `COMPLETED`
+- Trip state machine transitions from `REQUESTED` → `SEARCHING` → `MATCHED` → `EN_ROUTE` → `ARRIVED` → `IN_TRIP` → `COMPLETED`
 - Surge pricing adjusts fares based on supply/demand imbalance
 
 **Out of scope:** payments processing, driver onboarding, fraud detection, in-app messaging (though we'll mention where they plug in).
@@ -260,6 +260,8 @@ erDiagram
     TRIP }o--|| SURGE_ZONE : "priced_by"
 ```
 
+*Caption: Trips, driver locations, and surge zones all carry an H3 index, which is the key that ties live geospatial data to pricing.*
+
 **Storage choices:**
 
 | Entity | Store | Why |
@@ -356,9 +358,11 @@ flowchart TB
     style Async fill:#ffedd5,color:#000
 ```
 
+*Caption: Driver GPS pings go to Redis for matching and to Kafka for fan-out, so the WebSocket Gateway pushes updates without touching the write path.*
+
 **Walk-through — what happens when you tap "Request Uber":**
 
-1. **Rider app** sends `POST /v1/rides` → hits the **API Gateway** (auth, rate limiting, region routing).
+1. **Rider app** sends `POST /v1/rides` → hits the **API Gateway** (auth, [rate limiting](../../Level-03-Communication/07-Rate-Limiting/README.md), region routing).
 2. **Trip Service** creates a trip record in PostgreSQL with status `SEARCHING`, returns a `ride_id` and a short-lived WebSocket token.
 3. Rider app opens a **WebSocket connection** to the WS Gateway using that token.
 4. **Matching Service** queries the **Geo Index** (Redis + H3) to find all `AVAILABLE` drivers within, say, 5 km of the pickup point.
@@ -376,7 +380,7 @@ flowchart TB
 
 The single most important design question: how do you answer "find all available drivers within 3 km of this point" at 350 queries/second with sub-50ms latency?
 
-**Option A — Geohash**
+**Option A — [Geohash](../../Level-07-Big-Data-and-Specialized/07-Geospatial-Indexing/README.md)**
 
 Encode any (lat, lng) into a base-32 string where prefix length controls precision.
 
@@ -435,6 +439,8 @@ flowchart LR
     style Query fill:#dcfce7,color:#000
 ```
 
+*Caption: A pickup point maps to one hexagon, and a k-ring(1) query unions that cell with its six neighbours to collect candidate drivers.*
+
 **Implementation in Redis:**
 
 ```
@@ -443,7 +449,7 @@ h3Index = h3.latLngToCell(37.7749, -122.4194, resolution=9)  // ~0.1 km²
 SADD geo:h3:{h3Index} driver_id_456
 EXPIRE geo:h3:{h3Index} 30  // auto-expire if driver goes offline
 
-// Query drivers near pickup — k-ring(2) covers ~2 km radius at res-9
+// Query drivers near pickup — k-ring(2) covers ~0.7 km radius at res-9
 neighbors = h3.gridDisk(pickupH3Index, k=2)  // returns ~19 hex IDs
 SUNIONSTORE temp:search:{requestId} geo:h3:{hex1} geo:h3:{hex2} ... geo:h3:{hex19}
 ```
@@ -464,17 +470,17 @@ Driver App
   → Location Service (stateless, 50+ instances)
     → Redis WRITE: HSET driver:{id} lat lng h3_9 {index} ts {epoch}
                    SADD geo:h3:{h3Index} {driverId}
-                   EXPIRE driver:{id}:loc 30
+                   EXPIRE driver:{id} 30
     → Kafka PUBLISH: topic=driver-locations, key={driverId}, value={lat,lng,h3,ts}
 ```
 
 **Why Redis before Kafka?** Matching Service needs the current position now, not after a Kafka consumer lag. Redis is the source of truth for live location. Kafka is the fan-out bus for everything else (WS gateway, analytics, ETA re-computation).
 
-**Why not write directly to PostgreSQL?** PostgreSQL at 1M writes/second is not a thing. Even with connection pooling and bulk inserts you'd need a cluster the size of a small country. Redis AOF + periodic snapshot gives you durability guarantees that are good enough for location data (if you lose 4 seconds of GPS pings you've lost nothing important).
+**Why not write directly to PostgreSQL?** PostgreSQL at 1M writes/second is not a thing. Even with [connection pooling](../../Level-02-Data-Layer/06-Connection-Pooling/README.md) and bulk inserts you'd need a cluster the size of a small country. Redis AOF + periodic snapshot gives you durability guarantees that are good enough for location data (if you lose 4 seconds of GPS pings you've lost nothing important).
 
 **Redis cluster sharding:** Shard by `{driverId}` using consistent hashing. A single Redis node handles ~100K writes/second comfortably; 10 shards gives you comfortable headroom. Each shard also holds the H3 sets for the geographic cells assigned to it (co-located by H3 prefix hashing).
 
-**Driver going offline:** Driver app sends a DISCONNECT or pings stop arriving. A TTL-based eviction (30s) removes the driver from all H3 sets automatically via a Lua script that runs on key expiry.
+**Driver going offline:** Driver app sends a DISCONNECT or pings stop arriving. A TTL-based eviction (30s) removes the driver from all H3 sets automatically via a worker subscribed to Redis keyspace expiry notifications.
 
 ---
 
@@ -501,7 +507,7 @@ score(driver) = w1 × (1 / eta_seconds)
 
 **Preventing double-booking (the critical correctness requirement):**
 
-When dispatching to a driver, use a Redis distributed lock:
+When dispatching to a driver, use a Redis [distributed lock](../../Level-04-Distributed-Systems/08-Distributed-Locking/README.md):
 
 ```
 SET lock:driver:{driverId} {rideId} NX EX 20
@@ -535,6 +541,8 @@ stateDiagram-v2
     CANCELLED --> [*]
 ```
 
+*Caption: Cancellation is only possible before the trip starts, and every forward transition is triggered by a specific rider, driver, or geofence event.*
+
 Each transition is a Kafka event. The Trip Service is the authority on state; it rejects any out-of-order transitions. The WebSocket Gateway subscribes to `trip-events` Kafka topic and relays state changes to connected clients in real time.
 
 **Surge pricing:**
@@ -548,7 +556,7 @@ For each H3 cell at resolution 7 (~5 km²):
   ratio    = demand / supply
 
   if ratio < 0.5:   multiplier = 1.0   (no surge)
-  elif ratio < 1.0: multiplier = 1.0 + (ratio × 0.8)
+  elif ratio < 1.0: multiplier = 1.0 + ((ratio - 0.5) × 1.0)
   elif ratio < 2.0: multiplier = 1.5 + ((ratio - 1.0) × 0.5)
   else:             multiplier = cap at 3.0 (regulatory + PR reasons)
 ```
@@ -565,7 +573,7 @@ Multipliers are stored in Redis with a 60-second TTL and baked into fare estimat
 | Matching latency | H3 k-ring query + ETA | Pre-warm QuadTree in-process cache for top-50 cities; ETA service result cache with 30s TTL |
 | WebSocket connections | RAM and file descriptors per server | 1 WS node handles ~50K connections; auto-scale horizontally; use a Kafka consumer per WS node keyed on ride_id |
 | Trip DB writes | PostgreSQL under trip completion burst | PgBouncer connection pooling; completed trips async-archived to Cassandra; read replicas for status queries |
-| Surge computation | CPU for H3 coverage computation | Pre-index all H3-7 cells in operating cities (SF has ~200 cells at res-7); surge batch runs on dedicated compute |
+| Surge computation | CPU for H3 coverage computation | Pre-index all H3-7 cells in operating cities (SF has ~25 cells at res-7); surge batch runs on dedicated compute |
 | Driver goes offline mid-trip | Location stream stops | WS gateway detects keepalive failure, Trip Service flags trip, ops alert if >60s no ping during IN_TRIP |
 | Kafka lag during surge | Location events back up | Location topic has 64 partitions (by city); WS gateway consumers auto-scale via KEDA; drop stale location events (only latest per driver matters) |
 | Region failover | Primary region outage | Multi-region active-active; rider requests are region-pinned via Anycast; trip state replicated cross-region with async replication lag acceptable for location (not for payments) |
@@ -580,7 +588,7 @@ Sequential (our design) eliminates the double-accept race but increases P99 matc
 
 **H3 vs. PostGIS:**
 
-PostGIS with a GiST index on a `GEOGRAPHY` column can do `ST_DWithin` radius queries in ~10ms on millions of rows. That's fine for 100 QPS but breaks down at 350 ride requests/second × 100ms query = 35,000 DB QPS. Redis + H3 serves the same query in <1ms and scales horizontally. Use PostGIS for analytics and audit; Redis/H3 for the live dispatch path.
+PostGIS with a GiST index on a `GEOGRAPHY` column can do `ST_DWithin` radius queries in ~10ms on millions of rows. That's fine for 100 QPS but breaks down when the same indexed table must also absorb 250,000 location updates/second (1M at peak). Redis + H3 serves the same query in <1ms and scales horizontally. Use PostGIS for analytics and audit; Redis/H3 for the live dispatch path.
 
 **WebSocket vs. SSE vs. Polling:**
 
@@ -592,27 +600,27 @@ Redis Pub/Sub is simpler but loses messages if the WS server is down (no persist
 
 **Monolith vs. microservices:**
 
-At Uber's scale, microservices win. But the boundary matters: Location, Matching, and Trip services are tightly coupled in the hot path. Keep them in the same network segment (same VPC, same AZ when possible) to minimize cross-service latency. Payment, Notifications, and Analytics are naturally async and can live independently.
+At Uber's scale, [microservices](../../Level-05-Architecture-Patterns/01-Monolith-vs-Microservices/README.md) win. But the boundary matters: Location, Matching, and Trip services are tightly coupled in the hot path. Keep them in the same network segment (same VPC, same AZ when possible) to minimize cross-service latency. Payment, Notifications, and Analytics are naturally async and can live independently.
 
 ---
 
 ## 10. 🌐 How It's Actually Done
 
-**Uber H3** (open-sourced 2018): Uber's hexagonal hierarchical geospatial indexing system, now used by Foursquare, Microsoft, and others. The library converts lat/lng to a 64-bit cell ID at any of 16 resolutions in microseconds. https://h3geo.org
+**Uber H3** (open-sourced 2018): Uber's hexagonal hierarchical geospatial indexing system, now used well beyond Uber, by Foursquare and many geospatial analytics tools. The library converts lat/lng to a 64-bit cell ID at any of 16 resolutions in microseconds. https://h3geo.org
 
-**Ringpop:** Uber's consistent hash ring for distributing stateful services (like the Matching Service) across nodes without a central coordinator. Uses SWIM gossip protocol for membership. Replaced by a more evolved internal system but the concepts are public: https://github.com/uber/ringpop-go
+**Ringpop:** Uber's consistent hash ring for distributing stateful services (like the Matching Service) across nodes without a central coordinator. Uses SWIM [gossip protocol](../../Level-04-Distributed-Systems/10-Gossip-and-Failure-Detection/README.md) for membership. Replaced by a more evolved internal system but the concepts are public: https://github.com/uber/ringpop-go
 
 **Schemaless (Uber's document store):** Uber built Schemaless on top of MySQL to handle trip data at scale — it's a sharded, append-only cell store where each "row" is a sparse map of columns. Described in detail in their 2016 blog post "Designing Schemaless, Uber Engineering's Scalable Datastore Using MySQL." The key insight: MySQL is used as a dumb byte store; the application layer handles all schema and querying logic.
 
-**DOSA (Distributed Online Storage Abstraction):** Uber's ORM-like abstraction over multiple backends (Cassandra, MySQL, Redis), allowing services to switch storage engines without changing application code.
+**DOSA (Declarative Object Storage Abstraction):** Uber's ORM-like abstraction over multiple backends (Cassandra, MySQL, Redis), allowing services to switch storage engines without changing application code.
 
 **Presto + Apache Pinot:** OLAP layer for surge pricing analytics and operational dashboards. Pinot handles real-time queries on the location event stream; Presto handles historical analysis.
 
 **Engineering references:**
 - "Engineering Uber's Self-Healing Infrastructure" (Uber Engineering Blog, 2016)
-- "How Uber Manages a Million Writes Per Second Using Mesos and Cassandra" (InfoQ, 2016)
+- "How Uber Manages a Million Writes Per Second Using Mesos and Cassandra Across Multiple Datacenters" (High Scalability, 2016)
 - "H3: Uber's Hexagonal Hierarchical Spatial Index" (Uber Engineering Blog, 2018)
-- "Uber's Real-Time Push Platform" (Uber Engineering Blog, 2020) — describes the WebSocket gateway architecture
+- "Uber's Real-Time Push Platform" (Uber Engineering Blog, 2020) — describes the RAMEN push gateway (SSE, later [gRPC](../../Level-03-Communication/03-gRPC-and-RPC/README.md) streaming)
 
 ---
 
@@ -632,3 +640,11 @@ At Uber's scale, microservices win. But the boundary matters: Location, Matching
 The hardest parts of this system aren't the ones that sound hard. Payments, routing, and matching all have well-understood solutions. The genuinely tricky problems are: (1) handling 1M location writes/second without a hot Redis shard, (2) preventing the double-booking race without a slow distributed lock on every dispatch, and (3) keeping WebSocket fan-out consistent when a gateway node crashes mid-trip. Get those three right and the rest is engineering execution.
 
 **Next steps:** Read [Food Delivery](../12-Food-Delivery/README.md) to see how this architecture evolves when you add restaurant prep time, multi-order batching for a single driver, and menu/inventory systems into the same real-time dispatch loop.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [10 · Typeahead / Autocomplete](../10-Typeahead-Autocomplete/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [12 · Food Delivery (DoorDash / Swiggy)](../12-Food-Delivery/README.md)
+
+<!-- nav:end -->

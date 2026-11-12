@@ -21,7 +21,7 @@ Scope:
 - **Request routing** that directs each user to the nearest healthy edge.
 - A **cache hierarchy**: edge → regional cache → origin shield → origin.
 - **Cache invalidation and purge** propagated globally within seconds.
-- **TLS termination** at the edge (with SNI support for multi-tenant CDN).
+- **[TLS](../../Level-00-Foundations/06-HTTP-and-HTTPS/README.md) termination** at the edge (with SNI support for [multi-tenant](../../Level-05-Architecture-Patterns/10-Multi-Tenancy/README.md) CDN).
 - **Thundering herd protection** on cache misses.
 - **Analytics and observability** for CDN operators.
 
@@ -57,7 +57,7 @@ Out of scope: application-layer features (WAF, DDoS mitigation, Workers/edge-com
 |--------|-------|
 | Peak requests/second | 10 M RPS globally |
 | Avg response size | 100 KB (mix of HTML, images, video segments) |
-| Peak throughput | 10 M × 100 KB = 1 Tbps per PoP tier; 100 Tbps aggregate |
+| Peak throughput | 10 M × 100 KB = 1 TB/s ≈ 8 Tbps average; 100 Tbps aggregate capacity (headroom for video-heavy peaks) |
 | PoPs worldwide | 250 |
 | Avg RPS per PoP | 40 K RPS (non-uniform; top PoPs: 500 K+ RPS) |
 
@@ -172,6 +172,8 @@ erDiagram
     ZONE ||--o{ CACHE_OBJECT : "caches"
 ```
 
+*Caption: Notice that the zone is the hub: certificates, purge jobs, and cached objects all hang off it, while purge jobs fan out to many PoPs.*
+
 **Storage notes:**
 
 | Data | Store | Why |
@@ -253,10 +255,12 @@ flowchart TD
     style Origin fill:#e0f2fe,color:#000
 ```
 
+*Caption: Follow a cache miss down edge, regional cache, and origin shield before it reaches the origin, while the control plane pushes purges and certificates to every tier.*
+
 **Walk-through for a cached response:**
 
 1. User in Tokyo sends `GET https://example.com/logo.png`.
-2. DNS resolves `example.com` to a CDN Anycast IP. BGP routes the TCP SYN to the **Tokyo PoP** (closest BGP peer).
+2. [DNS](../../Level-00-Foundations/05-DNS/README.md) resolves `example.com` to a CDN Anycast IP. BGP routes the TCP SYN to the **Tokyo PoP** (closest BGP peer).
 3. Tokyo PoP terminates TLS using the cached certificate for `example.com`. Edge server checks its in-memory + SSD cache: **HIT** → respond with `200 OK`, set `Age` header. Done in < 5 ms.
 
 **Walk-through for a cache miss:**
@@ -292,11 +296,13 @@ flowchart LR
     style GeoDNS fill:#fef9c3,color:#000
 ```
 
+*Caption: Anycast lets internet routing pick the nearest PoP for a shared IP address, while GeoDNS picks a PoP when the name is resolved, based on where the resolver appears to be.*
+
 | | Anycast | DNS Geo Routing |
 |--|---------|-----------------|
 | **How it works** | All PoPs advertise the same IP via BGP; routers pick shortest AS path | DNS returns different IP per geographic region of the resolver |
 | **Routing latency** | Zero (packet-level) | Add one DNS RTT, but TTL can be 30–60 s |
-| **Failover speed** | BGP convergence: 30–180 s | DNS TTL expiry: 30–300 s |
+| **Failover speed** | BGP convergence: seconds to a couple of minutes | DNS TTL expiry: 30–300 s |
 | **Granularity** | Network topology (AS hops), not geography | Geographic (can route by country/city) |
 | **Real usage** | Cloudflare, Google (primary) | Akamai, AWS CloudFront (primary) |
 | **Combination** | Cloudflare uses Anycast as primary + DNS as customer-visible hostname | Most CDNs combine both |
@@ -307,7 +313,7 @@ flowchart LR
 
 ### 7.2 Cache Hierarchy & Consistent Hashing for Content Placement
 
-The cache hierarchy has four tiers, each larger and slower than the previous:
+The hierarchy has three cache tiers in front of the customer's origin, each larger and slower than the previous:
 
 ```mermaid
 flowchart TD
@@ -317,8 +323,8 @@ flowchart TD
     ORIGIN["Tier 4: Customer Origin<br/>Receives only ~3% of requests"]
 
     EDGE -->|"miss (20%)"| REGIONAL
-    REGIONAL -->|"miss (15% of 20%)"| SHIELD
-    SHIELD -->|"miss (60% of 3%)"| ORIGIN
+    REGIONAL -->|"miss (8% of total)"| SHIELD
+    SHIELD -->|"miss (3% of total)"| ORIGIN
 
     style EDGE fill:#dcfce7,color:#000
     style REGIONAL fill:#f3e8ff,color:#000
@@ -334,7 +340,8 @@ See [Consistent Hashing](../../Level-02-Data-Layer/08-Consistent-Hashing/README.
 3. "Virtual nodes" (150+ per server) ensure even distribution even with heterogeneous server capacities.
 
 ```
-cache_server = consistent_hash(normalize_url(url)) % ring_slots
+position     = hash(normalize_url(url))                  # a point on the ring
+cache_server = first virtual node clockwise from position  # no modulo involved
 ```
 
 For a 10-server PoP with 150 virtual nodes each: each URL maps deterministically to one server, maximizing cache utilization per byte of SSD.
@@ -372,6 +379,8 @@ sequenceDiagram
     PurgeAPI-->>Customer: 200 OK { propagatedIn: 2.1s }
 ```
 
+*Caption: Notice the purge is recorded durably first, then fanned out via pub/sub, and the customer is answered only after every PoP manager acknowledges.*
+
 **Purge strategies:**
 
 | Strategy | Mechanism | Use case |
@@ -407,6 +416,8 @@ flowchart TD
     style RESPOND fill:#dcfce7,color:#000
 ```
 
+*Caption: Only the first miss goes to the origin; concurrent misses for the same key wait on that in-flight fetch and share its response.*
+
 **Request coalescing (also called "request collapsing"):**
 
 - Edge server uses an in-memory map: `url → in-flight promise`.
@@ -440,16 +451,16 @@ flowchart TD
 |----------|-------------|----------------------|
 | Routing mechanism | Anycast (primary) + GeoDNS (fallback) | Pure DNS only — slower failover; pure Anycast — harder to do city-level routing |
 | Cache placement within PoP | Consistent hashing | Simple modulo — poor when servers added/removed; random — duplicate copies |
-| Purge propagation | Pub/sub fan-out from control plane | Gossip protocol — hard to get < 5 s SLA; polling — too slow |
+| Purge propagation | Pub/sub fan-out from control plane | [Gossip protocol](../../Level-04-Distributed-Systems/10-Gossip-and-Failure-Detection/README.md) — hard to get < 5 s SLA; polling — too slow |
 | Thundering herd | Request coalescing + stale-while-revalidate | No protection — origin gets hammered; mutex-only — all requests queue and wait |
 | TLS cert management | ACME (Let's Encrypt / ZeroSSL) per zone | Manual cert upload — operationally expensive at CDN scale |
-| Cache hierarchy depth | 3 tiers (edge → regional → shield) | 2 tiers only — worse origin offload; 4 tiers — added latency on misses |
+| Cache hierarchy depth | 3 cache tiers (edge → regional → shield) | 2 tiers only — worse origin offload; 4 tiers — added latency on misses |
 
 ---
 
 ## 10. 🌐 How It's Actually Done
 
-**Cloudflare:** Operates 300+ PoPs using Anycast exclusively. Every PoP advertises the same IP space via BGP. Uses a custom HTTP proxy (written in Rust, called Pingora) replacing nginx for better connection reuse and performance. Cache storage uses a custom "Tiered Cache" product. Purge propagates via the same anycast network in ~150 ms.
+**Cloudflare:** Operates 300+ PoPs using Anycast exclusively. Every PoP advertises the same IP space via BGP. Uses a custom HTTP proxy (written in Rust, called Pingora) replacing nginx for better connection reuse and performance. Its "Tiered Cache" product adds upper-tier caches between edges and origin. Purge propagates via the same anycast network in ~150 ms.
 
 **Akamai:** The original CDN (founded 1998). Uses DNS-based geo routing as the primary mechanism, with a massive global map of IP-to-geography derived from BGP data. Their "SureRoute" product computes real-time optimal paths through their backbone. They have over 4,000 PoPs (many very small).
 
@@ -464,7 +475,7 @@ flowchart TD
 | Aspect | Key Decision |
 |--------|-------------|
 | **Routing** | Anycast (BGP) for network-layer proximity + GeoDNS for fallback and geographic control |
-| **Cache hierarchy** | 4 tiers: edge SSD → regional cluster → origin shield → origin; 95%+ hit rate |
+| **Cache hierarchy** | 3 cache tiers (edge SSD → regional cluster → origin shield) in front of the origin; 95%+ hit rate |
 | **Content placement** | Consistent hashing within each PoP to maximize per-server cache efficiency |
 | **Cache invalidation** | Pub/sub broadcast to all PoPs; < 5 s propagation; soft-purge with stale-while-revalidate |
 | **Thundering herd** | Request coalescing (one origin fetch, all waiters served) + stale-while-revalidate |
@@ -475,4 +486,12 @@ The central insight: a CDN is fundamentally a **massive, globally distributed ca
 
 ---
 
-*Siblings: [Distributed Cache](../18-Distributed-Cache/README.md) · [YouTube/Netflix Streaming](../09-YouTube-Netflix-Streaming/README.md) · [Google Drive/Dropbox](../14-Google-Drive-Dropbox/README.md)*
+**Related:** [Distributed Cache](../18-Distributed-Cache/README.md) · [YouTube/Netflix Streaming](../09-YouTube-Netflix-Streaming/README.md) · [Google Drive/Dropbox](../14-Google-Drive-Dropbox/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [32 · Gmail-Style Email Service](../32-Email-Service/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [34 · Distributed Logging & Monitoring](../34-Distributed-Logging-Monitoring/README.md)
+
+<!-- nav:end -->

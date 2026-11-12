@@ -90,7 +90,7 @@ flowchart LR
 
 ### Engine 2 — LSM-Tree (Log-Structured Merge Tree)
 
-Used by: **Cassandra, RocksDB** (used by Facebook, TiKV, CockroachDB), **LevelDB, HBase, InfluxDB**.
+Used by: **Cassandra, RocksDB** (used by Facebook, TiKV, and formerly CockroachDB), **LevelDB, HBase, InfluxDB**.
 
 LSM-Trees never update data in place. They always **append** new writes to an in-memory buffer, then flush sorted batches to disk, then periodically merge and compact files in the background.
 
@@ -124,9 +124,9 @@ flowchart TD
 **Key components:**
 
 - **Memtable:** an in-memory sorted structure (usually a balanced BST or skip list). All writes go here first — it's fast because it's RAM.
-- **SSTable (Sorted String Table):** immutable, sorted file on disk. Once written, never modified. New writes for the same key create a new SSTable entry; the old one becomes a "tombstone" or is superseded by version.
+- **SSTable (Sorted String Table):** immutable, sorted file on disk. Once written, never modified. New writes for the same key create a new SSTable entry; the old one is simply superseded by the newer version (deletes are written as "tombstones").
 - **Compaction:** background process that merges SSTables, removes deleted entries (tombstones), and organizes data into levels. This is what makes future reads efficient.
-- **Bloom filter:** a probabilistic structure attached to each SSTable. A read checks the bloom filter first: if it says "key definitely not here," skip this SSTable. Reduces unnecessary disk reads dramatically.
+- **[Bloom filter](../../Level-07-Big-Data-and-Specialized/06-Probabilistic-Data-Structures/README.md):** a probabilistic structure attached to each SSTable. A read checks the bloom filter first: if it says "key definitely not here," skip this SSTable. Reduces unnecessary disk reads dramatically.
 
 ```mermaid
 flowchart LR
@@ -189,7 +189,7 @@ flowchart LR
 | **Read amplification** | Low (1 disk access) | Medium (multi-level check) |
 | **Space amplification** | Low (in-place overwrites) | Higher (stale entries until compaction) |
 | **Compaction pauses** | None | Yes — background compaction uses I/O |
-| **Crash recovery** | WAL replay | WAL replay + redo from memtable |
+| **Crash recovery** | WAL replay | WAL (commit log) replay to rebuild the memtable |
 | **Databases** | Postgres, MySQL, SQLite, SQL Server | Cassandra, RocksDB, HBase, LevelDB |
 
 **Compaction strategies in LSM-Trees:**
@@ -201,7 +201,7 @@ flowchart LR
 ## 🏢 Real-World Examples
 
 - **Postgres (B-Tree + WAL):** used by Shopify, GitHub, Instagram. The WAL is shipped to standbys for replication (Topic 01). `pg_wal` directory grows rapidly under write load — monitor it.
-- **RocksDB (LSM-Tree):** embedded storage engine used by Facebook's `MyRocks` (MySQL with RocksDB backend, uses 50% less storage than InnoDB), TiKV (TiDB's storage layer), and CockroachDB.
+- **RocksDB (LSM-Tree):** embedded storage engine used by Facebook's `MyRocks` (MySQL with RocksDB backend, uses 50% less storage than InnoDB), TiKV (TiDB's storage layer), and formerly CockroachDB (which replaced it with its RocksDB-inspired Pebble engine in 2020).
 - **Cassandra (LSM-Tree, leveled or size-tiered compaction):** Netflix's global metadata store. Handles millions of writes/second by appending to memtables and flushing SSTables. Compaction runs in the background — Netflix tunes compaction strategy per table.
 - **LevelDB / RocksDB (Google/Facebook):** LevelDB was created at Google for Chrome's IndexedDB storage. Facebook forked it as RocksDB and optimized it heavily for SSD workloads.
 - **SQLite (B-Tree):** the most widely deployed database in the world (every Android phone, iOS app, browser). Uses a B-Tree for both tables and indexes, with WAL mode for concurrency.
@@ -244,7 +244,7 @@ flowchart LR
 
 ## ⚠️ Common Pitfalls
 
-1. **Ignoring compaction in Cassandra.** If you never compact, your read performance degrades progressively as more SSTables accumulate per key. Monitor `SSTable count per partition` — when it climbs above ~20–30, trigger a manual compaction.
+1. **Falling behind on compaction in Cassandra.** Compaction runs automatically, but if it cannot keep up with writes (too little disk I/O headroom, or the wrong strategy for the workload), SSTables pile up and every read has to check more files. Watch pending compactions and SSTables-per-read (`nodetool tablestats`, `nodetool tablehistograms`), and choose the strategy on purpose: size-tiered for write-heavy tables, leveled for read-heavy ones, time-window for time-series data with TTLs.
 
 2. **Postgres WAL bloat.** Replication slots in Postgres hold WAL segments until the replica consumes them. If a replica falls behind (or is deleted but the slot isn't), WAL fills the disk and crashes the primary. Monitor `pg_replication_slots` and set `max_slot_wal_keep_size`.
 
@@ -262,7 +262,7 @@ flowchart LR
 - Lead with the **WAL** for crash recovery — interviewers love durability questions.
 - Know the terms: **memtable, SSTable, compaction, bloom filter, write amplification, read amplification**.
 - DDIA Chapter 3 (Storage and Retrieval) is the canonical treatment. Read the first half (B-Trees) and second half (LSM-Trees + SSTables) and you'll be ahead of 95% of candidates.
-- Connect storage engines to the bigger picture: LSM-Trees' append-only nature is why Cassandra replicates so efficiently — the SSTable logs are easy to ship and replay.
+- Connect storage engines to the bigger picture: LSM-Trees' immutable SSTables are why Cassandra can stream data so efficiently during bootstrap and repair — whole sorted files are easy to ship.
 
 ---
 
@@ -289,8 +289,17 @@ flowchart LR
 ## 📚 Further Reading
 
 - **DDIA Chapter 3** — Storage and Retrieval (the most important chapter in the book for this topic).
-- [RocksDB Overview (Facebook Engineering)](https://engineering.fb.com/2013/11/21/core-infra/the-history-of-rocksdb/)
+- [The History of RocksDB (Dhruba Borthakur, RocksDB blog)](http://rocksdb.blogspot.com/2013/11/the-history-of-rocksdb.html)
 - [Cassandra Architecture — Storage Engine](https://cassandra.apache.org/doc/latest/cassandra/architecture/storage-engine.html)
 - [PostgreSQL — WAL Internals](https://www.postgresql.org/docs/current/wal-internals.html)
 - [LevelDB Implementation Notes](https://github.com/google/leveldb/blob/main/doc/impl.md)
-- Previous: [03 — Indexing](../03-Indexing/README.md) · Next: [05 — ACID and Transactions](../05-ACID-and-Transactions/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Indexing](../03-Indexing/README.md) · 🏠 [Level 2 — The Data Layer](../README.md) · ➡️ **Next:** [ACID and Transactions](../05-ACID-and-Transactions/README.md)
+
+🧩 **See it applied in:** [27 · Distributed Key-Value Store](../../Bonus-Real-World-Architectures/27-Key-Value-Store/README.md)
+
+<!-- nav:end -->

@@ -42,8 +42,8 @@ This is fine early on. It's cheap, simple to manage, and easy to debug. But it h
 Add more power to the **same machine**: bigger CPU, more RAM, faster NVMe disk.
 
 - A small VM might have 2 vCPUs and 4 GB RAM
-- A large VM might have 96 vCPUs and 384 GB RAM (e.g., AWS `r6i.24xlarge`)
-- Cost grows **super-linearly**: doubling specs often costs 3–4x more
+- A large VM might have 96 vCPUs and 384 GB RAM (e.g., AWS `m6i.24xlarge`)
+- Cost is roughly linear inside a cloud instance family (2× the size ≈ 2× the price) but turns **super-linear at the top end**: the very largest machines, specialty hardware, and per-core software licenses carry a premium
 - There is a **hard ceiling**: no single machine has infinite resources
 - Downtime required for most hardware upgrades
 
@@ -65,6 +65,21 @@ A useful mental model from the book *The Art of Scalability*:
 - **Z-axis:** Split by data (shard users A–M to server 1, N–Z to server 2)
 
 Most real systems use all three axes simultaneously.
+
+```mermaid
+flowchart TD
+    APP["One application<br/>on one server"]
+    APP -->|"X axis: clone it"| X["Identical copies behind a load balancer<br/>App · App · App"]
+    APP -->|"Y axis: split by function"| Y["Separate services<br/>Users · Orders · Search"]
+    APP -->|"Z axis: split by data"| Z["Same code, different slices of data<br/>Users A–M · Users N–Z"]
+
+    style APP fill:#e5e7eb,color:#000
+    style X fill:#dbeafe,color:#000
+    style Y fill:#dcfce7,color:#000
+    style Z fill:#fef9c3,color:#000
+```
+
+*Caption: The three ways to scale: run more identical copies (X), split into services by function (Y), or partition the data so each copy handles a slice of it (Z).*
 
 ---
 
@@ -160,7 +175,7 @@ flowchart LR
 |------|-----------|---------|
 | **X — Clone** | Run N identical copies behind a load balancer | 10 identical web servers |
 | **Y — Decompose** | Split by function/service | User service, Order service, Payment service |
-| **Z — Partition** | Split by data subset (sharding) | Users 0–999999 on DB1, 1000000+ on DB2 |
+| **Z — Partition** | Split by data subset ([sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md)) | Users 0–999999 on DB1, 1000000+ on DB2 |
 
 ---
 
@@ -223,9 +238,9 @@ YouTube handles ~500 hours of video uploaded per minute. Key scalability choices
 ## ⚠️ Common Pitfalls
 
 1. **Premature scaling:** Scaling before you have a bottleneck wastes money and adds complexity. Measure first.
-2. **Forgetting the database:** You can horizontally scale app servers, but the DB is often the next bottleneck. Plan for read replicas and caching early.
+2. **Forgetting the database:** You can horizontally scale app servers, but the DB is often the next bottleneck. Plan for [read replicas](../../Level-02-Data-Layer/01-Database-Replication/README.md) and caching early.
 3. **Stateful app servers:** If your servers hold session state in memory, you can't add more without users getting logged out. Fix this first (see [Stateless vs Stateful](../07-Stateless-vs-Stateful/README.md)).
-4. **Ignoring operational complexity:** 100 servers are 100x harder to deploy, monitor, and debug than one. Invest in observability and automation.
+4. **Ignoring operational complexity:** 100 servers are 100x harder to deploy, monitor, and debug than one. Invest in [observability](../../Level-06-Scale-and-Reliability/01-Observability/README.md) and automation.
 5. **Hot spots / uneven load:** Horizontal scaling only works if traffic distributes evenly. A poor sharding key or a lack of load balancing creates one overloaded node and many idle ones.
 
 ---
@@ -265,4 +280,13 @@ YouTube handles ~500 hours of video uploaded per minute. Key scalability choices
 - [The Art of Scalability](https://akfpartners.com/books/the-art-of-scalability) — AKF Partners, where the Scale Cube originated
 - [AWS Well-Architected Framework — Reliability Pillar](https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html)
 - [High Scalability Blog](http://highscalability.com/) — real-world architecture teardowns
-- Next: [Load Balancing](../02-Load-Balancing/README.md) — the mechanism that makes horizontal scaling possible
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Level 1 — Building Blocks (overview)](../README.md) · ➡️ **Next:** [Load Balancing](../02-Load-Balancing/README.md)
+
+🧩 **See it applied in:** [10 · Typeahead / Autocomplete](../../Bonus-Real-World-Architectures/10-Typeahead-Autocomplete/README.md)
+
+<!-- nav:end -->

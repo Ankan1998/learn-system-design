@@ -2,7 +2,7 @@
 
 > A planetary-scale geospatial platform that stores the entire road network as a weighted graph, serves billions of map tiles via CDN, computes real-time routes using precomputed Contraction Hierarchies, and derives live traffic ETAs from anonymized GPS probes.
 
-**Difficulty:** ⭐⭐⭐⭐ · **Builds on:** [Geospatial Indexing](../11-Uber-Ride-Sharing/README.md), [CDN & Caching](../../Level-01-Building-Blocks/06-CDN/README.md), [Graph Algorithms](../../Level-02-Data-Layer/README.md)
+**Difficulty:** ⭐⭐⭐⭐ · **Builds on:** [Geospatial Indexing](../../Level-07-Big-Data-and-Specialized/07-Geospatial-Indexing/README.md), [CDN & Caching](../../Level-01-Building-Blocks/06-CDN/README.md), [Uber / Ride-Sharing](../11-Uber-Ride-Sharing/README.md)
 
 ---
 
@@ -35,10 +35,10 @@ You are designing a system that handles **~1 billion** active users, **~5 billio
 
 ### Non-Functional
 
-- **Routing latency** < 200 ms P99 for typical in-country queries; < 2 s for cross-continental.
+- **Routing latency** < 200 ms [P99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) for typical in-country queries; < 2 s for cross-continental.
 - **Tile latency** < 50 ms P99 cache hit; < 500 ms cache miss.
 - **Availability** 99.99% (< 52 min downtime/year).
-- **Probe ingestion** throughput: sustain 500 k GPS events/second globally.
+- **Probe ingestion** throughput: sustain 25 M GPS events/second globally at peak (see §3).
 - **Consistency** for map data: eventual is fine; stale-map reads up to 24 h are acceptable; fresh traffic data must be < 2 min old.
 - **Map data storage**: the system must store the road network, tile pyramid, and places at petabyte scale.
 - **Privacy**: GPS probes must be anonymized before aggregation; raw location histories must never leave the device unencrypted.
@@ -60,7 +60,7 @@ Total raster tile corpus:   ≈ 17 TB compressed (Brotli ~3:1 from 50 TB raw)
 Vector tile corpus:         ≈  3 TB  (much smaller — geometry + style rules only)
 ```
 
-With replication × 3 across regions + CDN caching, total storage footprint ~ **150 TB** (object store + CDN edge).
+With replication × 3 across regions + CDN caching, total storage footprint ~ **150 TB** ([object store](../../Level-02-Data-Layer/09-Object-Storage/README.md) + CDN edge).
 
 ### Routing Queries
 
@@ -71,7 +71,7 @@ With replication × 3 across regions + CDN caching, total storage footprint ~ **
 Peak (5×): ≈ 290,000 routing queries/sec
 ```
 
-Each routing query runs Contraction Hierarchies (CH) on a precomputed graph. A single server can process ~500–2,000 CH queries/sec depending on query distance. At 290 k/s you need **~200–500 routing servers** behind an anycast load balancer, with the graph partitioned by geographic region (see Deep Dive 1).
+Each routing query runs Contraction Hierarchies (CH) on a precomputed graph. A single server can process ~500–2,000 CH queries/sec depending on query distance. At 290 k/s you need **~200–500 routing servers** behind an anycast [load balancer](../../Level-01-Building-Blocks/02-Load-Balancing/README.md), with the graph partitioned by geographic region (see Deep Dive 1).
 
 ### GPS Probe Ingestion
 
@@ -209,6 +209,8 @@ erDiagram
     PLACE }o--|| NODE : "snaps to"
 ```
 
+*Caption: Live traffic lives in its own table keyed by edge, so speeds can update constantly without touching the slowly changing road topology.*
+
 ### Map Tile Pyramid
 
 Tiles follow the **Slippy Map** (Web Mercator / EPSG:3857) convention:
@@ -227,7 +229,7 @@ Tiles follow the **Slippy Map** (Web Mercator / EPSG:3857) convention:
 
 **Traffic speeds:** Bigtable (wide-column) — edge_id as row key, time-bucketed speed columns. Writes at 25 M events/sec aggregated; reads by routing servers every 60 seconds.
 
-**Places & geocoding index:** Elasticsearch with geo_point fields + S2 cell sharding; updated from a batch pipeline hourly.
+**Places & geocoding index:** Elasticsearch with geo_point fields + S2 cell [sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md); updated from a batch pipeline hourly.
 
 ---
 
@@ -308,11 +310,13 @@ flowchart TD
     INGEST -->|"upsert places"| PLACEDB
 ```
 
+*Caption: Three independent paths share one platform: CDN-served tiles, online routing over an in-memory CH graph, and a streaming probe pipeline feeding Bigtable.*
+
 **Walk-through (numbered):**
 
 1. **Tile cache hit** — The mobile app requests tile z=15/x=5242/y=12665. The CDN edge node (nearest PoP) returns it in < 50 ms from edge cache. ~90% of tile requests never reach origin.
 2. **Tile cache miss** — The CDN forwards to the Tile Service, which reads the pre-rendered tile from GCS, returns it, and instructs the CDN to cache it with a 24-hour TTL.
-3. **Directions request** — The client sends origin + destination to the API Gateway. The Routing Service loads the relevant CH partition from the in-memory graph, runs a bidirectional CH query, overlays current traffic speeds from Bigtable, and returns an encoded polyline with step-by-step instructions.
+3. **Directions request** — The client sends origin + destination to the [API Gateway](../../Level-05-Architecture-Patterns/05-API-Gateway/README.md). The Routing Service loads the relevant CH partition from the in-memory graph, runs a bidirectional CH query, overlays current traffic speeds from Bigtable, and returns an encoded polyline with step-by-step instructions.
 4. **GPS probe pipeline** — Every opted-in device emits a probe (lat, lng, speed, heading, timestamp) to the Probe Ingestor. Kafka absorbs the burst. Dataflow (Flink) map-matches probes to road segments, filters outliers, computes a rolling median speed per segment, and writes to Bigtable. Routing servers refresh their traffic overlay every 60 seconds.
 5. **ETA** — The ETA Service blends current speeds (Bigtable), historical speed patterns (time-of-day / day-of-week from GRAPH), and a gradient-boosted ML model trained on historical ETA accuracy to produce a confidence-interval ETA.
 6. **Place search** — Query goes to Places Service → Elasticsearch with a geo_distance filter + BM25 relevance score. Results are snapped to the road graph for "snap-to-road" accuracy.
@@ -334,7 +338,7 @@ The road network is a **directed graph** G = (V, E) where:
 | Algorithm | Time complexity | Works at planet scale? | Notes |
 |-----------|----------------|------------------------|-------|
 | Dijkstra  | O((V + E) log V) | No — too slow at ~800M nodes | Baseline, textbook |
-| Bidirectional Dijkstra | O(V^0.5 log V) empirically | Borderline | Meet-in-middle halves search space |
+| Bidirectional Dijkstra | Same worst case; ~half the nodes explored in practice | Borderline | Meet-in-middle halves search space |
 | A* with geo heuristic | Better in practice | Partially | Heuristic h(v) = straight-line dist / max_speed; inadmissible heuristics break optimality |
 | Contraction Hierarchies (CH) | O(V^0.5) query, heavy precompute | Yes | Gold standard for road routing |
 
@@ -347,7 +351,7 @@ flowchart LR
         A1["A"] -->|"5"| B1["B"]
         B1 -->|"3"| C1["C"]
         A1 -->|"4"| D1["D"]
-        D1 -->|"2"| C1
+        D1 -->|"6"| C1
     end
 
     subgraph Contracted["After contracting B"]
@@ -356,11 +360,13 @@ flowchart LR
         B2 -->|"3"| C2["C"]
         A2 -->|"8 (shortcut)"| C2
         A2 -->|"4"| D2["D"]
-        D2 -->|"2"| C2
+        D2 -->|"6"| C2
     end
 
     Original -->|"contract low-importance nodes"| Contracted
 ```
+
+*Caption: Removing B adds an A→C shortcut of weight 8 because A→B→C is the only shortest path between them, so distances stay exact.*
 
 **Preprocessing (offline, ~4 hrs for planet):**
 1. Rank all nodes by "importance" (fewer neighbors = less important = contracted first).
@@ -391,8 +397,10 @@ flowchart TD
         ZMAX["Zoom 22<br/>17.6T tiles<br/>building level<br/>~0.04 m/px"]
     end
 
-    Z0 -->|"2× tile count each level"| Z1 --> Z2 --> Z3 -->|"..."| ZMAX
+    Z0 -->|"4× tile count each level"| Z1 --> Z2 --> Z3 -->|"..."| ZMAX
 ```
+
+*Caption: Each zoom level quadruples the tile count and halves metres per pixel, which is why zoom 22 reaches trillions of tiles.*
 
 **Raster tiles (PNG/JPEG/WebP):**
 - Pre-rendered at all zoom levels by a MapReduce pipeline.
@@ -401,7 +409,7 @@ flowchart TD
 - Size: ~20–100 KB per tile compressed.
 - Con: style changes require re-rendering billions of tiles.
 
-**Vector tiles (Protobuf / MVT format):**
+**Vector tiles ([Protobuf](../../Level-03-Communication/09-Data-Serialization-and-Schema-Evolution/README.md) / MVT format):**
 - Contain raw geometry + attribute data (road class, name, POI type).
 - Client-side rendering with WebGL (Google Maps JS API v3, MapLibre).
 - Much smaller (~5–20 KB) and enable dynamic styling, smooth zoom, night mode, traffic overlays on the fly.
@@ -421,16 +429,16 @@ Cache-TTL: zoom < 10 → 7 days (world geography rarely changes)
 
 ### Deep Dive 3: Live Traffic ETA from Anonymized GPS Probe Aggregation
 
-**Privacy model:** Raw GPS coordinates never leave the device unencrypted. The device locally map-matches its location to a road segment ID (not raw lat/lng), strips the route context, adds random noise to the timestamp, and emits only `{segment_id, speed_kph, heading, anonymous_token}`.
+**Privacy model:** Probes travel over TLS and carry a short-lived random token instead of a user ID, so points can be stitched into a short trace but not tied to an account. The ingestion tier map-matches each trace to road segments, keeps only `{segment_id, speed_kph, heading}`, drops the first and last stretch of every trip (the parts that reveal homes and workplaces), and publishes a segment's speed only when enough distinct devices contributed to it.
 
 **Pipeline steps:**
 
 ```
-Device → [local map-match] → probe {seg_id, speed, ts}
+Device → probe {lat, lng, speed, heading, ts, rotating token} over TLS
   → Kafka topic (partitioned by geo-hash)
   → Dataflow streaming job:
       1. Outlier filter  (speed > 200 kph or < 0? discard)
-      2. Map-match validation (does speed match road class max speed? flag)
+      2. Map-match to road segments, trim trip endpoints, drop the token
       3. Rolling 2-min median speed per segment
       4. Bayesian smoothing with historical free-flow speed
       5. Write speed record to Bigtable
@@ -499,7 +507,7 @@ When a road changes or a map error is corrected, you need to invalidate affected
 
 ### Probe Ingestor Backpressure
 
-At 25 M events/sec, a Kafka cluster needs ~25 GB/sec of write throughput. **Solution:** Kafka partitioned by `geo_hash % 1000`. Each partition serves one Dataflow worker. Probes older than 5 minutes are dropped — stale traffic data is worse than no traffic data.
+At 25 M events/sec, a Kafka cluster needs ~2.5 GB/sec of write throughput (before replication). **Solution:** Kafka partitioned by `geo_hash % 1000`. Each partition serves one Dataflow worker. Probes older than 5 minutes are dropped — stale traffic data is worse than no traffic data.
 
 ### Failure Modes
 
@@ -530,7 +538,7 @@ At 25 M events/sec, a Kafka cluster needs ~25 GB/sec of write throughput. **Solu
 
 ### Dijkstra vs. Contraction Hierarchies
 
-Pure Dijkstra on the 800 M node planet graph takes ~minutes per query — completely impractical. A* helps but depends on a good heuristic and doesn't scale to cross-continental routes. CH with precomputation reduces query time to **< 10 ms** at the cost of 4-hour preprocessing and ~50 GB memory per geographic partition. For a real-time system at 290 k queries/sec, CH is the only viable choice.
+Pure Dijkstra on the 800 M node planet graph takes ~minutes per query — completely impractical. A* helps but depends on a good heuristic and doesn't scale to cross-continental routes. CH with precomputation reduces query time to **< 10 ms** at the cost of 4-hour preprocessing and ~50 GB memory for the planet graph. For a real-time system at 290 k queries/sec, CH is the only viable choice.
 
 ### Probe Aggregation: Median vs. Mean
 
@@ -538,7 +546,7 @@ Speed distributions are highly skewed (a few cars parked cause near-zero reading
 
 ### Monolith vs. Microservices
 
-Google Maps is inherently decomposed: routing, tile serving, traffic, and places have completely different scaling properties (tile serving is read-heavy and CDN-friendly; routing is compute-heavy; probe ingestion is write-heavy). Separate services with well-defined APIs is the right call here — this is one of the canonical examples where microservices pay off.
+Google Maps is inherently decomposed: routing, tile serving, traffic, and places have completely different scaling properties (tile serving is read-heavy and CDN-friendly; routing is compute-heavy; probe ingestion is write-heavy). Separate services with well-defined APIs is the right call here — this is one of the canonical examples where [microservices](../../Level-05-Architecture-Patterns/01-Monolith-vs-Microservices/README.md) pay off.
 
 ---
 
@@ -546,11 +554,11 @@ Google Maps is inherently decomposed: routing, tile serving, traffic, and places
 
 **Google S2 Geometry Library:** Google uses the [S2 library](https://s2geometry.io/) for all geospatial indexing. S2 subdivides the sphere into a hierarchy of cells using a Hilbert space-filling curve, enabling efficient range queries, containment tests, and geo-sharding. You can index a region as a union of S2 cells and run geo queries as cell range lookups. Used for tile sharding, place indexing, and probe routing.
 
-**Contraction Hierarchies in practice:** Google's routing engine (internally called "Pathfinder") uses CH as its base algorithm, augmented with time-dependent edge weights (to model rush-hour speed patterns) and turn-cost modeling (left turns at intersections add time). The open-source equivalent is [OSRM](http://project-osrm.org/) which also uses CH on OpenStreetMap data.
+**Contraction Hierarchies in practice:** Google does not publish its routing engine's internals, but production road routers are built on Contraction Hierarchies or close relatives, augmented with time-dependent edge weights (to model rush-hour speed patterns) and turn-cost modeling (left turns at intersections add time). Bing Maps, for example, uses Customizable Route Planning, a relative of CH whose weights can be refreshed in seconds when traffic changes. The open-source equivalent is [OSRM](http://project-osrm.org/) which also uses CH on OpenStreetMap data.
 
-**OpenStreetMap & HERE Maps:** While Google has its own proprietary map database built from Street View, satellite imagery, partner feeds, and user contributions, many competitors (Apple Maps historically, Bing Maps, DuckDuckGo Maps) use [HERE Maps](https://www.here.com/) as a data source. [OpenStreetMap](https://www.openstreetmap.org/) is the open-source alternative that powers Mapbox, OsmAnd, and Organic Maps.
+**OpenStreetMap & HERE Maps:** While Google has its own proprietary map database built from Street View, satellite imagery, partner feeds, and user contributions, many competitors (Bing Maps historically, Amazon Location Service, many in-car navigation systems) use [HERE Maps](https://www.here.com/) as a data source. [OpenStreetMap](https://www.openstreetmap.org/) is the open-source alternative that powers Mapbox, OsmAnd, and Organic Maps.
 
-**Google Cloud Spanner for geo data:** The authoritative road graph topology is stored in Spanner — a globally distributed, strongly consistent, horizontally scalable SQL database — because road network edits need to be consistent (you don't want half the routing servers seeing a new one-way street and the other half not). Spanner's external consistency gives you this guarantee across regions.
+**Why a globally consistent database for the road graph:** This design keeps the authoritative road graph topology in Spanner — a globally distributed, strongly consistent, horizontally scalable SQL database — because road network edits need to be consistent (you don't want half the routing servers seeing a new one-way street and the other half not). Spanner's external consistency gives you this guarantee across regions.
 
 **Bigtable for traffic:** Bigtable's wide-column model maps perfectly to traffic data: row key = `segment_id#time_bucket`, columns = speed readings from different probe batches. It handles the 25 M writes/sec with horizontal scaling across tablet servers.
 
@@ -580,6 +588,14 @@ Google Maps is a masterclass in applying classical computer science to planetary
 - The road network is a **graph** — nodes are intersections, edges are road segments, weights are travel time (not distance).
 - **Dijkstra doesn't scale** to planet-sized graphs at production QPS. You need precomputed shortcuts (Contraction Hierarchies).
 - Map **tiles are pre-computed** and served almost entirely from CDN cache (~90% hit rate). The origin never sees most tile requests.
-- **Privacy for traffic data** is achieved by map-matching on-device and transmitting segment IDs + speeds, not raw GPS tracks.
+- **Privacy for traffic data** comes from rotating anonymous tokens, trimming trip endpoints, and publishing only per-segment aggregates over many devices — never an individual's track.
 - **Eventual consistency** is fine for map data (roads don't change by the second), but **routing must reflect traffic within ~2 minutes** to be useful for navigation.
 - At this scale, every component is independently scalable: routing servers, tile origin, probe ingestors, and the places index all scale on different axes.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [14 · Google Drive / Dropbox](../14-Google-Drive-Dropbox/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [16 · Ticketmaster](../16-Ticketmaster/README.md)
+
+<!-- nav:end -->

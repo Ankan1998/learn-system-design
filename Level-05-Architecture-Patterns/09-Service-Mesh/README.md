@@ -365,4 +365,10 @@ Don't. With one language and 12 services, a small shared Go library (retries, ti
 
 ---
 
-⬅️ Previous: [08 — Serverless Architecture](../08-Serverless-Architecture/README.md) · ➡️ Next: [10 — Multi-Tenancy & SaaS Architecture](../10-Multi-Tenancy/README.md) · 🏠 [Level 5 Index](../README.md)
+<!-- nav:start -->
+
+⬅️ **Previous:** [Serverless Architecture — FaaS & Beyond](../08-Serverless-Architecture/README.md) · 🏠 [Level 5 — Architecture Patterns](../README.md) · ➡️ **Next:** [Multi-Tenancy & SaaS Architecture](../10-Multi-Tenancy/README.md)
+
+🧩 **See it applied in:** [03 · Rate Limiter](../../Bonus-Real-World-Architectures/03-Rate-Limiter/README.md)
+
+<!-- nav:end -->

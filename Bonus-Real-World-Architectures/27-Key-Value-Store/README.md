@@ -31,7 +31,7 @@
 - Tunable consistency (quorum reads/writes)
 - Conflict resolution (vector clocks / LWW)
 - Membership & failure detection via gossip
-- Durable on-disk storage engine (LSM-tree)
+- Durable on-disk storage engine ([LSM-tree](../../Level-02-Data-Layer/04-Database-Internals/README.md))
 
 **Out of scope:**
 - Secondary indexes, range queries (that's a wide-column store like Cassandra)
@@ -52,7 +52,7 @@
 - **Durability:** zero data loss on single-node failure; survive loss of any minority of nodes
 - **Availability:** system remains readable/writable even during node failures (AP-leaning, tunable)
 - **Throughput:** 100 000 reads/s + 100 000 writes/s per cluster
-- **Latency:** p99 GET < 10 ms, p99 PUT < 20 ms
+- **Latency:** [p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) GET < 10 ms, p99 PUT < 20 ms
 - **Scalability:** linear scale-out by adding nodes
 - **Partition tolerance:** required (network partitions happen; we choose A over C by default, with tuning knobs)
 
@@ -75,7 +75,7 @@ Write throughput:
 
 Memory (LSM-tree memtable + bloom filters):
   Memtable: 256 MB per node (flushes to disk when full)
-  Bloom filters: ~10 bits/key → 1B keys × 10 bits = 1.25 GB per node
+  Bloom filters: ~10 bits/key → 1B keys × 3 replicas × 10 bits / 10 nodes ≈ 375 MB per node
     (fits in RAM — critical for read performance)
 
 Network:
@@ -147,7 +147,7 @@ Level-2 SSTables (~100× larger)
 
 **Why LSM-tree over B-tree?**
 - Writes always go to memtable first → sequential disk I/O on flush → much higher write throughput than random B-tree updates
-- Read amplification is managed with Bloom filters (skip SSTables that can't contain the key) and block caches
+- Read amplification is managed with [Bloom filters](../../Level-07-Big-Data-and-Specialized/06-Probabilistic-Data-Structures/README.md) (skip SSTables that can't contain the key) and block caches
 - Compaction runs in the background to merge and GC tombstones
 
 ---
@@ -206,6 +206,8 @@ flowchart TD
     style AE  fill:#e2d9f3,color:#000
 ```
 
+*Caption: Any node can coordinate a request; it replicates along the ring, falls back to hinted handoff for down replicas, and gossips with peers instead of relying on a master.*
+
 **Walk-through (PUT request):**
 1. Client sends `PUT(key, value)` to any node (or a dedicated coordinator).
 2. Coordinator hashes the key → finds the N=3 nodes responsible (the key's "preference list" on the ring).
@@ -222,10 +224,10 @@ flowchart TD
 
 See [Consistent Hashing deep-dive](../../Level-02-Data-Layer/08-Consistent-Hashing/README.md) for the full treatment. Summary for this system:
 
-- Hash each key with MD5/SHA-1 → 128-bit hash → map to position on a 2^32 ring.
+- Hash each key with MD5/SHA-1 → 128/160-bit hash → map to position on a 2^32 ring.
 - Each physical node owns **V = 150 virtual nodes** (vnodes) distributed randomly around the ring.
 - A key's coordinator is the first vnode clockwise from the key's hash position.
-- **Why vnodes?** Adding a new physical node moves only 1/N of the data on average. Without vnodes, a new node only takes from its immediate predecessor, causing uneven load if nodes have different capacities.
+- **Why vnodes?** Adding a new physical node moves only 1/N of the data on average. Without vnodes, a new node only takes from its immediate successor, causing uneven load if nodes have different capacities.
 
 ```mermaid
 flowchart LR
@@ -245,6 +247,8 @@ flowchart LR
     style VC1 fill:#e2d9f3,color:#000
     style VA2 fill:#d4edda,color:#000
 ```
+
+*Caption: Each key walks clockwise to the first vnode at or after its hash, so key2 at 350 skips B1 at 300 and lands on C1 at 450.*
 
 **Replication:** after finding the coordinator vnode, replicate to the next N−1 distinct physical nodes clockwise. This ensures replicas are on different machines (and ideally different racks/AZs).
 
@@ -291,9 +295,9 @@ Resolution strategies:
      (see Design #28 for CRDTs)
 ```
 
-**Dynamo's approach:** return both conflicting versions as a "sibling" list; the next client write must include a reconciled vector clock. Works well for shopping carts (union of items) but awkward for counters (use a separate CRDT counter instead).
+**Dynamo's approach:** return both conflicting versions as a "sibling" list; the next client write must include a reconciled vector clock. Works well for shopping carts (union of items) but awkward for counters (use a separate [CRDT](../../Level-04-Distributed-Systems/09-CRDTs-and-Conflict-Resolution/README.md) counter instead).
 
-**Cassandra's approach:** pure LWW — last timestamp wins. Simple, but requires tightly synchronised clocks. Cassandra uses hybrid logical clocks (HLC) to reduce the risk.
+**Cassandra's approach:** pure LWW — last timestamp wins. Simple, but requires tightly synchronised clocks. Cassandra relies on NTP-synchronised client/coordinator microsecond timestamps, so operators must keep clock skew low.
 
 ### 7.4 Anti-Entropy via Merkle Trees
 
@@ -323,6 +327,8 @@ flowchart TD
     style R    fill:#cce5ff,color:#000
 ```
 
+*Caption: Two replicas compare root hashes first and descend only into subtrees that differ, so finding one stale key among millions takes a handful of comparisons.*
+
 If Node A and Node B have the same root hash → done. If they differ, compare left children, then right children, and recurse until the differing keys are found. For 1 billion keys, sync only the diverged subset — typically O(log N) messages to find mismatches.
 
 **In Cassandra** each token range gets its own Merkle tree, rebuilt nightly during a `nodetool repair` pass. In Riak, anti-entropy runs continuously in the background.
@@ -332,7 +338,7 @@ If Node A and Node B have the same root hash → done. If they differ, compare l
 There is no central master. Nodes use **gossip (epidemic protocol)** to share membership state:
 
 1. Every second, each node picks a random peer and exchanges its view of the cluster (node states: alive / suspect / dead).
-2. On receiving a message, a node merges the peer's state with its own using **SWIM failure detection**: if a node hasn't been heard from in T seconds, it is marked suspect; if still silent after another interval, it's declared dead.
+2. On receiving a message, a node merges the peer's state with its own (the higher heartbeat version wins). Failure detection rides on the same exchange: a node that has not been heard from, directly or through gossip, for T seconds is marked *suspect*, and if it stays silent for another interval it is declared *dead*. Cassandra replaces the fixed T with a phi-accrual detector, and SWIM-style protocols add indirect probes through other nodes before suspecting anyone — see [Gossip & Failure Detection](../../Level-04-Distributed-Systems/10-Gossip-and-Failure-Detection/README.md).
 3. Dead nodes are removed from the preference list; hinted handoffs for their data are queued for delivery when they recover.
 
 This approach scales to thousands of nodes with O(log N) convergence time and no single coordinator to fail.
@@ -345,7 +351,7 @@ When a replica node is temporarily unavailable during a write:
 2. When node X recovers and rejoins the cluster (detected via gossip), the hinting node delivers the queued writes.
 3. The hint is deleted after successful delivery.
 
-**Limits:** hints are bounded (e.g., stored for max 1 hour / 100 MB). If a node is down too long, only anti-entropy (Merkle sync) can bring it back to consistency. This is why DynamoDB recommends keeping R+W>N even with hinted handoff enabled.
+**Limits:** hints are bounded (e.g., stored for max 1 hour / 100 MB). If a node is down too long, only anti-entropy (Merkle sync) can bring it back to consistency. This is why Dynamo-style systems recommend keeping R+W>N even with hinted handoff enabled.
 
 ### 7.7 LSM-Tree Storage Engine
 
@@ -358,15 +364,18 @@ flowchart LR
     C0 -->|compact| C1[L1 SSTables<br/>sorted, non-overlapping]
     C1 -->|compact| C2[L2 SSTables]
 
-    R[Read request] --> BF[Check Bloom Filter]
-    BF -->|key not present| MISS[Return not found]
-    BF -->|might exist| MT2[Check Memtable]
-    MT2 -->|not in mem| C0R[Search L0 → L1 → L2]
+    R[Read request] --> MT2[Check Memtable]
+    MT2 -->|found| HIT[Return value]
+    MT2 -->|not in memtable| BF[Bloom filter of each SSTable<br/>L0 → L1 → L2]
+    BF -->|definitely absent| SKIP[Skip that SSTable]
+    BF -->|might exist| C0R[Read its index + data block]
 
     style WAL fill:#f8d7da,color:#000
     style MT  fill:#cce5ff,color:#000
     style BF  fill:#fff3cd,color:#000
 ```
+
+*Caption: Writes only ever append (WAL, then memtable, then flushed SSTables merged by compaction), while reads use Bloom filters to skip SSTables that cannot hold the key.*
 
 **Write path:** WAL first (crash safety) → memtable (fast RAM write) → flush to SSTable when memtable is full.
 
@@ -384,7 +393,7 @@ flowchart LR
 |----------|--------|-----------|
 | Node failure (< N/2+1) | Reduced replication until recovery | Hinted handoff + Merkle anti-entropy on return |
 | Network partition | Writes succeed on partition with quorum; minority partition serves stale reads | Tunable R/W; clients handle `not_quorum` errors |
-| Hot key (celebrity problem) | One set of N nodes overwhelmed | Key-level rate limiting; read-your-own-writes caching layer |
+| Hot key (celebrity problem) | One set of N nodes overwhelmed | Key-level [rate limiting](../../Level-03-Communication/07-Rate-Limiting/README.md); read-your-own-writes caching layer |
 | Compaction I/O spike | Latency spikes during compaction | Rate-limit compaction; schedule during off-peak; add I/O capacity |
 | Vector clock growth | VC entries accumulate per conflicting writer | Prune VCs after a fixed number of entries (Dynamo prunes at 10) |
 | Clock skew (LWW) | Writes with earlier timestamps silently dropped | Use HLC; monitor NTP offset; alert on skew > 100 ms |
@@ -414,7 +423,7 @@ flowchart LR
 - **Amazon Dynamo** (2007 paper by DeCandia et al.) — the blueprint for this design. Uses consistent hashing, N/R/W quorums, vector clocks with client-side reconciliation, gossip, Merkle anti-entropy, and hinted handoff. Dynamo runs under Amazon's shopping cart and session storage. The paper is required reading.
 - **Apache Cassandra** — merges Dynamo's distribution model with Google Bigtable's column-family data model. Uses LWW (no vector clocks) with tunable quorums. CQL (Cassandra Query Language) adds secondary indexes and range queries on top.
 - **Riak KV** — open-source Dynamo clone. Supports both LWW and vector-clock siblings. Has a rich anti-entropy system with active background repair. Used by Riot Games and GitHub at scale.
-- **Amazon DynamoDB** (the managed service, distinct from the 2007 Dynamo paper) — single-digit-millisecond reads/writes via a fully managed API. Internally uses log-structured storage, global secondary indexes, and transparent partitioning.
+- **Amazon DynamoDB** (the managed service, distinct from the 2007 Dynamo paper) — single-digit-millisecond reads/writes via a fully managed API. Internally each storage replica uses a write-ahead log plus a B-tree, global secondary indexes, and transparent partitioning.
 - **ScyllaDB** — Cassandra-compatible but rewritten in C++ with a share-nothing architecture (one core per shard). Achieves much lower p99 latency than Java-based Cassandra.
 - **FoundationDB** — takes the opposite trade-off: CP (strict serializability) using a distributed log + MVCC. Powers Apple iCloud and Snowflake's metadata layer. Proves CP KV stores are viable at scale when you need it.
 
@@ -429,8 +438,16 @@ flowchart LR
 | Consistency | Tunable R + W; default W=2 R=2 (quorum, strong) |
 | Conflict resolution | Vector clocks with client merge (or LWW with HLC) |
 | Anti-entropy | Merkle tree reconciliation between replica pairs |
-| Membership | SWIM gossip protocol; no central coordinator |
+| Membership | Gossip protocol with suspect / dead failure detection; no central coordinator |
 | Failure handling | Hinted handoff (temporary) + Merkle repair (long-term) |
 | Storage engine | LSM-tree: WAL → memtable → SSTables + Bloom filters + compaction |
 
 The fundamental insight from the Dynamo paper is that **availability and consistency are a dial, not a switch**. By exposing N, R, and W as tunable parameters, the system can serve both use cases that need strong consistency (financial counters: W=3 R=2) and use cases that need maximum availability (shopping carts: W=1 R=1) — often within the same cluster. The engineering challenge is making the "eventually consistent" path truly converge reliably, which is exactly what Merkle anti-entropy, hinted handoff, and vector clocks are designed to do.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [26 · Unique ID Generator](../26-Unique-ID-Generator/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [28 · Google Docs Collaborative Editing](../28-Google-Docs-Collaborative-Editing/README.md)
+
+<!-- nav:end -->

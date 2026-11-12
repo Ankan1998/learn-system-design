@@ -188,7 +188,7 @@ Redis supports: LRU, LFU, Random, TTL-only. Memcached uses LRU exclusively.
 Facebook's "Scaling Memcache at Facebook" (USENIX 2013) described a deployment of **tens of thousands** of Memcached servers handling billions of requests per second. Key patterns:
 - **Look-aside caching:** App checks Memcached first, reads from MySQL on miss
 - **Lease tokens:** To prevent thundering herd, the first miss gets a "lease" — other requests wait rather than all hitting the DB simultaneously
-- Facebook eventually open-sourced a Memcached variant called **mcrouter** for routing across pools
+- Facebook eventually open-sourced a Memcached protocol router called **mcrouter** for routing across pools
 
 ### Twitter — Timeline Caching
 
@@ -302,4 +302,13 @@ A cache with a 20% hit ratio is barely helping. Always instrument `cache_hits`, 
 - [Facebook: Scaling Memcache at Facebook (USENIX 2013)](https://www.usenix.org/conference/nsdi13/technical-sessions/presentation/nishtala)
 - [Redis Documentation — Eviction Policies](https://redis.io/docs/manual/eviction/)
 - [AWS ElastiCache Best Practices](https://docs.aws.amazon.com/AmazonElastiCache/latest/red-ug/best-practices.html)
-- Previous: [Load Balancing](../02-Load-Balancing/README.md) · Next: [Databases — SQL vs NoSQL](../04-Databases-SQL-vs-NoSQL/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Load Balancing](../02-Load-Balancing/README.md) · 🏠 [Level 1 — Building Blocks](../README.md) · ➡️ **Next:** [Databases — SQL vs NoSQL](../04-Databases-SQL-vs-NoSQL/README.md)
+
+🧩 **See it applied in:** [01 · URL Shortener](../../Bonus-Real-World-Architectures/01-URL-Shortener/README.md) · [02 · Pastebin](../../Bonus-Real-World-Architectures/02-Pastebin/README.md) · [03 · Rate Limiter](../../Bonus-Real-World-Architectures/03-Rate-Limiter/README.md) · [04 · Notification Service](../../Bonus-Real-World-Architectures/04-Notification-Service/README.md) · [05 · Web Crawler](../../Bonus-Real-World-Architectures/05-Web-Crawler/README.md) · [06 · Twitter/X News Feed](../../Bonus-Real-World-Architectures/06-News-Feed-Twitter/README.md) · [07 · Instagram](../../Bonus-Real-World-Architectures/07-Instagram/README.md) · [09 · YouTube / Netflix](../../Bonus-Real-World-Architectures/09-YouTube-Netflix-Streaming/README.md) · …and 7 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

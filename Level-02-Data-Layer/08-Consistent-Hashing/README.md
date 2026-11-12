@@ -20,6 +20,27 @@ The same problem hits distributed databases whenever you want to add or remove a
 
 **The core problem:** naive modular hashing ties the mapping of every key to the total number of nodes N. Change N, and you pay a full reshuffle.
 
+```mermaid
+flowchart LR
+    subgraph MOD["Modulo hashing: hash(key) % N"]
+        direction TB
+        M1["4 servers<br/>key 10 → server 2<br/>key 11 → server 3<br/>key 12 → server 0<br/>key 13 → server 1"]
+        M2["5 servers<br/>key 10 → server 0<br/>key 11 → server 1<br/>key 12 → server 2<br/>key 13 → server 3"]
+        M1 -->|"add one server:<br/>every key here moves"| M2
+    end
+    subgraph RING["Consistent hashing"]
+        direction TB
+        C1["4 servers on the ring"]
+        C2["5 servers on the ring<br/>only the keys between the new server<br/>and its predecessor move"]
+        C1 -->|"add one server:<br/>about 1 key in 5 moves"| C2
+    end
+
+    style MOD fill:#fee2e2,color:#000
+    style RING fill:#dcfce7,color:#000
+```
+
+*Caption: With modulo hashing, adding a server changes the answer for almost every key, which empties a cache in one stroke. On a ring, only the new server's slice changes hands.*
+
 ---
 
 ## 🌍 Real-World Analogy
@@ -70,12 +91,12 @@ When Node E (hash = 70°) is added:
 
 When Node B (120°) is removed:
 
-- Its keys (80°–120°) migrate to Node C (the next clockwise node).
+- Its keys (30°–120°) migrate to Node C (the next clockwise node).
 - Everything else stays put.
 
 ### Step 5 — Virtual Nodes (Vnodes)
 
-**Problem:** with only one position per physical node, the ring can become uneven. If Node A is at 30° and Node B is at 31°, Node A handles almost nothing. Real data and load cluster unpredictably.
+**Problem:** with only one position per physical node, the ring can become uneven. If Node A is at 30° and Node B is at 31°, Node B handles almost nothing. Real data and load cluster unpredictably.
 
 **Solution:** each physical node gets **V virtual positions** on the ring (e.g., V = 150):
 
@@ -106,7 +127,7 @@ flowchart LR
 
     subgraph After["After: Node E added at 70°"]
         direction TB
-        A_ring["Ring positions:<br/>A=30° · E=70° · B=120° · C=210° · D=300°<br/><br/>user:42 (80°) → Node B  ✅ unchanged<br/>user:99 (160°) → Node C  ✅ unchanged<br/>user:7 (270°) → Node D  ✅ unchanged<br/>user:3 (20°) → Node A  ✅ unchanged<br/><br/>Keys 30°–70° move A→E  ⬅ only ~K/N keys!"]
+        A_ring["Ring positions:<br/>A=30° · E=70° · B=120° · C=210° · D=300°<br/><br/>user:42 (80°) → Node B  ✅ unchanged<br/>user:99 (160°) → Node C  ✅ unchanged<br/>user:7 (270°) → Node D  ✅ unchanged<br/>user:3 (20°) → Node A  ✅ unchanged<br/><br/>Keys 30°–70° move B→E  ⬅ only ~K/N keys!"]
     end
 
     Before --> After
@@ -170,10 +191,10 @@ flowchart TD
 ## 🏢 Real-World Examples
 
 ### Amazon Dynamo / DynamoDB
-The original consistent hashing paper. Dynamo introduced virtual nodes to handle uneven load. Each node is assigned a set of vnodes; when a node is added, its vnodes are populated from several existing nodes, spreading the transfer cost across the cluster.
+The paper that popularized consistent hashing for databases (the technique itself comes from Karger et al., 1997). Dynamo introduced virtual nodes to handle uneven load. Each node is assigned a set of vnodes; when a node is added, its vnodes are populated from several existing nodes, spreading the transfer cost across the cluster.
 
 ### Apache Cassandra
-Uses consistent hashing with virtual nodes (`num_tokens` setting, default 256 per node). The token ring is visible via `nodetool ring`. Adding a node pulls tokens from across the ring for smooth rebalancing.
+Uses consistent hashing with virtual nodes (`num_tokens` setting, default 16 per node since Cassandra 4.0; 256 in earlier versions). The token ring is visible via `nodetool ring`. Adding a node pulls tokens from across the ring for smooth rebalancing.
 
 ### Memcached Clients (libmemcached, twemproxy)
 Because Memcached itself is stateless (no cluster coordination), **clients** implement consistent hashing to route requests to the right server. This means adding/removing a Memcached instance only invalidates the fraction of keys it owned.
@@ -190,7 +211,7 @@ Many CDN edge networks and L7 load balancers use consistent hashing to route req
 
 | Factor | Naive Modular Hashing | Consistent Hashing |
 |--------|----------------------|--------------------|
-| **Keys remapped on resize** | ~(N−1)/N of all keys (~80–90%) | ~K/N keys (~20% for 5→6 nodes) |
+| **Keys remapped on resize** | ~(N−1)/N of all keys (~80–90%) | ~K/N keys (~17% for 5→6 nodes) |
 | **Implementation complexity** | Trivial | Moderate (ring data structure + vnodes) |
 | **Load balance (no vnodes)** | Even (by modular arithmetic) | Potentially uneven (depends on hash luck) |
 | **Load balance (with vnodes)** | N/A | Near-even; improves with higher V |
@@ -218,7 +239,7 @@ Many CDN edge networks and L7 load balancers use consistent hashing to route req
 
 1. **No virtual nodes → hotspots.** With one position per node, key distribution can be wildly uneven. One node might own 40% of the ring by chance. Always use virtual nodes in production.
 
-2. **Low V → poor distribution.** Using V = 3 virtual nodes per node gives almost no benefit. Use V ≥ 100 (Cassandra defaults to 256).
+2. **Low V → poor distribution.** Using V = 3 virtual nodes per node gives almost no benefit. Use V ≥ 100 (Cassandra defaulted to 256 before 4.0; its newer default of 16 relies on a smarter token-allocation algorithm).
 
 3. **Ignoring replication.** In systems like Cassandra, each key is stored on R replicas — the next R nodes clockwise. The replication factor must be factored into capacity planning; adding a node doesn't immediately relieve the most-loaded node because replicas lag.
 
@@ -266,5 +287,14 @@ Many CDN edge networks and L7 load balancers use consistent hashing to route req
 - [Amazon Dynamo Paper (2007)](https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf) — Section 4.2 on partitioning with virtual nodes.
 - [DDIA Chapter 6](https://dataintensive.net/) — Partitioning; consistent hashing vs range partitioning.
 - [Tom White — Consistent Hashing](https://tom-e-white.com/2007/11/consistent-hashing.html) — clear walkthrough with code.
-- Previous: [07 — Data Modeling](../07-Data-Modeling/README.md) · Next: [09 — Object Storage](../09-Object-Storage/README.md) · Back to [Level 02 Overview](../README.md)
-- See also: [Bonus — Distributed Cache](../../Bonus-Real-World-Architectures/README.md) · [Bonus — Key-Value Store](../../Bonus-Real-World-Architectures/README.md)
+- See also: [Bonus — Distributed Cache](../../Bonus-Real-World-Architectures/18-Distributed-Cache/README.md) · [Bonus — Key-Value Store](../../Bonus-Real-World-Architectures/27-Key-Value-Store/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Data Modeling](../07-Data-Modeling/README.md) · 🏠 [Level 2 — The Data Layer](../README.md) · ➡️ **Next:** [Object Storage](../09-Object-Storage/README.md)
+
+🧩 **See it applied in:** [11 · Uber Ride-Sharing](../../Bonus-Real-World-Architectures/11-Uber-Ride-Sharing/README.md) · [14 · Google Drive / Dropbox](../../Bonus-Real-World-Architectures/14-Google-Drive-Dropbox/README.md) · [33 · Content Delivery Network (CDN)](../../Bonus-Real-World-Architectures/33-Content-Delivery-Network/README.md) · [40 · A/B Testing (Experimentation) Platform](../../Bonus-Real-World-Architectures/40-Experimentation-Platform/README.md) · [01 · URL Shortener](../../Bonus-Real-World-Architectures/01-URL-Shortener/README.md) · [06 · Twitter/X News Feed](../../Bonus-Real-World-Architectures/06-News-Feed-Twitter/README.md) · [10 · Typeahead / Autocomplete](../../Bonus-Real-World-Architectures/10-Typeahead-Autocomplete/README.md) · [30 · Video Conferencing (Zoom / Google Meet)](../../Bonus-Real-World-Architectures/30-Video-Conferencing/README.md) · …and 2 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

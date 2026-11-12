@@ -36,8 +36,8 @@ The three hard problems:
 - Fraud filtering: filter bot clicks before billing
 
 ### Non-Functional
-- **10 B clicks/day** → ~115 000 clicks/s average; **500 000 clicks/s** peak (viral event)
-- End-to-end latency from click to aggregated count visible: **< 5 s** p99
+- **10 B clicks/day** → ~115 000 clicks/s average; **~460 000 clicks/s** peak (4× average, viral event)
+- End-to-end latency from click to aggregated count visible: **< 5 s** [p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md)
 - Aggregation accuracy: **< 0.1% error** vs. batch ground truth
 - Exactly-once counting — no double-billing
 - Query API p99: **< 100 ms**
@@ -60,7 +60,7 @@ The three hard problems:
 **Deduplication window**
 - Dedup key = `hash(adId + userId + floor(timestamp / 60s))`
 - Active dedup keys: 115 000 clicks/s × 60 s window × 10% unique = ~690 000 keys
-- Each key: 32 bytes → **~22 MB** for dedup bloom filter — fits in Flink operator state
+- Each key: 32 bytes → **~22 MB** for dedup [bloom filter](../../Level-07-Big-Data-and-Specialized/06-Probabilistic-Data-Structures/README.md) — fits in Flink operator state
 
 **Aggregation output**
 - 100 000 active ads × 1 440 minutes/day = **144 M rows/day** in time-series store
@@ -158,6 +158,8 @@ erDiagram
     RECONCILIATION_RUN ||--o{ CLICK_AGGREGATE : "validates"
 ```
 
+*Caption: Notice aggregates are keyed by ad, window start, and granularity, and each reconciliation run validates those aggregates against the batch ground truth.*
+
 **Storage choices:**
 - **Kafka** — raw click event stream (7-day retention); source of truth for replay
 - **Redis (Bloom filter / Set per window)** — deduplication within 1-minute window
@@ -210,6 +212,8 @@ flowchart TD
     class Browsers,Dashboard ext
 ```
 
+*Caption: Notice ingestion forks every click to Kafka for the real-time Flink path and to S3 for the nightly Spark path that later corrects ClickHouse.*
+
 **Walk-through (click event, hot ad):**
 1. Browser SDK fires `POST /v1/clicks` immediately on click; `202 Accepted` in < 5 ms (no sync processing).
 2. Ingestion Service writes to Kafka partition `hash(adId) % 100` — all clicks for the same ad go to the same partition (preserves order, simplifies dedup).
@@ -230,10 +234,10 @@ The stream processor may crash and restart, replaying events from the last Kafka
 
 **Flink's exactly-once mechanism:**
 - Flink periodically **checkpoints** its operator state (dedup bloom filter, aggregation accumulators) to S3.
-- Checkpoint is triggered by injecting a **barrier** into every Kafka partition simultaneously.
+- Checkpoint is triggered by injecting a **barrier** into the stream at every source (Kafka-reading) task.
 - When all operators have seen the barrier → checkpoint is complete → Flink commits Kafka offsets.
-- On recovery: restore state from last checkpoint; re-read Kafka from the checkpointed offset (at-least-once re-delivery). But since aggregation state is also restored, re-read events are deduplicated by the restored bloom filter.
-- Output to ClickHouse uses **two-phase commit (2PC)**: Flink writes to a staging table within a transaction; commits only after checkpoint succeeds.
+- On recovery: restore state from last checkpoint; re-read Kafka from the checkpointed offset (at-least-once re-delivery). But since aggregation state is also restored to the same point, re-read events are applied to that state exactly once.
+- Output to ClickHouse is made **idempotent** rather than transactional (ClickHouse has no general-purpose multi-statement transactions): each window's result is keyed by `(adId, windowStart)` in a ReplacingMergeTree table, and every insert batch carries a deduplication token derived from the checkpoint ID. A batch replayed after recovery is ignored or overwrites the same row instead of double-counting. (Sinks that do support transactions, such as Kafka, use Flink's [two-phase commit](../../Level-04-Distributed-Systems/04-Distributed-Transactions/README.md) instead.)
 
 ```mermaid
 sequenceDiagram
@@ -246,16 +250,17 @@ sequenceDiagram
     F->>F: process, accumulate state
     K->>F: BARRIER (checkpoint N)
     F->>S3: snapshot state (offsets, agg accumulators, bloom filter)
-    F->>CH: BEGIN TRANSACTION
-    F->>CH: INSERT aggregates
     S3-->>F: snapshot confirmed
-    F->>CH: COMMIT
+    F->>CH: INSERT window aggregates (dedup token = checkpoint N)
     Note over F: crash & restart
     F->>S3: restore state from checkpoint N
-    F->>K: seek to offset 1000 (re-read)
-    F->>F: events deduplicated by restored bloom filter
+    F->>K: seek to offset 2000 (checkpointed offset, re-read)
+    F->>F: replayed events applied once to restored state
+    F->>CH: a re-sent batch carries the same token and is ignored
     Note over F: no double-count in output
 ```
+
+*Caption: After a crash Flink rewinds both its state and its Kafka position to the same checkpoint, so replayed events are counted once, and the deduplication token stops a repeated insert from landing twice.*
 
 See [Idempotency & Exactly-Once](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md) for the general pattern.
 
@@ -267,8 +272,8 @@ A user who double-clicks, refreshes, or has a buggy SDK fires multiple `clickId`
 
 **Bloom filter for efficiency:**
 - A Bloom filter says "definitely not seen" or "probably seen" — no false negatives, some false positives.
-- Size: for 1 M dedup keys/minute and 0.1% false positive rate → **~14 MB** per 1-minute window.
-- Flink maintains a rolling window of 3 bloom filters (current minute, previous minute, two minutes ago). Events checked against all three.
+- Size: for 1 M dedup keys/minute and 0.1% false positive rate → **~1.8 MB** (≈14.4 bits per key) per 1-minute window.
+- The minute bucket is part of the key, so a duplicate can only match inside its own minute. Flink keeps the filters for the current and the two previous minutes so that late-arriving events are still checked against the filter for the minute they belong to.
 - On minute rollover: discard oldest, create fresh filter.
 
 **clickId dedup (exact):** For the exact same `clickId` (e.g., SDK retried the POST), maintain an exact set in Flink's RocksDB-backed state store with 5-minute TTL. Bloom filter handles approximate semantic dedup; exact clickId set handles protocol-level dedup.
@@ -289,9 +294,11 @@ flowchart LR
     class C1,C2 check
 ```
 
+*Caption: Two filters in a row: an exact set catches the same click sent twice, and a Bloom filter catches the same user clicking the same ad again within the minute.*
+
 ### 7.3 Hot Partition / Celebrity Ad Problem
 
-A celebrity posts a sponsored story. 5 million people click in 60 seconds. All clicks route to the same Kafka partition (`hash(adId) % 100` = partition 47). Partition 47's consumer is overwhelmed.
+A celebrity posts a sponsored story. 1 million people click in 60 seconds. All clicks route to the same Kafka partition (`hash(adId) % 100` = partition 47). Partition 47's consumer is overwhelmed.
 
 **Mitigations:**
 
@@ -320,6 +327,8 @@ flowchart LR
     class P0,P1,Px,P9 part
     class FA,FB,FJ,Merge flink
 ```
+
+*Caption: Notice salting spreads one hot ad across ten partitions, each Flink subtask keeps a partial count, and a merge step sums them at window close.*
 
 ### 7.4 Lambda Architecture — Real-Time + Batch Reconciliation
 
@@ -370,7 +379,7 @@ flowchart TD
 
 **Failure modes:**
 - **Flink job crash** → restores from last checkpoint (every 60 s); replays Kafka from checkpoint offset; dedup state restored → no double-count.
-- **Kafka broker failure** → ISR replication; leader election in ~30 s; producer retries; possible duplicate events during retry → deduplicated by Flink.
+- **Kafka broker failure** → ISR replication; [leader election](../../Level-04-Distributed-Systems/05-Leader-Election/README.md) promotes an in-sync replica within seconds; producer retries; possible duplicate events during retry → deduplicated by Flink.
 - **ClickHouse node failure** → ClickHouse replica serves reads; writes queued; eventual consistency within seconds.
 - **S3 unavailable** → Ingestion Service buffers in local disk (bounded); Spark batch delayed; stream aggregates still available.
 
@@ -390,7 +399,7 @@ flowchart TD
 
 ## 10. 🌐 How It's Actually Done
 
-**Google Ads** uses a system called **Dremel** (now BigQuery) for offline reconciliation of ad metrics. Their real-time pipeline uses **Pub/Sub → Dataflow (Flink-equivalent) → Bigtable** for low-latency counts.
+**Google Ads** published **Photon** (SIGMOD 2013), which joins ad click and query streams exactly-once across datacenters, and **Mesa** (VLDB 2014), the geo-replicated warehouse that stores ad metrics. On Google Cloud the equivalent pipeline is **Pub/Sub → Dataflow → Bigtable/BigQuery**.
 
 **Meta (Facebook Ads):** Described in "Scuba: Diving into Data at Facebook" — a real-time aggregation store that ingests ~1 M events/s per table. Their counting pipeline uses approximate counting (HyperLogLog for unique users) alongside exact dedup for billing.
 
@@ -406,7 +415,7 @@ flowchart TD
 
 | Aspect | Decision |
 |---|---|
-| Ingestion | Stateless ingestion → Kafka (partitioned by adId) + S3 (raw for batch) |
+| Ingestion | [Stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md) ingestion → Kafka (partitioned by adId) + S3 (raw for batch) |
 | Dedup | Bloom filter (semantic, per minute window) + exact clickId set (protocol dedup) |
 | Stream processing | Flink with exactly-once checkpointing + 2PC sink to ClickHouse |
 | Hot ad | Key salting → N parallel Kafka partitions → Flink merge at window close |
@@ -415,3 +424,11 @@ flowchart TD
 | Billing | Always billed from Spark batch counts (exact); stream counts are advisory only |
 
 The decisive architectural choice is the **lambda architecture**: accept that real-time is fast-but-approximate, batch is slow-but-exact, and bill from the exact number. This separates the product requirement (advertisers see near-real-time data) from the financial requirement (they're charged the right amount), letting you optimize each path independently.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [19 · Distributed Message Queue](../19-Distributed-Message-Queue/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [21 · Distributed Job Scheduler](../21-Distributed-Job-Scheduler/README.md)
+
+<!-- nav:end -->

@@ -2,7 +2,7 @@
 
 > Security at scale means layering authentication, authorization, encryption, and threat mitigation so that your system stays safe even when attackers have unlimited time, money, and bots.
 
-**Level:** 6 · **Topic:** 5 · **Prerequisites:** [Observability](../01-Observability), [Deployment Strategies](../04-Deployment-Strategies)
+**Level:** 6 · **Topic:** 5 · **Prerequisites:** [Observability](../01-Observability/README.md), [Deployment Strategies](../04-Deployment-Strategies/README.md)
 
 ---
 
@@ -12,8 +12,8 @@ Once your API is public, it is hammered — constantly. Bots probe for weak pass
 
 At small scale you can get away with a single lock on the door. At scale you cannot:
 
-- A 71 Tbps DDoS (Cloudflare, 2024) overwhelms any single firewall.
-- A stolen JWT that never expires gives an attacker permanent access.
+- A 3.8 Tbps DDoS (Cloudflare, 2024) overwhelms any single firewall.
+- A stolen [JWT](../../Level-03-Communication/08-Authentication-and-Authorization/README.md) that never expires gives an attacker permanent access.
 - One overly-permissive IAM role can let a compromised Lambda drain your entire database.
 
 Security at scale is not one thing — it is a system of overlapping defenses that assumes every layer will eventually be breached.
@@ -47,7 +47,7 @@ Each checkpoint is independent. Bypassing one does not grant access to the rest.
 
 You cannot authorize a user you have not authenticated. But authentication alone is not enough — a valid user should still only reach resources they are permitted to touch.
 
-**Zero-trust architecture** — "never trust, always verify." Every request — even from inside the VPC — must carry a valid, short-lived credential. There is no trusted network perimeter. Google's BeyondCorp model (2011 paper, production since ~2014) pioneered this: Googlers access internal apps from coffee shops the same way they access them from the office.
+**Zero-trust architecture** — "never trust, always verify." Every request — even from inside the VPC — must carry a valid, short-lived credential. There is no trusted network perimeter. Google's BeyondCorp model (started ~2011, paper published 2014) pioneered this: Googlers access internal apps from coffee shops the same way they access them from the office.
 
 *Defense in depth as a request path. Each layer assumes the one before it has already been breached.*
 
@@ -100,6 +100,8 @@ sequenceDiagram
     RS->>CA: 200 OK — protected data
 ```
 
+*Caption: The user's password never reaches the client app; the app swaps a short-lived authorization code for tokens, and the API only verifies the JWT signature and expiry.*
+
 ### Key Concepts
 
 **Sessions vs JWT tokens**
@@ -109,7 +111,7 @@ sequenceDiagram
 
 **TLS in transit** — All traffic must use TLS 1.2+. TLS 1.3 is preferred (fewer round-trips, forward secrecy by default). Never transmit credentials over HTTP, even internally.
 
-**Encryption at rest** — Databases, S3 buckets, and disk volumes should be encrypted (AES-256). AWS RDS, GCP Cloud SQL, and Azure SQL all offer this by default — just make sure you have not turned it off.
+**Encryption at rest** — Databases, S3 buckets, and disk volumes should be encrypted (AES-256). GCP Cloud SQL and Azure SQL encrypt by default, and S3 has encrypted every new object since 2023. On AWS RDS and EBS it is a setting chosen at creation time, so enforce it account-wide rather than trusting each team to tick the box.
 
 **Secrets management** — Never store secrets in code or environment variables committed to git. Use:
 - **HashiCorp Vault** — dynamic secrets, auto-rotation, audit logs.
@@ -126,7 +128,7 @@ The rule: a secret that has never touched a `.env` file checked into git is a se
 
 | Attack | How it works | Defense |
 |---|---|---|
-| **DDoS** | Flood the server with traffic from thousands of IPs until it falls over | CDN-level absorption (Cloudflare, AWS Shield), rate limiting, anycast routing |
+| **DDoS** | Flood the server with traffic from thousands of IPs until it falls over | CDN-level absorption (Cloudflare, AWS Shield), [rate limiting](../../Level-03-Communication/07-Rate-Limiting/README.md), anycast routing |
 | **SQL Injection** | Inject SQL via user input: `' OR 1=1 --` | Parameterized queries / prepared statements; ORM; input validation |
 | **XSS (Cross-Site Scripting)** | Inject JavaScript into a page that other users view | Content-Security-Policy header; output encoding; framework escaping (React, Angular do this by default) |
 | **CSRF (Cross-Site Request Forgery)** | Trick a logged-in user's browser into making a request they did not intend | CSRF tokens (double-submit cookie pattern); `SameSite=Strict` cookies |
@@ -181,7 +183,7 @@ flowchart TD
 
 ### Additional Strategies
 
-**Rate limiting** — Limit requests per IP, per user, or per API key. Typical pattern: 100 requests/minute for authenticated users, 10/minute for anonymous. Return `429 Too Many Requests` with a `Retry-After` header. Implement at the gateway layer (Kong, AWS API Gateway, Nginx) so it happens before your app code runs.
+**Rate limiting** — Limit requests per IP, per user, or per API key. Typical pattern: 100 requests/minute for authenticated users, 10/minute for anonymous. Return `429 Too Many Requests` with a `Retry-After` header. Implement at the gateway layer (Kong, AWS [API Gateway](../../Level-05-Architecture-Patterns/05-API-Gateway/README.md), Nginx) so it happens before your app code runs.
 
 **WAF (Web Application Firewall)** — Sits in front of your app and blocks requests matching known attack patterns (OWASP CRS rule set). AWS WAF, Cloudflare WAF, and ModSecurity can block SQLi and XSS before your code ever sees the request.
 
@@ -191,8 +193,8 @@ flowchart TD
 
 ## 🏢 Real-World Examples
 
-**Cloudflare — DDoS mitigation at 71 Tbps**
-In September 2024, Cloudflare mitigated the largest DDoS ever recorded: 71 terabits per second, sustained for ~80 seconds. This was possible because Cloudflare's anycast network spans 330+ cities — the attack traffic is absorbed at the edge, never reaching the origin. No single data center sees the full load.
+**Cloudflare — DDoS mitigation at 3.8 Tbps**
+In September 2024, Cloudflare mitigated what was then the largest DDoS ever recorded: 3.8 terabits per second, sustained for ~65 seconds. This was possible because Cloudflare's anycast network spans 330+ cities — the attack traffic is absorbed at the edge, never reaching the origin. No single data center sees the full load.
 
 **Google BeyondCorp — zero-trust in production**
 Google published the BeyondCorp research paper in 2014 and has been running it internally since around 2011. The model: no corporate VPN. Every request carries a short-lived credential tied to device posture (OS version, disk encryption status) and user identity. Access is granted at the application layer, not the network layer. Google Workspace and GCP's Identity-Aware Proxy (IAP) bring this model to customers.
@@ -220,7 +222,7 @@ Security and user experience pull in opposite directions. Your job is to find a 
 
 **Use these patterns when:**
 - You have public-facing endpoints (rate limiting and WAF are non-negotiable).
-- You handle PII, financial data, or health records (encryption at rest + in transit is required by GDPR, PCI-DSS, HIPAA).
+- You handle PII, financial data, or health records (encryption at rest + in transit is required by [GDPR](../09-Data-Privacy-and-Encryption/README.md), PCI-DSS, HIPAA).
 - You run microservices with service-to-service communication (mTLS or short-lived service tokens).
 - You allow third-party integrations (OAuth 2.0 with scoped tokens).
 
@@ -258,7 +260,7 @@ Request logging that captures Authorization headers, passwords in query strings,
 
 - **Always mention HTTPS/TLS first.** It is the baseline. If you say "the client sends credentials to the server" without mentioning TLS, an interviewer will notice.
 - **Distinguish AuthN from AuthZ clearly.** "Authentication is who you are; authorization is what you are allowed to do. They are separate concerns with separate systems."
-- **Explain where tokens live.** `HttpOnly` cookie vs `localStorage` is a classic follow-up. The right answer: `HttpOnly` cookie for web apps (not accessible to JS, requires CSRF token); `localStorage` is acceptable for native mobile apps where XSS is not a threat.
+- **Explain where tokens live.** `HttpOnly` cookie vs `localStorage` is a classic follow-up. The right answer: `HttpOnly` cookie for web apps (not accessible to JS, requires CSRF token); native mobile apps, where XSS is not a threat, use the OS secure store (Keychain / Keystore) instead.
 - **Know the JWT trade-off.** Stateless = no revocation without extra infrastructure. If asked "how do you log someone out immediately?" the answer is: maintain a token blocklist (Redis set of revoked JTI claims) checked on every request — which reintroduces statefulness.
 - **Mention defense in depth.** Never describe a single control as "the solution." Layer WAF → rate limiting → input validation → least-privilege → encryption.
 - **Bring up zero-trust if discussing microservices.** "Inside the VPC is not automatically trusted. Every service authenticates with a short-lived token."
@@ -297,3 +299,13 @@ Request logging that captures Authorization headers, passwords in query strings,
 - [JWT Best Practices RFC 8725](https://datatracker.ietf.org/doc/html/rfc8725) — what to validate, what algorithms to avoid (`alg: none`), and how to set claims correctly.
 - [HashiCorp Vault documentation](https://developer.hashicorp.com/vault/docs) — practical guide to dynamic secrets, secret rotation, and audit logging.
 - [Cloudflare DDoS Threat Report](https://radar.cloudflare.com/reports/ddos) — quarterly data on DDoS attack size, duration, and vectors; great for grounding answers in real numbers.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Deployment Strategies](../04-Deployment-Strategies/README.md) · 🏠 [Level 6 — Scale & Reliability](../README.md) · ➡️ **Next:** [Multi-Region and Geo-Distribution](../06-Multi-Region-and-Geo-Distribution/README.md)
+
+🧩 **See it applied in:** [41 · Online Code Judge (LeetCode / HackerRank)](../../Bonus-Real-World-Architectures/41-Online-Code-Judge/README.md) · [44 · Identity & Access Management Service (Auth0 / Okta)](../../Bonus-Real-World-Architectures/44-Identity-and-Access-Service/README.md)
+
+<!-- nav:end -->

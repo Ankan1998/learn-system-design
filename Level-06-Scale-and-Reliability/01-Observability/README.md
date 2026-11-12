@@ -2,7 +2,7 @@
 
 > Observability is the ability to understand the internal state of a system by examining its external outputs — logs, metrics, and traces — so you can ask arbitrary questions about your system without deploying new code.
 
-**Level:** 6 · **Topic:** 1 · **Prerequisites:** [Capacity Planning and Estimation](../02-Capacity-Planning-and-Estimation) · [Load Balancing](../../Level-01-Building-Blocks/02-Load-Balancing) · [CAP Theorem](../../Level-04-Distributed-Systems/01-CAP-Theorem)
+**Level:** 6 · **Topic:** 1 · **Prerequisites:** [Latency, Throughput & Performance](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) · [Load Balancing](../../Level-01-Building-Blocks/02-Load-Balancing/README.md) · [CAP Theorem](../../Level-04-Distributed-Systems/01-CAP-Theorem/README.md)
 
 ---
 
@@ -10,7 +10,7 @@
 
 Your service goes down at 2 AM. Users are screaming. You SSH into a server and... now what?
 
-In a monolith with a single process, you might grep a log file and find the culprit in minutes. But modern systems are distributed across dozens of microservices, running in Kubernetes pods that get killed and recreated constantly. A single user request might touch 15 different services before returning a response. When something breaks, **you are flying blind**.
+In a monolith with a single process, you might grep a log file and find the culprit in minutes. But modern systems are distributed across dozens of microservices, running in [Kubernetes](../07-Containers-and-Orchestration/README.md) pods that get killed and recreated constantly. A single user request might touch 15 different services before returning a response. When something breaks, **you are flying blind**.
 
 The core problem is this: **you can't debug what you can't see**. Without deliberate instrumentation, production failures become black boxes:
 
@@ -122,10 +122,7 @@ sequenceDiagram
     note over AG: Span 1 ends<br/>t=152ms, duration=152ms
 ```
 
-style AG fill:#d0e8ff,stroke:#6aadff,color:#000
-style AU fill:#d4f1d4,stroke:#5cb85c,color:#000
-style DB fill:#fff3cd,stroke:#f0ad4e,color:#000
-style U fill:#f5d0f0,stroke:#c96cc9,color:#000
+*Caption: One trace ID ties the spans together and each span records its own start and duration, which is how the 125 ms database call stands out inside a 152 ms request.*
 
 Every span shares the same **TraceID** (`abc123`) so you can reconstruct the full picture. If the total request took 152ms but the database span took 125ms, you know exactly where to focus.
 
@@ -135,7 +132,7 @@ Tools like **Jaeger** and **Zipkin** store and visualize these traces. **OpenTel
 
 **ELK** (Elasticsearch, Logstash, Kibana) is the most common log aggregation stack:
 
-1. **Logstash / Filebeat** — agents running on each host that ship log lines to a central destination
+1. **Filebeat → Logstash** — a lightweight shipper (Filebeat) on each host tails log files and forwards them; Logstash parses, enriches, and routes them centrally
 2. **Elasticsearch** — stores logs as indexed JSON documents, enables full-text search and aggregations
 3. **Kibana** — dashboard UI for querying and visualizing logs
 
@@ -158,7 +155,7 @@ With structured logs, you can filter `trace_id = abc123` to find every log line 
 
 ### Metrics — Prometheus and Grafana
 
-**Prometheus** is a time-series database that scrapes numeric metrics from your services at regular intervals (typically every 15 seconds). You query it with **PromQL**.
+**Prometheus** is a [time-series database](../../Level-07-Big-Data-and-Specialized/08-Specialized-Databases/README.md) that scrapes numeric metrics from your services at regular intervals (typically every 15 seconds). You query it with **PromQL**.
 
 **Grafana** sits on top of Prometheus (and other sources) to render dashboards. Most teams have a Grafana dashboard per service showing the **RED** and **USE** method metrics:
 
@@ -224,7 +221,7 @@ flowchart LR
 
 **Datadog** is the most widely used commercial observability platform. It unifies logs, metrics, and traces under a single query language and correlation ID, so you can click from a metric spike to the traces that caused it to the log lines within those traces — all without context-switching. Datadog's pricing is volume-based (per host, per log GB ingested, per trace), which teaches you quickly that cardinality and log verbosity have real dollar costs.
 
-**Netflix** runs tens of thousands of microservices and popularized the concept of "observability-driven development." Their Atlas metrics system handles millions of time series. Netflix engineers are expected to ship dashboards and runbooks alongside every new feature — observability is a first-class deliverable, not an afterthought. Netflix also open-sourced **Hystrix** (circuit breakers) and **Chaos Monkey** — tools that only make sense if you have strong observability to measure their effect.
+**Netflix** runs over a thousand microservices and popularized the concept of "observability-driven development." Their Atlas metrics system handles millions of time series. Netflix engineers are expected to ship dashboards and runbooks alongside every new feature — observability is a first-class deliverable, not an afterthought. Netflix also open-sourced **Hystrix** ([circuit breakers](../../Level-05-Architecture-Patterns/06-Resilience-Patterns/README.md)) and **Chaos Monkey** — tools that only make sense if you have strong observability to measure their effect.
 
 ---
 
@@ -328,3 +325,13 @@ Interviewers love asking why you shouldn't put `user_id` as a Prometheus metric 
 - [Cindy Sridharan — Monitoring and Observability](https://copyconstruct.medium.com/monitoring-and-observability-8417d1952e1c) — the essay that popularized "observability" in the software industry
 - [Jaeger Documentation](https://www.jaegertracing.io/docs/) — distributed tracing concepts and Jaeger architecture
 - [Grafana Best Practices](https://grafana.com/docs/grafana/latest/best-practices/) — dashboard design and alerting guidance
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Level 6 — Scale & Reliability (overview)](../README.md) · ➡️ **Next:** [Capacity Planning and Estimation](../02-Capacity-Planning-and-Estimation/README.md)
+
+🧩 **See it applied in:** [33 · Content Delivery Network (CDN)](../../Bonus-Real-World-Architectures/33-Content-Delivery-Network/README.md) · [34 · Distributed Logging & Monitoring](../../Bonus-Real-World-Architectures/34-Distributed-Logging-Monitoring/README.md) · [04 · Notification Service](../../Bonus-Real-World-Architectures/04-Notification-Service/README.md) · [05 · Web Crawler](../../Bonus-Real-World-Architectures/05-Web-Crawler/README.md) · [21 · Distributed Job Scheduler](../../Bonus-Real-World-Architectures/21-Distributed-Job-Scheduler/README.md) · [36 · Webhook Delivery Service](../../Bonus-Real-World-Architectures/36-Webhook-Delivery-Service/README.md)
+
+<!-- nav:end -->

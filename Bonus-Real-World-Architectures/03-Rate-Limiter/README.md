@@ -3,10 +3,10 @@
 > A distributed rate limiter that enforces per-user, per-IP, and per-endpoint request quotas across a fleet of API servers — without a single point of failure.
 
 **Difficulty:** ⭐⭐ · **Builds on:**
-[Level-03 · Rate-Limiting Concepts](../../Level-03-Communication/07-Rate-Limiting/README.md) ·
-[Level-03 · API Design](../../Level-03-Communication/01-API-Design-REST/README.md) ·
-[Level-01 · Caching](../../Level-01-Building-Blocks/03-Caching/README.md) ·
-[Level-05 · API Gateway](../../Level-05-Architecture-Patterns/05-API-Gateway/README.md) ·
+[Level 3 · Rate-Limiting Concepts](../../Level-03-Communication/07-Rate-Limiting/README.md) ·
+[Level 3 · API Design](../../Level-03-Communication/01-API-Design-REST/README.md) ·
+[Level 1 · Caching](../../Level-01-Building-Blocks/03-Caching/README.md) ·
+[Level 5 · API Gateway](../../Level-05-Architecture-Patterns/05-API-Gateway/README.md) ·
 [Bonus · URL Shortener](../01-URL-Shortener/README.md)
 
 ---
@@ -41,7 +41,7 @@ You're designing the rate-limiting layer for a public API platform (think Stripe
 
 ### Non-Functional
 
-- **Latency:** add no more than 1–2 ms P99 to the request path
+- **Latency:** add no more than 1–2 ms [P99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) to the request path
 - **Availability:** rate limiter must not be a hard dependency — if it's down, the system decides to fail open (allow) or fail closed (block), depending on the use case
 - **Accuracy:** tolerate at most ~0.1% overcounting in the sliding window approximation
 - **Throughput:** handle 500K+ check-and-increment operations per second
@@ -175,7 +175,7 @@ Content-Type: application/json
 |---|---|---|---|
 | Fixed Window Counter | `STRING` (integer) | `rl:fw:{uid}:{endpoint}:{window_ts}` | window duration |
 | Sliding Window Log | `SORTED SET` | `rl:swl:{uid}:{endpoint}` | window duration |
-| Sliding Window Counter | Two `STRING`s | `rl:swc:{uid}:{endpoint}:{curr_ts}` + `{prev_ts}` | window duration |
+| Sliding Window Counter | Two `STRING`s | `rl:swc:{<uid>:<endpoint>}:<curr_ts>` + the same with `<prev_ts>` (literal braces = cluster hash tag) | 2× window duration |
 | Token Bucket | `HASH` | `rl:tb:{uid}:{endpoint}` → `{tokens, last_refill}` | idle TTL |
 | Leaky Bucket | `LIST` + `STRING` | `rl:lb:{uid}:{endpoint}` | window duration |
 
@@ -191,11 +191,11 @@ Fields: `tokens` (float, current bucket level), `last_refill` (Unix timestamp of
 ### Sliding Window Counter — two STRING counters
 
 ```
-rl:swc:usr_abc:/v1/payments:1719187200   →  124  (TTL: 120s)
-rl:swc:usr_abc:/v1/payments:1719187260   →   37  (TTL: 120s)
+rl:swc:{usr_abc:/v1/payments}:1719187200   →  124  (TTL: 120s)
+rl:swc:{usr_abc:/v1/payments}:1719187260   →   37  (TTL: 120s)
 ```
 
-The Lua script reads both, computes the weighted count, and increments the current-window key — all atomically.
+The Lua script reads both, computes the weighted count, and increments the current-window key — all atomically. The literal braces are a Redis Cluster **hash tag**: only the text inside them is hashed, so both window keys land in the same slot. Without the tag the two keys usually hash to different slots and `EVAL` fails with a `CROSSSLOT` error.
 
 ### Sliding Window Log — SORTED SET
 
@@ -277,13 +277,15 @@ flowchart TD
     class RL_MW rl
 ```
 
+*Caption: Notice that the rate-limit check happens inside the gateway before any backend service is reached, with rules cached locally and counters held in sharded Redis.*
+
 ### Request flow walk-through
 
 1. **Client** sends `POST /v1/payments` with `Authorization: Bearer sk_live_xyz`.
 2. **CDN / L4 LB** absorbs network-level floods, forwards TCP to an API Gateway node.
 3. **API Gateway** extracts the rate-limit key — typically `{user_id}:{endpoint}` — and invokes the RL middleware.
 4. **RL Middleware** looks up the user's tier and limit rules from its **local in-memory cache** (refreshed every 30 s from the Rules DB). Cache hit keeps this under 100 µs.
-5. Middleware calls `EVAL <lua_script> 1 <key> <limit> <window> <now>` on the correct **Redis shard** (key hashing routes to the right primary).
+5. Middleware calls `EVAL <lua_script> 2 <curr_key> <prev_key> <limit> <window> <now> <window_start>` on the correct **Redis shard** (key hashing routes to the right primary).
 6. **Lua script** atomically reads the counter, checks the limit, increments if allowed, and returns `{allowed, remaining, reset_at}`.
 7. If **allowed**: gateway forwards to the backend service, injects `X-RateLimit-*` headers into the response.
 8. If **blocked**: gateway returns `429 Too Many Requests` immediately — the backend is never touched.
@@ -310,7 +312,7 @@ flowchart LR
 
         TB["Token Bucket<br/>───────────────<br/>✅ Handles bursts natively<br/>✅ Smooth, predictable<br/>✅ Industry standard<br/>⭐ Recommended (general use)"]
 
-        LB["Leaky Bucket<br/>───────────────<br/>✅ Constant output rate<br/>✅ Great for queue shaping<br/>❌ Drops bursts, not delays<br/>Use for egress control"]
+        LB["Leaky Bucket<br/>───────────────<br/>✅ Constant output rate<br/>✅ Great for queue shaping<br/>❌ No bursts: excess waits or is dropped<br/>Use for egress control"]
     end
 
     classDef rec fill:#c8e6c9,color:#000,stroke:#388e3c
@@ -334,8 +336,8 @@ The most critical correctness requirement is that **read-check-increment** is at
 Here's the **Sliding Window Counter** Lua script — the recommended precision algorithm:
 
 ```lua
--- KEYS[1] = current window key  e.g. "rl:swc:usr_abc:/payments:1719187260"
--- KEYS[2] = previous window key e.g. "rl:swc:usr_abc:/payments:1719187200"
+-- KEYS[1] = current window key  e.g. "rl:swc:{usr_abc:/payments}:1719187260"
+-- KEYS[2] = previous window key e.g. "rl:swc:{usr_abc:/payments}:1719187200"
 -- ARGV[1] = limit               e.g. "1000"
 -- ARGV[2] = window_seconds      e.g. "60"
 -- ARGV[3] = current_time_ms     e.g. "1719187242500"
@@ -414,10 +416,12 @@ sequenceDiagram
     R-->>C2: {allowed=0, remaining=0}
 ```
 
+*Caption: Notice how two separate GET and INCR calls let both servers admit request 1001, while a single Lua EVAL serializes the check and blocks the second request.*
+
 **Other race conditions to watch for:**
 
 - **Clock skew:** Different servers may have slightly different system clocks. Use a single `now` timestamp from Redis (`TIME` command) inside the Lua script instead of passing it from the application server — or accept ±1ms jitter.
-- **Redis replication lag:** If a primary fails and you fail over to a replica, the replica may have missed the last few writes. You can see a brief window where counters are slightly under-counted. Acceptable in most cases; use synchronous replication (`WAIT 1 0`) if not.
+- **Redis [replication lag](../../Level-02-Data-Layer/01-Database-Replication/README.md):** If a primary fails and you fail over to a replica, the replica may have missed the last few writes. You can see a brief window where counters are slightly under-counted. Acceptable in most cases; if not, issue `WAIT 1 <timeout>` after the write to block until one replica has acknowledged it (this narrows the loss window but does not make Redis strongly consistent).
 - **Partitioned Redis:** If your Redis Cluster splits, some nodes become unavailable. The client library should fail the rate-limit check — you then decide: fail open (allow the request, risk abuse) or fail closed (block the request, risk availability).
 
 ### 7.4 Deployment Topology: Where Does the Rate Limiter Live?
@@ -452,6 +456,8 @@ flowchart TD
     class A_Svc,B_Side1,B_Side2,C_App service
 ```
 
+*Caption: Compare where the limiter sits in each option — at the shared gateway, in a sidecar beside each service, or embedded in the app — while all three share Redis.*
+
 | | API Gateway | Sidecar | In-App Library |
 |---|---|---|---|
 | **Centralized logic** | ✅ Single place to update rules | ❌ Deploy to every sidecar | ❌ Deploy to every app |
@@ -469,8 +475,8 @@ flowchart TD
 ### Scaling Redis
 
 - A single Redis node at 100K–500K ops/sec handles most APIs up to ~100M req/day.
-- Beyond that: **Redis Cluster** with consistent hashing. Shard by `user_id` so one user's requests always hit the same shard (avoids cross-shard transactions).
-- For multi-region (US + EU + APAC): run independent Redis clusters per region. Accept that a user who routes through two regions (via anycast DNS) might slightly exceed their quota. Add a global counter with lower accuracy if you need strict global enforcement.
+- Beyond that: **Redis Cluster** with hash-slot [sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md) (16,384 slots). Shard by `user_id` so one user's requests always hit the same shard (avoids cross-shard transactions).
+- For multi-region (US + EU + APAC): run independent Redis clusters per region. Accept that a user who routes through two regions (via anycast [DNS](../../Level-00-Foundations/05-DNS/README.md)) might slightly exceed their quota. Add a global counter with lower accuracy if you need strict global enforcement.
 
 ### Bottlenecks
 
@@ -484,7 +490,7 @@ flowchart TD
 |---|---|---|
 | Redis primary dies | Counters unavailable until failover (~30s) | **Fail open** (allow traffic, log for audit) for most APIs; **fail closed** for sensitive endpoints. Redis Sentinel auto-promotes replica. |
 | Redis Cluster partition | Some shards unreachable | Route to replica (reads may be slightly stale). If primary unreachable: fail open or closed per policy. |
-| RL middleware crash | No rate limiting enforced | Deploy as a sidecar or library so it's co-located with the gateway process. Monitor with health checks. Circuit breaker on the Redis call. |
+| RL middleware crash | No rate limiting enforced | Deploy as a sidecar or library so it's co-located with the gateway process. Monitor with health checks. [Circuit breaker](../../Level-05-Architecture-Patterns/06-Resilience-Patterns/README.md) on the Redis call. |
 | Clock skew between app servers | Window boundaries off by ±1s | Read `now` from Redis `TIME` command inside Lua, or accept the jitter (usually harmless). |
 | Burst at window boundary (fixed window) | Up to 2× the limit in 1 second | Switch to sliding window counter or token bucket. |
 
@@ -519,17 +525,17 @@ Each layer uses a different limit and a different mechanism. If the outer layer 
 | Algorithm | Memory | Accuracy | Burst handling | Complexity |
 |---|---|---|---|---|
 | Fixed Window Counter | O(1) | ❌ Boundary burst | ❌ None | Very low |
-| Leaky Bucket | O(N queue) | ✅ Precise rate | ❌ Drops bursts | Medium |
+| Leaky Bucket | O(N queue) | ✅ Precise rate | ❌ Smooths bursts away (queue, or drop when full) | Medium |
 | Token Bucket | O(1) | ✅ Good | ✅ Native burst | Medium |
 | Sliding Window Log | O(requests) | ✅ Perfect | ✅ Accurate | Medium |
 | Sliding Window Counter | O(1) | ✅ ~99.9% | ✅ Good | Medium |
 
 ### Alternatives to Redis
 
-- **Memcached:** Lacks Lua scripting → can't do atomic check-and-increment. Not suitable.
+- **Memcached:** Lacks Lua scripting → only atomic `incr` and CAS, so multi-step algorithms (sliding window, token bucket) are awkward. Suitable only for simple counters.
 - **DynamoDB / Bigtable:** Conditional writes can approximate atomic increments, but latency is 5–20 ms vs. Redis's 0.3–1 ms. Use only if you need durable counters (billing-grade).
 - **In-process (no external store):** Only for single-instance services. Use a `sync.Map` + goroutine or `java.util.concurrent.AtomicLong`.
-- **Service Mesh (Envoy / Istio):** Built-in rate limiting via `ratelimit` service. Integrates with Redis under the hood. Good if you're already running a mesh.
+- **[Service Mesh](../../Level-05-Architecture-Patterns/09-Service-Mesh/README.md) (Envoy / Istio):** Built-in rate limiting via `ratelimit` service. Integrates with Redis under the hood. Good if you're already running a mesh.
 
 ---
 
@@ -539,11 +545,11 @@ Real engineering teams have open-sourced their approaches — here's what they f
 
 **Stripe** ([Engineering Blog](https://stripe.com/blog/rate-limiters)) uses a combination of Request Rate Limiters (per endpoint), Concurrent Request Limiters (max in-flight), and Fleet Usage Load Shedders. They explicitly recommend Token Bucket for user-facing APIs and note that "failing open" (allowing traffic when Redis is down) is the right choice for most endpoints — the alternative is a Redis outage taking down your entire API.
 
-**Cloudflare** uses a sliding window approach built on top of their distributed key-value store. Their "Leaky Bucket" variant meters egress traffic to prevent one customer's traffic spike from impacting others on shared infrastructure.
+**Cloudflare** described its rate limiter in "How we built rate limiting capable of scaling to millions of domains" (2017). It is the sliding window *counter* approximation used in this design (the previous window's count weighted by overlap, plus the current count), kept in memory at each point of presence rather than in one global store. Measured against an exact sliding log on 400 million requests, it made the wrong call on about 0.003% of them.
 
-**GitHub** enforces API rate limits with fixed window counters (simple, visible to users) but uses sliding windows for abuse detection internally. Their `X-RateLimit-*` headers became the de facto standard that most APIs now follow.
+**GitHub** uses fixed hourly windows for its REST API primary limits (5,000 requests per hour for an authenticated user) and layers separate "secondary" limits on top to catch bursts and abuse. Its `X-RateLimit-Limit`, `-Remaining`, and `-Reset` headers became the de facto standard that most APIs now follow.
 
-**Kong / AWS API Gateway** both expose rate limiting as a configurable plugin/policy backed by Redis. Kong's `rate-limiting` plugin supports local (per-node), cluster (Redis), and hybrid modes.
+**Kong / AWS API Gateway** both expose rate limiting as a configurable plugin/policy (AWS API Gateway throttles with a token bucket). Kong's `rate-limiting` plugin supports `local` (per-node), `cluster` (Kong datastore), and `redis` policies.
 
 **Envoy Proxy's `ratelimit` service** ([GitHub](https://github.com/envoyproxy/ratelimit)) is a production-grade open-source rate limiter written in Go, backed by Redis, that you can deploy as a sidecar with any Envoy-based service mesh (Istio, Consul Connect).
 
@@ -569,3 +575,11 @@ You're building a distributed rate limiter that sits in the API gateway and enfo
 3. **Failure mode decisions:** Should your rate limiter fail open or closed when Redis dies? Neither answer is universally correct. The right answer depends on your threat model, your users, and your SLA — and you need to have thought it through before the incident, not during it.
 
 4. **Where to enforce:** Gateway, sidecar, or in-app? The answer affects your deployment model, your ability to enforce limits per microservice, and your blast radius when things go wrong. Each approach has genuine trade-offs that depend on your org structure as much as your technical requirements.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [02 · Pastebin](../02-Pastebin/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [04 · Notification Service](../04-Notification-Service/README.md)
+
+<!-- nav:end -->

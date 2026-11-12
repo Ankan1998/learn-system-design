@@ -1,4 +1,4 @@
-# Design 31 — E-Commerce Platform
+# Design an E-Commerce Platform (Amazon)
 
 > Amazon-style storefront — catalog, cart, inventory, checkout saga, and recommendations at scale
 
@@ -41,7 +41,7 @@ The interesting problems are:
 - **Availability:** 99.99% for checkout (four nines); 99.9% acceptable for catalog/browse
 - **Latency:** Product page < 200 ms p99; search < 300 ms p99; checkout < 3 s p99
 - **Consistency:** Strong for inventory and payment; eventual for catalog search index and recommendations
-- **Durability:** Zero order loss; payment events are idempotent
+- **Durability:** Zero order loss; payment events are [idempotent](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md)
 - **Scale:** 350 M SKUs, peak 66 000 orders/minute (Amazon Prime Day benchmark), 100 M daily active users
 
 ---
@@ -74,7 +74,7 @@ Catalog writes:  ~50 000 listing updates/min         (sellers, price changes, st
 Products:          350 M × 10 KB average metadata   = 3.5 TB   (relational / document store)
 Product images:    350 M × 5 images × 500 KB avg    = 875 TB   (object store; CDN-cached)
 Search index:      350 M docs × ~5 KB indexed fields = 1.75 TB  (Elasticsearch)
-Orders (10 yr):    1 100 ops/s × 86 400 × 365 × 10 × 2 KB = ~620 TB
+Orders (10 yr):    1 100 ops/s × 86 400 × 365 × 10 × 2 KB = ~690 TB
 Cart sessions:     10 M active × 2 KB               = 20 GB    (Redis; fits in RAM)
 ```
 
@@ -105,7 +105,7 @@ POST   /v1/cart/merge                    # merge guestCartId → authenticated c
 # Checkout
 POST /v1/orders                          # idempotency-key header required
   body: { cartId, shippingAddressId, paymentMethodId }
-  → returns: { orderId, status: "PENDING" }
+  → returns: { orderId, status: "CONFIRMED" }   # "PENDING" if payment needs an extra step (e.g. 3-D Secure)
 
 GET  /v1/orders/{orderId}               # poll / webhook for status
 
@@ -196,16 +196,18 @@ erDiagram
     INVENTORY||--o{ RESERVATION : "holds stock"
 ```
 
+*Caption: Products split into SKUs, and stock lives per SKU in INVENTORY, with RESERVATION rows holding units for in-flight checkouts until they are committed or released.*
+
 **Storage justifications:**
 
 | Data | Store | Reason |
 |---|---|---|
 | Products / SKUs | PostgreSQL (sharded by `product_id`) | ACID, rich queries, JSONB for flexible attributes |
-| Inventory | PostgreSQL with `FOR UPDATE SKIP LOCKED` | Strong consistency; row-level locking |
+| Inventory | PostgreSQL with `SELECT … FOR UPDATE` / version CAS | Strong consistency; row-level locking |
 | Cart sessions | Redis (TTL 30 days) | Sub-millisecond reads, automatic expiry, simple data structure |
 | Orders | PostgreSQL (append-heavy, partitioned by month) | Durability, ACID, audit trail |
 | Search index | Elasticsearch | Full-text + faceted search, near-real-time indexing |
-| Product images | S3-compatible object store + CDN | Blob storage at petabyte scale; CDN reduces latency globally |
+| Product images | S3-compatible [object store](../../Level-02-Data-Layer/09-Object-Storage/README.md) + CDN | Blob storage at petabyte scale; CDN reduces latency globally |
 | Recommendations | Apache Cassandra + in-memory cache | Wide-column model suits user→product affinity; high write throughput |
 
 ---
@@ -292,6 +294,8 @@ flowchart TD
     class Web,Mobile client
 ```
 
+*Caption: The Order Service orchestrates inventory, payment and shipping synchronously, while Kafka carries product and order events to search, notifications and recommendations asynchronously.*
+
 **Numbered walk-through:**
 
 1. **Browse/search** — Browser hits CDN for static assets; API Gateway routes `GET /search` to Search Service, which queries Elasticsearch. Product images are served directly from CDN (pre-warmed via cache-control headers from S3).
@@ -374,7 +378,7 @@ The cart has two personas: **guest** (before login) and **authenticated** (after
 
 ### 7.3 Inventory Management & the Oversell Problem
 
-This is the hardest part of the system. You have `quantity_on_hand = 1000` and 100 000 users simultaneously add the same SKU to their cart and start checking out. Without coordination, you could decrement `quantity` 10 000 times and ship 1 000× what you have.
+This is the hardest part of the system. You have `quantity_on_hand = 1000` and 100 000 users simultaneously add the same SKU to their cart and start checking out. Without coordination, you could decrement `quantity` 10 000 times and sell 10× what you have.
 
 **Three-phase inventory model:**
 
@@ -418,7 +422,7 @@ WHERE  sku_id = :sku
 ```lua
 -- Atomic Lua script (runs on single Redis node)
 local count = redis.call('GET', KEYS[1])
-if count == nil or tonumber(count) <= 0 then
+if count == false or tonumber(count) <= 0 then  -- missing key returns false in Redis Lua
   return -1  -- out of stock
 end
 return redis.call('DECR', KEYS[1])
@@ -507,12 +511,12 @@ The `Idempotency-Key` header (a UUID generated client-side) is stored in the `or
 ## 8. 📈 Scaling, Bottlenecks & Failure Modes
 
 **Catalog Service reads:**
-- Read replicas for PostgreSQL (5–10 replicas). Route all reads to replicas via PgBouncer connection pool.
+- Read replicas for PostgreSQL (5–10 replicas). Route all reads to replicas via [PgBouncer](../../Level-02-Data-Layer/06-Connection-Pooling/README.md) connection pool.
 - Redis read-through cache for hot products. At peak, >99% of product-page requests should be served from cache.
 - Elasticsearch handles all search traffic — never hit PostgreSQL for search queries.
 
 **Cart Service:**
-- Redis Cluster with consistent hashing. Each cart lives on one shard, so cart reads/writes are single-node operations.
+- Redis Cluster with [consistent hashing](../../Level-02-Data-Layer/08-Consistent-Hashing/README.md). Each cart lives on one shard, so cart reads/writes are single-node operations.
 - If a Redis node dies, the guest cart is lost (user must re-add items). Authenticated carts can be reconstructed from the PostgreSQL cold-path table within a few seconds.
 
 **Inventory Service (the hot spot):**
@@ -521,7 +525,7 @@ The `Idempotency-Key` header (a UUID generated client-side) is stored in the `or
 - Circuit breaker: if Inventory Service latency exceeds 500 ms, Order Service returns a 503 and asks the user to retry rather than queueing unboundedly.
 
 **Order Service (saga orchestrator):**
-- Order Service is stateless. Saga state is persisted in the `orders` table (each step updates `saga_state` JSON column).
+- Order Service is [stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md). Saga state is persisted in the `orders` table (each step updates `saga_state` JSON column).
 - On restart, the Order Service reads in-progress sagas from the DB and resumes from the last committed step. This requires each downstream call to be idempotent (inventory service checks if a reservation already exists for `orderId` before creating a new one).
 
 **Payment Service failures:**
@@ -554,13 +558,13 @@ The `Idempotency-Key` header (a UUID generated client-side) is stored in the `or
 
 ## 10. 🌐 How It's Actually Done
 
-**Amazon** pioneered the transition from monolith to microservices for exactly this problem. Their "two-pizza team" principle maps directly to service ownership: the Cart team owns cart, the Inventory team owns inventory. Amazon also developed DynamoDB to handle the cart's key-value access pattern at extreme scale — their public paper explicitly cites the shopping cart as the motivating use case.
+**Amazon** pioneered the transition from [monolith](../../Level-05-Architecture-Patterns/01-Monolith-vs-Microservices/README.md) to microservices for exactly this problem. Their "two-pizza team" principle maps directly to service ownership: the Cart team owns cart, the Inventory team owns inventory. Amazon also developed Dynamo (the precursor to DynamoDB) to handle the cart's key-value access pattern at extreme scale — their public 2007 paper explicitly cites the shopping cart as the motivating use case.
 
-**Shopify** takes a different architectural stance: a **multi-tenant SaaS model**. A single Rails monolith (now modularised into "components") serves millions of merchants. Shopify uses MySQL with aggressive sharding by shop ID, plus Redis for caching and Kafka for event streaming. Their approach shows that a well-optimised monolith can scale to $200 B+ in annual GMV before you need full microservices decomposition. The key insight: shard first, decompose second.
+**Shopify** takes a different architectural stance: a **[multi-tenant](../../Level-05-Architecture-Patterns/10-Multi-Tenancy/README.md) SaaS model**. A single Rails monolith (now modularised into "components") serves millions of merchants. Shopify uses MySQL with aggressive sharding by shop ID, plus Redis for caching and Kafka for event streaming. Their approach shows that a well-optimised monolith can scale to $200 B+ in annual GMV before you need full microservices decomposition. The key insight: shard first, decompose second.
 
 **Flash sale handling in the wild:** Taobao (Alibaba) runs "Double 11" (Singles Day) at peak loads of ~540 000 orders per second. Their approach: pre-warm every cache layer 24 h in advance, pre-allocate inventory tokens in Redis Cluster, rate-limit checkout at the CDN edge (return "sold out" page from edge cache when stock = 0), and use an asynchronous order pipeline where the user gets an optimistic "order placed" before all downstream steps complete.
 
-**Idempotency at Stripe:** Stripe's idempotency key implementation is a well-documented public reference. They store `(key, user_id) → (response_body, http_status, created_at)` in a Redis cluster with a 24-hour TTL. On conflict, they lock the key with a distributed mutex to prevent two concurrent requests with the same key from both proceeding.
+**Idempotency at Stripe:** Stripe's idempotency key implementation is a well-documented public reference. The first request with a given key is executed and its status code and body are saved, whether it succeeded or failed. A retry with the same key within 24 hours gets that saved response back, a retry that arrives while the original is still in flight is rejected with a 409 conflict, and reusing a key with different parameters is an error.
 
 ---
 
@@ -578,3 +582,11 @@ The `Idempotency-Key` header (a UUID generated client-side) is stored in the `or
 The e-commerce platform is the canonical distributed systems interview because it combines **every major pattern in one system**: read-heavy caching, write-heavy inventory coordination, distributed transactions (saga), event-driven async processing, and personalisation. The oversell problem and the checkout saga are the two questions you are most likely to be asked to deep-dive. Know them cold.
 
 If you take one thing away: **the checkout flow is a saga, not a transaction**. Design every step to be idempotent, every failure to have a compensating action, and every orchestrator restart to resume from durable state. The rest is caching and sharding.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [30 · Video Conferencing (Zoom / Google Meet)](../30-Video-Conferencing/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [32 · Gmail-Style Email Service](../32-Email-Service/README.md)
+
+<!-- nav:end -->

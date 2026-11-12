@@ -19,7 +19,7 @@
 
 ## 📋 Prerequisites
 
-Complete **[Level 00 — Foundations](../Level-00-Foundations/README.md)** first, especially:
+Complete **[Level 0 — Foundations](../Level-00-Foundations/README.md)** first, especially:
 
 - [How the Internet Works](../Level-00-Foundations/03-How-the-Internet-Works/README.md)
 - [Network Protocols](../Level-00-Foundations/04-Network-Protocols/README.md)
@@ -31,9 +31,9 @@ Complete **[Level 00 — Foundations](../Level-00-Foundations/README.md)** first
 
 ```mermaid
 flowchart LR
-    A([Level 00<br/>Foundations]) --> B
+    A([Level 0<br/>Foundations]) --> B
 
-    subgraph B[Level 01 — Building Blocks]
+    subgraph B[Level 1 — Building Blocks]
         direction TB
         S1[01 Scalability] --> S2[02 Load Balancing]
         S2 --> S3[03 Caching]
@@ -44,7 +44,7 @@ flowchart LR
         S7 --> S8[08 Concurrency &<br/>Async I/O]
     end
 
-    B --> C([Level 02<br/>Data Layer])
+    B --> C([Level 2<br/>Data Layer])
 
     style A fill:#d0e8ff,color:#000
     style C fill:#d0e8ff,color:#000
@@ -87,4 +87,12 @@ flowchart LR
 
 ## ➡️ What Comes Next
 
-After finishing this level, head to **[Level 02 — Data Layer](../Level-02-Data-Layer/README.md)** to go deeper into databases: replication, sharding, indexing, and ACID transactions.
+After finishing this level, head to **[Level 2 — Data Layer](../Level-02-Data-Layer/README.md)** to go deeper into databases: replication, sharding, indexing, and ACID transactions.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous level:** [Level 0 — Foundations](../Level-00-Foundations/README.md) · 🏠 [Curriculum home](../README.md) · ➡️ **Start this level:** [Scalability](01-Scalability/README.md)
+
+<!-- nav:end -->

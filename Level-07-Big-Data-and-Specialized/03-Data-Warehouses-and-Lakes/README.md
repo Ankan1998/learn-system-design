@@ -4,7 +4,7 @@
 
 ---
 
-**Level:** 7 · **Topic:** 3 of 6 · **Prerequisites:** [01 — Batch Processing](../01-Batch-Processing/README.md) · [Level 02 — Data Layer](../../Level-02-Data-Layer/README.md)
+**Level:** 7 · **Topic:** 3 of 9 · **Prerequisites:** [01 — Batch Processing](../01-Batch-Processing/README.md) · [Level 2 — Data Layer](../../Level-02-Data-Layer/README.md)
 
 ---
 
@@ -71,7 +71,7 @@ flowchart TD
     QUERY["SELECT country, SUM(revenue)<br/>FROM orders<br/>GROUP BY country"]
 
     ROW -->|"must read ALL columns<br/>even unused ones"| QUERY
-    COL -->|"reads ONLY country + revenue<br/>cols → 80% less I/O"| QUERY
+    COL -->|"reads ONLY country + revenue<br/>cols → 60% less I/O"| QUERY
 
     style ROW fill:#fce8f3,color:#000
     style COL fill:#e8f8f0,color:#000
@@ -161,7 +161,7 @@ flowchart TD
 
 | | Data Warehouse | Data Lake | Lakehouse |
 |--|---------------|-----------|-----------|
-| **Storage** | Proprietary (Snowflake, Redshift) | Object store (S3, GCS) | Object store (S3) |
+| **Storage** | Proprietary (Snowflake, Redshift) | [Object store](../../Level-02-Data-Layer/09-Object-Storage/README.md) (S3, GCS) | Object store (S3) |
 | **Schema** | Schema-on-write (defined upfront) | Schema-on-read (flexible) | Schema-on-write (enforced at write) |
 | **Format** | Proprietary columnar | Parquet, ORC, Avro, JSON | Open: Delta Lake, Apache Iceberg |
 | **ACID** | Yes | No | Yes |
@@ -174,7 +174,7 @@ flowchart TD
 | Product | Type | Key Differentiator |
 |---------|------|-------------------|
 | **Snowflake** | DW | Separate storage/compute; instant elasticity; any cloud |
-| **BigQuery** | DW | Serverless; pay-per-query; built-in ML; Google-scale |
+| **BigQuery** | DW | [Serverless](../../Level-05-Architecture-Patterns/08-Serverless-Architecture/README.md); pay-per-query; built-in ML; Google-scale |
 | **Amazon Redshift** | DW | AWS-native; RA3 nodes decouple compute/storage |
 | **Databricks / Delta Lake** | Lakehouse | Apache Spark + ACID on S3; open source |
 | **Apache Iceberg** | Lakehouse format | Open table format; time travel; any engine |
@@ -197,8 +197,8 @@ flowchart TD
 ### Airbnb — Data Warehouse at Scale
 Airbnb migrated from a single-node Hive cluster to a distributed data warehouse serving 1,000+ analysts. Their **Minerva** framework enforces a single source of truth for metrics — `bookings`, `revenue`, `host_satisfaction_score` — defined once in code (using dbt-like transformations) and reused everywhere. This eliminated metric inconsistency across dashboards.
 
-### Netflix — BigQuery + S3 Lakehouse
-Netflix processes **700 billion events per day**. Raw events land in S3 (Parquet). A subset is loaded into BigQuery for ad-hoc SQL by 2,000+ internal users. Critical metrics (A/B test results, content performance) are computed via Spark on the S3 lake. The two-tier approach gives them both cheap storage and fast SQL.
+### Netflix — Trino + S3 Lakehouse
+Netflix processes **700 billion events per day**. Raw events land in S3 (Parquet, organized as Apache Iceberg tables, a format Netflix created). Trino (Presto) serves ad-hoc SQL over those tables for 2,000+ internal users. Critical metrics (A/B test results, content performance) are computed via Spark on the S3 lake. The two-tier approach gives them both cheap storage and fast SQL.
 
 ### Snowflake — The "Multi-Cluster Shared Data" Architecture
 Snowflake's key innovation: storage (S3) and compute (virtual warehouses) are completely separate. You can spin up 100 concurrent SQL query engines against the same data without them contending. Shopify runs 300+ virtual warehouses against a single Snowflake storage layer — different teams get isolated compute at different sizes (S, M, L) without sharing resources.
@@ -247,10 +247,10 @@ Snowflake's key innovation: storage (S3) and compute (virtual warehouses) are co
 ## ⚠️ Common Pitfalls
 
 1. **Querying the OLTP database for analytics.** Joining 5 tables across 100M rows on your production Postgres → killing user-facing latency. Always build a separate analytics system.
-2. **The data swamp.** Dumping everything into S3 with no schema registry, no naming conventions, no ownership — nobody knows what's there or if it's correct. Fix: data catalog (AWS Glue, Apache Atlas) + column-level metadata.
+2. **The data swamp.** Dumping everything into S3 with no [schema registry](../../Level-03-Communication/09-Data-Serialization-and-Schema-Evolution/README.md), no naming conventions, no ownership — nobody knows what's there or if it's correct. Fix: data catalog (AWS Glue, Apache Atlas) + column-level metadata.
 3. **Ignoring data freshness SLAs.** Analysts think data is real-time but ETL runs once daily. Document and display data freshness on every dashboard.
-4. **Star schema anti-patterns.** Putting too many attributes in the fact table ("snowflake schema gone wrong") → slow queries that can't use columnar pruning. Keep fact tables narrow.
-5. **Cost shock in BigQuery.** A poorly written query that scans 100 TB accidentally costs ~$500. Fix: partition pruning, column selection, query cost estimates before running.
+4. **Star schema anti-patterns.** Putting too many attributes in the fact table (denormalizing dimensions into the fact) → slow queries that can't use columnar pruning. Keep fact tables narrow.
+5. **Cost shock in BigQuery.** A poorly written query that scans 100 TB accidentally costs ~$625 (at $6.25/TB on-demand). Fix: partition pruning, column selection, query cost estimates before running.
 6. **Not partitioning the data lake.** Querying 5 years of Parquet files without `WHERE year=2024` causes a full scan of petabytes. Always partition by time + key fields.
 
 ---
@@ -294,5 +294,13 @@ Snowflake's key innovation: storage (S3) and compute (virtual warehouses) are co
 - [Delta Lake Documentation](https://docs.delta.io/) — ACID on S3
 - [Apache Iceberg Documentation](https://iceberg.apache.org/docs/latest/) — Open lakehouse table format
 - [BigQuery Under the Hood](https://cloud.google.com/blog/products/bigquery/in-memory-query-execution-in-google-bigquery) — Dremel paper
-- Previous: [02 — Stream Processing](../02-Stream-Processing/README.md)
-- Next: [04 — Search Systems](../04-Search-Systems/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Stream Processing](../02-Stream-Processing/README.md) · 🏠 [Level 7 — Big Data & Specialized Systems](../README.md) · ➡️ **Next:** [Search Systems](../04-Search-Systems/README.md)
+
+🧩 **See it applied in:** [40 · A/B Testing (Experimentation) Platform](../../Bonus-Real-World-Architectures/40-Experimentation-Platform/README.md)
+
+<!-- nav:end -->

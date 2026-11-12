@@ -4,7 +4,7 @@ Welcome to the starting line. Before you can design systems that serve millions 
 
 ---
 
-## What you'll be able to do after this
+## 🎯 What You'll Be Able to Do After This Level
 
 - Explain how data travels across the internet at the packet level
 - Describe the client-server model and the request/response cycle clearly
@@ -15,7 +15,7 @@ Welcome to the starting line. Before you can design systems that serve millions 
 
 ---
 
-## Topics
+## 📚 Topics
 
 | # | Topic | What it covers |
 |---|-------|----------------|
@@ -31,7 +31,7 @@ Topics 1 and 2 lay the conceptual groundwork. Topics 3 through 7 all build on th
 
 ---
 
-## Learning path
+## 🗺️ Roadmap
 
 ```mermaid
 graph LR
@@ -63,20 +63,20 @@ graph LR
 
 ---
 
-## Prerequisites
+## 📋 Prerequisites
 
 None — this is the starting point.
 
 ---
 
-## Estimated time
+## ⏱️ Estimated Time
 
 ~4–6 hours (reading + exercises across all 7 topics).
 
 ---
 
-## Navigation
+<!-- nav:start -->
 
-| | |
-|---|---|
-| Next level | [Level 1 — Building Blocks](../Level-01-Building-Blocks/README.md) |
+⬅️ **Previous:** [Curriculum home](../README.md) · ➡️ **Start this level:** [What is System Design?](01-What-is-System-Design/README.md)
+
+<!-- nav:end -->

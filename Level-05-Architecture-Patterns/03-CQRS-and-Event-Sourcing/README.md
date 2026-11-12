@@ -32,7 +32,7 @@ Traditional CRUD systems have one data model that serves everyone: your write op
 The core insight: **reads and writes have different shapes**. Separate them.
 
 - **Command side (Write):** Accepts commands (`PlaceOrder`, `TransferFunds`), validates business rules, applies changes, emits events. Optimized for consistency and integrity.
-- **Query side (Read):** Answers queries. Often uses a denormalized, read-optimized data store (Elasticsearch, Redis, a separate read replica, a materialized view). Optimized for speed and flexibility.
+- **Query side (Read):** Answers queries. Often uses a denormalized, read-optimized data store (Elasticsearch, Redis, a separate [read replica](../../Level-02-Data-Layer/01-Database-Replication/README.md), a materialized view). Optimized for speed and flexibility.
 
 You can have one database (CQRS without Event Sourcing) or separate databases. They sync asynchronously via events or projections.
 
@@ -114,7 +114,7 @@ sequenceDiagram
 
     C->>CH: TransferFunds {from: acc-1, to: acc-2, amount: 200}
     CH->>ES: Load events for acc-1
-    ES-->>CH: [AccountOpened, MoneyDeposited x3, ...]
+    ES-->>CH: [AccountOpened, MoneyDeposited x2, MoneyWithdrawn, ...]
     CH->>CH: Replay events → current balance = $1050
     CH->>CH: Validate: $1050 >= $200 ✓
     CH->>ES: Append MoneyTransferred event
@@ -193,7 +193,7 @@ graph LR
 | **EventStoreDB** | Purpose-built event store | Native event sourcing, subscriptions |
 | **Apache Kafka** | Distributed log | High throughput, event streaming |
 | **PostgreSQL** (events table) | Relational, append-only table | Teams already on Postgres, lower complexity |
-| **DynamoDB Streams** | Managed, serverless | AWS ecosystems |
+| **DynamoDB (+ Streams)** | Managed table as the append-only store; Streams feed the projections | AWS ecosystems |
 | **Axon Framework** | Java framework with event store | Java/Spring teams |
 
 ### Projection Patterns
@@ -209,7 +209,7 @@ graph LR
 
 ## 🏢 Real-World Examples
 
-**Banking Systems:** Every major bank uses some form of Event Sourcing for accounts. Your account balance is derived from a ledger of transactions — every debit and credit is an immutable record. CQRS separates the write side (ledger entries) from the read side (account summary pages, monthly statements, fraud detection scores). Regulatory requirements like PCI-DSS and SOX essentially mandate this: you must be able to explain every change.
+**Banking Systems:** The ledger is the original event-sourced system. Your account balance is derived from an append-only list of transactions — every debit and credit is an immutable record, and a correction is a new entry, never an edit. CQRS separates the write side (ledger entries) from the read side (account summary pages, monthly statements, fraud detection scores). Audit and financial-reporting rules such as SOX require that every change be explainable, which an append-only ledger gives you for free.
 
 **Event Sourcing for E-commerce:** An order in Shopify or Amazon isn't just a row with a status column. It goes through events: `OrderPlaced`, `PaymentAuthorized`, `ItemsPicked`, `Shipped`, `Delivered`, `ReturnRequested`, `RefundIssued`. Each event drives different projections: the customer's order status page, the warehouse pick-list, the finance team's revenue report, the carrier's tracking integration.
 
@@ -315,4 +315,10 @@ graph LR
 
 ---
 
-*← [Event-Driven Architecture](../02-Event-Driven-Architecture/README.md) · [Level 05 Overview](../README.md) · Next: [Service Discovery](../04-Service-Discovery/README.md) →*
+<!-- nav:start -->
+
+⬅️ **Previous:** [Event-Driven Architecture](../02-Event-Driven-Architecture/README.md) · 🏠 [Level 5 — Architecture Patterns](../README.md) · ➡️ **Next:** [Service Discovery](../04-Service-Discovery/README.md)
+
+🧩 **See it applied in:** [24 · Stock Exchange](../../Bonus-Real-World-Architectures/24-Stock-Exchange/README.md) · [12 · Food Delivery (DoorDash / Swiggy)](../../Bonus-Real-World-Architectures/12-Food-Delivery/README.md)
+
+<!-- nav:end -->

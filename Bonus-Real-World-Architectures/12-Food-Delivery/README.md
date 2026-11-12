@@ -55,7 +55,7 @@ Unlike Uber, the "product" (food) isn't ready instantly — the courier can't ju
 | Search latency | < 200 ms P99 |
 | Availability | 99.99% (< 53 min downtime/year) |
 | Consistency | Order state machine: strong; location tracking: eventual |
-| Peak throughput | 500K concurrent active orders (lunch/dinner rush) |
+| Peak throughput | ~250K concurrent active orders (lunch/dinner rush) |
 | ETA accuracy | ± 3 minutes for 80% of deliveries |
 
 ---
@@ -66,14 +66,15 @@ Unlike Uber, the "product" (food) isn't ready instantly — the courier can't ju
 - 40 million monthly active customers (MAU)
 - Peak concurrent: ~2% active simultaneously → **800K concurrent users**
 - Average 2 orders/customer/month → **80M orders/month**
-- Peak orders: 10× average → **~30K orders/minute** at lunch/dinner peaks
-- 1M active couriers globally, ~200K on shift during peak
+- 80M orders/month ≈ 2.7M orders/day; the busiest hour carries ~15% of a day → 400K orders/hour ≈ **~6,700 orders/minute** at the dinner peak
+- Concurrent active orders at peak: 6,700/min × 35 min ≈ **~235K**
+- 1M active couriers globally, ~200K on shift during peak (enough for ~400K orders/hour once ~30% of deliveries are batched)
 - Average order: 35 min end-to-end, so each courier handles ~1.7 orders/hour
 - 500K restaurants, average menu: 60 items
 
 **Order Throughput:**
 ```
-30,000 orders/min ÷ 60 = 500 orders/second (peak write rate)
+6,700 orders/min ÷ 60 ≈ 110 orders/second (peak write rate)
 ```
 
 **Location Updates (couriers):**
@@ -100,7 +101,7 @@ Each customer browses ~3 min before ordering.
 **Bandwidth:**
 ```
 Location updates: 40,000 writes/s × 100 B = 4 MB/s inbound
-Push to customers tracking orders: 500K × 200 B = 100 MB/s outbound
+Push to customers tracking orders: 235K × 200 B every 5s ≈ 10 MB/s outbound
 ```
 
 > Key insight: location write throughput (40K/s) and fan-out to tracking subscribers are the dominant load patterns — not order writes.
@@ -292,12 +293,14 @@ erDiagram
     ORDER ||--o| RATING : rated_in
 ```
 
+*Caption: The ORDER entity sits at the centre, linking customer, restaurant, line items, courier dispatch, payment, and an optional rating.*
+
 **Storage justification:**
 
 | Store | What | Why |
 |---|---|---|
 | PostgreSQL | Orders, customers, restaurants, payments | ACID transactions; order state machine needs strong consistency |
-| PostGIS / pgvector | Restaurant geospatial search | Radius queries on `point` columns with spatial indexes |
+| PostGIS | Restaurant geospatial search | Radius queries on `point` columns with spatial indexes |
 | Redis (Cluster) | Courier locations, active order state cache, rate limiting, session tokens | Sub-millisecond reads; location data has 24h TTL; pub/sub for tracking |
 | Elasticsearch | Menu search, restaurant full-text + faceted search | Tokenized cuisine/dish search; relevance scoring |
 | Cassandra | Order event log, location history | Append-heavy, time-series; high write throughput; wide rows by order_id |
@@ -372,12 +375,14 @@ flowchart TD
     ETA -- reads traffic + history --> CS
 ```
 
+*Caption: Kafka decouples the Order Service from dispatch and notifications, while courier locations take a separate fast path through the Tracking Service and Redis.*
+
 **Walk-through of a complete order:**
 
 1. **Customer searches** → API Gateway → Search Service queries Elasticsearch for restaurant name/cuisine and PostGIS for proximity. Results ranked by rating × distance × surge ETA.
 2. **Customer places order** → Order Service creates the order record in PostgreSQL (status: `pending`), charges payment via Payment Service, publishes `order.placed` to Kafka.
 3. **Restaurant notified** → Notification Service consumes `order.placed`, pushes to restaurant tablet via FCM. Restaurant confirms with estimated prep time (e.g., 15 min).
-4. **Dispatch Service** listens for `order.accepted`. It queries Redis for nearby online couriers (geohash lookup), calls ETA Service to predict travel time from each courier to restaurant, and picks the best candidate — dispatching them so they arrive just as food is ready. Offer is pushed to the courier app.
+4. **Dispatch Service** listens for `order.accepted`. It queries Redis for nearby online couriers ([geohash](../../Level-07-Big-Data-and-Specialized/07-Geospatial-Indexing/README.md) lookup), calls ETA Service to predict travel time from each courier to restaurant, and picks the best candidate — dispatching them so they arrive just as food is ready. Offer is pushed to the courier app.
 5. **Courier accepts** → Dispatch Service records assignment, Order Service transitions status to `courier_assigned`, Kafka event triggers customer notification.
 6. **Courier en route** → Courier App sends location updates every 5s → Tracking Service writes to Redis and fans out to the customer's SSE stream.
 7. **Restaurant marks ready** → Order Service transitions to `ready_for_pickup`. If courier is already there, they pick up immediately. If courier is still in transit, food waits (this is where bad timing hurts quality).
@@ -455,7 +460,7 @@ stateDiagram-v2
 
 **State transition rules:**
 - Every transition publishes a Kafka event (`order.{new_state}`).
-- Idempotency keys prevent double-processing if a service retries.
+- [Idempotency keys](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md) prevent double-processing if a service retries.
 - Transitions are guarded: you can't go from `PENDING` directly to `PICKED_UP`.
 - Cancellations after `PREPARING` trigger a penalty fee (food cost is sunk for the restaurant).
 
@@ -491,7 +496,7 @@ Couriers can carry up to 2 orders simultaneously. Batching is evaluated when:
 1. Restaurant A and Restaurant B are within 0.5 km of each other.
 2. Both orders' customers are in compatible directions from the restaurants.
 3. Order B's total ETA increase for its customer is < 8 minutes vs. single delivery.
-DoorDash reports that ~30% of deliveries are batched during peak hours, which significantly improves courier utilization.
+Batching a meaningful share of peak-hour deliveries (this design assumes ~30%) is what lets 200K couriers cover the dinner rush.
 
 ### 7.4 ETA Prediction Pipeline
 
@@ -530,7 +535,7 @@ ETA is the single metric customers care most about — and the hardest to get ri
 **Order Service (PostgreSQL bottleneck):**
 - Orders are sharded by `order_id` (UUID, random distribution) across 16 PostgreSQL shards.
 - Read replicas handle tracking reads (status checks) — they can tolerate slight lag.
-- Connection pooling via PgBouncer in transaction mode — prevents connection exhaustion at peak.
+- [Connection pooling](../../Level-02-Data-Layer/06-Connection-Pooling/README.md) via PgBouncer in transaction mode — prevents connection exhaustion at peak.
 
 **Location Tracking (Redis bottleneck):**
 - Redis Cluster with 8 shards, each holding a geographic region's courier keys.
@@ -544,7 +549,7 @@ ETA is the single metric customers care most about — and the hardest to get ri
 
 **Peak hour surge handling:**
 - Pre-scale: predictive autoscaling based on historical demand curves (Tuesdays 7pm is always busy).
-- Circuit breakers on third-party APIs (Maps, payment gateway) with fallbacks (cached ETA, retry queue).
+- [Circuit breakers](../../Level-05-Architecture-Patterns/06-Resilience-Patterns/README.md) on third-party APIs (Maps, payment gateway) with fallbacks (cached ETA, retry queue).
 - Shed non-critical work: review prompts, analytics events, and recommendation refreshes are dequeued after peak.
 
 ### Failure Modes
@@ -566,12 +571,12 @@ ETA is the single metric customers care most about — and the hardest to get ri
 
 - **Chosen:** Kafka → FCM push to restaurant tablet.
 - **Alternative:** Restaurant tablet polls `/orders?status=pending` every 10s.
-- **Why push wins:** Polling adds 10s average lag on order receipt. During a 5-restaurant cluster, 5 pollers × 10s = restaurant may miss a time-sensitive window. Push is near-instant, but you need to handle FCM delivery failures (tablet offline, network drop) with a fallback: restaurant can always pull on reconnect.
+- **Why push wins:** Polling adds ~5s average (10s worst-case) lag on order receipt. During a 5-restaurant cluster, 5 pollers × 10s = restaurant may miss a time-sensitive window. Push is near-instant, but you need to handle FCM delivery failures (tablet offline, network drop) with a fallback: restaurant can always pull on reconnect.
 
 ### Eventual vs. Strong Consistency for Order State
 
 - **Chosen:** Strong consistency (PostgreSQL, single shard per order) for all state transitions.
-- **Alternative:** Eventual consistency via event sourcing (Cassandra event log as source of truth).
+- **Alternative:** Eventual consistency via [event sourcing](../../Level-05-Architecture-Patterns/03-CQRS-and-Event-Sourcing/README.md) (Cassandra event log as source of truth).
 - **Why strong wins here:** The order state machine has too many guard conditions to be safe with eventual reads. "Has a courier been assigned yet?" must be answered correctly to avoid double-dispatch. Unlike location tracking (where eventual is fine), order state errors have real money/food consequences.
 
 ### Dedicated Dispatch Service vs. Embedded in Order Service
@@ -582,8 +587,8 @@ ETA is the single metric customers care most about — and the hardest to get ri
 
 ### Monolith vs. Microservices
 
-At startup scale (< 10K orders/day), a monolith (Rails / Django) is fine. The microservice split is justified at scale because:
-- **Search** needs Elasticsearch, which is read-heavy and stateless — scales independently.
+At startup scale (< 10K orders/day), a [monolith](../../Level-05-Architecture-Patterns/01-Monolith-vs-Microservices/README.md) (Rails / Django) is fine. The microservice split is justified at scale because:
+- **Search** needs Elasticsearch, which is read-heavy and [stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md) — scales independently.
 - **Dispatch** is CPU-heavy (optimization) and needs different SLAs from payment.
 - **Tracking** is I/O bound (Redis pub/sub fan-out) — scales differently from order writes.
 
@@ -595,24 +600,23 @@ Compare to [Airbnb Booking](../13-Airbnb-Booking/README.md), which has far lower
 
 ### DoorDash Engineering
 
-- **Dispatch engine** uses a custom optimization model they call "Dispatch Brain" — a global assignment optimizer that considers all unassigned orders and available Dashers simultaneously (not just greedy nearest-first). Published as "Optimizing the DoorDash Marketplace" (2020).
-- **Batching:** DoorDash introduced "Double Dash" — offering two deliveries to a single Dasher when routes are compatible. Evaluated continuously by their dispatch optimizer.
+- **Dispatch engine** uses a custom optimization model they call "DeepRed" — a global assignment optimizer that considers all unassigned orders and available Dashers simultaneously (not just greedy nearest-first). Published as "Next-Generation Optimization for Dasher Dispatch at DoorDash" (2020).
+- **Batching:** DoorDash calls these "stacked orders" — offering two deliveries to a single Dasher when routes are compatible. Evaluated continuously by their dispatch optimizer.
 - **ETA prediction:** Uses XGBoost models with 100+ features, retrained daily. They found that restaurant-specific prep time features (not generic category averages) cut prediction error by 30%.
 - **Real-time data platform:** Kafka + Apache Flink for stream processing. Flink jobs compute per-zone demand/supply ratio in 60-second windows, feeding the surge pricing system.
 - DoorDash Engineering Blog: https://doordash.engineering/
 
 ### Swiggy Engineering
 
-- **Hyperlocal search:** Swiggy introduced a custom ranking model that combines restaurant rating, distance, price range, and cuisine affinity (from user history) into a single score. A/B tested against pure proximity ranking — 18% lift in order conversion.
-- **Courier assignment:** Uses a variant of the Hungarian Algorithm (linear assignment problem) when demand spikes — globally optimal assignment across all open orders and available delivery partners in a city, solved every 30 seconds.
+- **Hyperlocal search:** Swiggy introduced a custom ranking model that combines restaurant rating, distance, price range, and cuisine affinity (from user history) into a single score. The lesson generalises: ranking by proximity alone leaves conversions on the table.
+- **Courier assignment:** Treated as a batch assignment problem rather than greedy nearest-courier matching: every few tens of seconds, all open orders and available delivery partners in a zone are matched together (the classic formulation is the linear assignment problem, solved by the Hungarian algorithm or a min-cost flow).
 - **ETA for Indian traffic conditions:** Standard map APIs significantly underestimate ETA in dense urban areas. Swiggy trains correction models on historical delivery data per city corridor. Traffic data is augmented with their own historical delivery-path time series.
 - Swiggy Engineering Blog: https://bytes.swiggy.com/
 
 ### Relevant Papers & References
 
-- "Real-Time Dispatch and Routing for Same-Day Delivery" — MIT Operations Research (2019).
 - "ETA Prediction with Graph Neural Networks in Google Maps" — Google (2021) — similar multi-factor ETA approach.
-- "Optimal Delivery Route Assignments at Uber Eats" — Uber Engineering (2018).
+- "Next-Generation Optimization for Dasher Dispatch at DoorDash" — DoorDash Engineering (2020).
 - Apache Kafka documentation on pub/sub patterns: https://kafka.apache.org/documentation/
 - PostGIS geospatial indexing: https://postgis.net/documentation/
 
@@ -632,10 +636,18 @@ Here is what you should be able to walk through in a senior system design interv
 5. **Kafka as the event bus** — decouples notification, dispatch, analytics, and payout systems. A state transition in Order Service shouldn't need to synchronously call six downstream services.
 
 **Numbers to remember:**
-- 500 orders/second at peak
+- ~110 orders/second at peak (~235K orders in flight)
 - 40K courier location writes/second
 - < 5 seconds for courier assignment
 - ± 3 minute ETA accuracy target
 - 30% of deliveries batched (stacked) during peak
 
-**Next:** [Airbnb Booking System](../13-Airbnb-Booking/README.md) — another marketplace problem, but with much lower write throughput, longer booking windows, and a very different consistency model (preventing double-booking of the same property).
+**Compare with:** [Airbnb Booking System](../13-Airbnb-Booking/README.md) — another marketplace problem, but with much lower write throughput, longer booking windows, and a very different consistency model (preventing double-booking of the same property).
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [11 · Uber Ride-Sharing](../11-Uber-Ride-Sharing/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [13 · Airbnb Booking](../13-Airbnb-Booking/README.md)
+
+<!-- nav:end -->

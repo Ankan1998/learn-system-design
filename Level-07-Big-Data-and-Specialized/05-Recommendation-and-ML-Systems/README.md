@@ -4,13 +4,13 @@
 
 ---
 
-**Level:** 7 · **Topic:** 5 of 6 · **Prerequisites:** [04 — Search Systems](../04-Search-Systems/README.md) · [01 — Batch Processing](../01-Batch-Processing/README.md) · [02 — Stream Processing](../02-Stream-Processing/README.md)
+**Level:** 7 · **Topic:** 5 of 9 · **Prerequisites:** [04 — Search Systems](../04-Search-Systems/README.md) · [01 — Batch Processing](../01-Batch-Processing/README.md) · [02 — Stream Processing](../02-Stream-Processing/README.md)
 
 ---
 
 ## 🎯 The Problem
 
-Netflix has 250 million subscribers and 15,000+ titles. When Alice logs in on Monday morning, she should see the 20 most relevant titles *for her, right now* — not just popular titles, and not just what she's watched before.
+Netflix has 300 million subscribers and 15,000+ titles. When Alice logs in on Monday morning, she should see the 20 most relevant titles *for her, right now* — not just popular titles, and not just what she's watched before.
 
 The brute-force approach — score all 15,000 titles against Alice's preferences using a complex ML model — takes 500 ms per title × 15,000 = 7,500 seconds. That's 2+ hours, not an acceptable homepage load time.
 
@@ -18,7 +18,7 @@ You need a system that can:
 - Reduce 15,000 → ~200 candidates in milliseconds (retrieval)
 - Precisely rank those 200 using rich features in < 100 ms (ranking)
 - Retrain models continuously as user preferences shift
-- Handle 250 million users simultaneously
+- Handle 300 million users
 
 ---
 
@@ -109,7 +109,7 @@ An **embedding** is a dense vector representation (e.g., 128 dimensions) learned
 |-----------|-----|---------|
 | **HNSW** (Hierarchical Navigable Small World) | Graph-based; navigate a multi-layer graph | `hnswlib`, Elasticsearch `knn`, Weaviate |
 | **IVF** (Inverted File Index) | Cluster vectors; search only nearby clusters | `faiss` (Facebook AI) |
-| **LSH** (Locality Sensitive Hashing) | Hash similar vectors to same buckets | ScaNN (Google) |
+| **LSH** (Locality Sensitive Hashing) | Hash similar vectors to same buckets | FALCONN, `faiss` (`IndexLSH`) |
 
 Trade-off: ANN is not exact — it may miss 1-5% of the true nearest neighbors. Acceptable for recommendations (top-100 candidates don't need to be perfectly optimal).
 
@@ -179,6 +179,8 @@ flowchart LR
     style MONITOR fill:#fce8f3,color:#000
 ```
 
+*Caption: The lifecycle is a loop, not a line: monitoring detects model decay and feeds back into data collection, and deployment moves through shadow and canary stages first.*
+
 ### Handling the Cold Start Problem
 
 | Scenario | Problem | Solutions |
@@ -192,13 +194,13 @@ flowchart LR
 ## 🏢 Real-World Examples
 
 ### Netflix — Personalized Everything
-Netflix's recommendation system is responsible for **80% of content watched** (vs. 20% from search). Their architecture uses a two-stage system: matrix factorization generates candidate embeddings (stored in Annoy ANN index), a deep neural network ranks candidates using 100+ features. Key insight: they optimize for *long-term engagement* (did the user enjoy the title?), not just clicks. A/B testing is central — every model change is tested on a segment before full rollout.
+Netflix's recommendation system is responsible for **80% of content watched** (vs. 20% from search). Their architecture uses a two-stage system: embedding models generate candidates (retrieved from an approximate-nearest-neighbor index), then a deep neural network ranks them using 100+ features. Key insight: they optimize for *long-term engagement* (did the user enjoy the title?), not just clicks. A/B testing is central — every model change is tested on a segment before full rollout.
 
 ### YouTube — Watch Next at 2 Billion Users
-YouTube's recommendation paper (2016, "Deep Neural Networks for YouTube Recommendations") described the two-stage architecture that became the industry blueprint. **Candidate generation:** a two-tower model maps user and video into a shared embedding space; ANN retrieves top-200 candidates from 20 million+ videos. **Ranking:** a deep network with 1 billion+ parameters scores those 200 using watch time, likes, comments, and engagement history. They explicitly optimize for *watch time*, not just click-through rate, to reduce clickbait.
+YouTube's recommendation paper (2016, "Deep Neural Networks for YouTube Recommendations") described the two-stage architecture that became the industry blueprint. **Candidate generation:** a deep network turns a user's watch and search history into a user embedding, and nearest-neighbor search against video embeddings retrieves a few hundred candidates from millions of videos (the direct ancestor of today's two-tower models). **Ranking:** a deep network with 1 billion+ parameters scores those 200 using watch time, likes, comments, and engagement history. They explicitly optimize for *watch time*, not just click-through rate, to reduce clickbait.
 
 ### Spotify — Discover Weekly
-Spotify computes Discover Weekly for 600M+ users every Monday using collaborative filtering on implicit feedback (streams, saves, playlist adds). They run a massive Spark job to decompose the 600M × 100M track matrix using matrix factorization (NMF). The resulting 128-dimensional user/track embeddings power both Discover Weekly and "Because You Listened To..." recommendations. They also use audio embeddings (spectral features from raw audio) for new tracks with no history — solving the new-item cold start.
+Spotify computes Discover Weekly for 600M+ users every Monday using collaborative filtering on implicit feedback (streams, saves, playlist adds). They run a massive batch job to decompose the 600M × 100M user-track matrix using implicit-feedback matrix factorization (ALS). The resulting 128-dimensional user/track embeddings power both Discover Weekly and "Because You Listened To..." recommendations. They also use audio embeddings (spectral features from raw audio) for new tracks with no history — solving the new-item cold start.
 
 ### TikTok — Interest Graph Over Social Graph
 Unlike Instagram (social graph: follow people you know), TikTok optimizes purely for engagement on each video — even from creators you've never heard of. Their recommendation models rapidly converge on user preferences (within ~10 videos of a new session) using strong real-time signals (watch completion rate, replays, shares). Each video gets a fresh score per user per session — no long-term stale preferences.
@@ -259,8 +261,8 @@ Amazon pioneered item-based collaborative filtering in 1998. Their key innovatio
 - **"How does the two-stage recommender work?"** Stage 1 (cheap, recall-focused): ANN over embeddings → 200 candidates from millions. Stage 2 (expensive, precision-focused): deep ranking model with 100+ features → top 20.
 - **"What is a feature store?"** A system that stores pre-computed features, shared between offline training and online serving, to prevent training-serving skew.
 - **"What is the cold start problem?"** New user or new item with no behavioral history → can't compute embeddings. Fix: content-based features, onboarding questions, popularity defaults.
-- **"How does Netflix recommend in < 200 ms with 250M users?"** Two-stage: ANN retrieval (< 10 ms) → neural ranking of 200 candidates (< 100 ms). Features pre-computed in feature store — no heavy computation at serve time.
-- **Real numbers:** Netflix A/B tests show each 1% improvement in recommendation relevance → 1% reduction in subscription cancellations; YouTube's two-tower model processes 1 billion training examples daily.
+- **"How does Netflix recommend in < 200 ms with 300M users?"** Two-stage: ANN retrieval (< 10 ms) → neural ranking of 200 candidates (< 100 ms). Features pre-computed in feature store — no heavy computation at serve time.
+- **Real numbers:** Netflix has estimated that personalization and recommendations save it more than $1 billion a year in retention (Gomez-Uribe & Hunt, 2015); YouTube's 2016 models had about a billion parameters and were trained on hundreds of billions of examples.
 
 ---
 
@@ -291,6 +293,15 @@ Amazon pioneered item-based collaborative filtering in 1998. Their key innovatio
 - [Deep Neural Networks for YouTube Recommendations](https://research.google/pubs/pub45530/) — The blueprint paper (2016)
 - [System Design for Recommendations and Search](https://eugeneyan.com/writing/system-design-for-discovery/) — Eugene Yan's excellent blog post
 - [Feature Stores for ML](https://www.featurestore.org/) — Overview of the feature store ecosystem (Feast, Tecton, Hopsworks)
-- [Spotify's Music Recommendation](https://research.atspotify.com/2021/09/the-evolution-of-music-recommendation-at-spotify/) — Blog from Spotify Research
+- [How Spotify Uses ML to Create the Future of Personalization](https://engineering.atspotify.com/2021/12/how-spotify-uses-ml-to-create-the-future-of-personalization/) — Blog from Spotify Research
 - Related: [04 — Search Systems](../04-Search-Systems/README.md) — ANN search connects both topics
-- Next: [06 — Probabilistic Data Structures](../06-Probabilistic-Data-Structures/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Search Systems](../04-Search-Systems/README.md) · 🏠 [Level 7 — Big Data & Specialized Systems](../README.md) · ➡️ **Next:** [Probabilistic Data Structures](../06-Probabilistic-Data-Structures/README.md)
+
+🧩 **See it applied in:** [09 · YouTube / Netflix](../../Bonus-Real-World-Architectures/09-YouTube-Netflix-Streaming/README.md) · [45 · Real-Time Fraud Detection System (Stripe Radar)](../../Bonus-Real-World-Architectures/45-Fraud-Detection-System/README.md)
+
+<!-- nav:end -->

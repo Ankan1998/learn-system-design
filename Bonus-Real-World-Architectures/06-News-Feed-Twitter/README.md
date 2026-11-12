@@ -42,7 +42,7 @@ When you open Twitter/X you instantly see a feed of tweets from people you follo
 | Property | Target |
 |---|---|
 | Availability | 99.99 % (≤ 53 min downtime/year) |
-| Read latency (P99) | < 200 ms end-to-end |
+| Read latency ([P99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md)) | < 200 ms end-to-end |
 | Write latency (P99) | < 500 ms to acknowledge tweet |
 | Fan-out propagation | < 5 s for normal users |
 | Durability | Zero tweet loss after ack |
@@ -56,15 +56,15 @@ When you open Twitter/X you instantly see a feed of tweets from people you follo
 
 ```
 DAU                   = 300 M
-Tweets per day        = 500 M   (~1,700 tweets/s avg)
-Peak write multiplier = 3×       → ~5,000 tweets/s peak
+Tweets per day        = 500 M   (~5,800 tweets/s avg)
+Peak write multiplier = 3×       → ~17,000 tweets/s peak
 Reads per DAU         = ~50 feed refreshes/day
 Total read QPS avg    = 300 M × 50 / 86,400 ≈ 175,000 reads/s
 Peak read QPS         = 175,000 × 3 ≈ 500,000 reads/s
-Read : Write ratio    ≈ 100 : 1
+Read : Write ratio    ≈ 30 : 1 by requests (each read returns ~20 tweets, so ≈ 600 : 1 by tweets)
 ```
 
-The 100:1 skew is the dominant design signal — **optimize aggressively for reads**.
+The read skew is the dominant design signal — **optimize aggressively for reads**.
 
 ### Storage
 
@@ -92,7 +92,7 @@ Timeline cache (Redis):
 
 ```
 Read:  500,000 req/s × 5 KB avg payload ≈ 2.5 GB/s egress
-Write: 5,000 tweets/s × 500 B ≈ 2.5 MB/s ingest (tiny vs reads)
+Write: 17,000 tweets/s × 500 B ≈ 8.5 MB/s ingest (tiny vs reads)
 Media: CDN-served, not counted in app-tier bandwidth
 ```
 
@@ -226,7 +226,7 @@ flowchart TD
 
     subgraph WritePath["Write Path"]
         TweetSvc["Tweet Service"]
-        FanoutSvc["Fanout Service<br/>(Rafting)"]
+        FanoutSvc["Fanout Service"]
         MQ["Message Queue<br/>(Kafka)"]
         GraphSvc["Follower Graph<br/>Service"]
     end
@@ -286,11 +286,13 @@ flowchart TD
     class TimelineCache,TweetCache,UserCache cache
 ```
 
+*Caption: Notice that the write path ends by pushing tweet IDs into the Redis timeline cache, so the read path can serve feeds from cache without touching the follower graph.*
+
 ### Numbered Walk-Through
 
 1. **Tweet write** — Client hits the API Gateway, which authenticates and routes to the **Tweet Service**. The tweet is validated, given a Snowflake ID, and persisted to **Tweet DB** (MySQL, sharded by tweet_id). A `tweet_created` event is published to **Kafka**.
 
-2. **Fan-out** — The **Fanout Service** (Twitter calls this part of "Rafting") consumes the Kafka event. It calls the **Follower Graph Service** to get the poster's follower list. For each follower, it writes the new tweet_id into that user's **Timeline Cache** (Redis sorted set, score = tweet_id).
+2. **Fan-out** — The **Fanout Service** consumes the Kafka event. It calls the **Follower Graph Service** to get the poster's follower list. For each follower, it writes the new tweet_id into that user's **Timeline Cache** (Redis sorted set, score = tweet_id).
 
 3. **Celebrity shortcut** — If the poster is a *celebrity* (follower count > threshold, e.g. 1 M), fan-out is skipped or rate-limited. Instead, celebrity tweets are fetched at read time (fan-out-on-read for that subset).
 
@@ -342,15 +344,17 @@ flowchart LR
     class H1,H2,H3,H4,H5 hybrid
 ```
 
+*Caption: Compare where the cost lands — push pays at write time, pull pays on every read, and the hybrid pushes for normal users while merging celebrity tweets at read time.*
+
 | Strategy | Write Cost | Read Cost | Best For |
 |---|---|---|---|
 | Fan-out-on-write (push) | High — O(followers) per tweet | O(1) cache lookup | Normal users (low follower count) |
 | Fan-out-on-read (pull) | O(1) — just write tweet | O(following) per read | Celebrity / power users |
 | Hybrid | Low-medium | Near O(1) + small merge | Production at scale |
 
-**The Beyoncé problem:** Beyoncé has ~300 M followers. A single tweet triggers 300 M Redis writes at ~10 µs each = 3,000 seconds of single-threaded work. The hybrid approach skips the push for celebrities. When you load your timeline, the Feed Service fetches your cached feed (regular follows) and *then* appends the latest N tweets from celebrity accounts you follow, merging the two lists by timestamp.
+**The Beyoncé problem:** picture a mega-celebrity with ~300 M followers. A single tweet triggers 300 M Redis writes at ~10 µs each = 3,000 seconds of single-threaded work. The hybrid approach skips the push for celebrities. When you load your timeline, the Feed Service fetches your cached feed (regular follows) and *then* appends the latest N tweets from celebrity accounts you follow, merging the two lists by timestamp.
 
-**Implementation detail:** Twitter marks users as "heavy hitter" once their follower count crosses a configurable threshold. The Fanout Service checks a Bloom filter / user metadata before deciding to push.
+**Implementation detail:** Twitter marks users as "heavy hitter" once their follower count crosses a configurable threshold. The Fanout Service checks a [Bloom filter](../../Level-07-Big-Data-and-Specialized/06-Probabilistic-Data-Structures/README.md) / user metadata before deciding to push.
 
 ---
 
@@ -371,7 +375,7 @@ Operations:
 
 - Cap each timeline at **800 entries** — studies show users rarely scroll past 800 tweets.
 - If a user has been inactive > 7 days, their timeline is evicted. On next login, the Feed Service **cold-starts** the timeline: fetches followees from the graph, pulls recent tweets from Tweet DB, and pre-populates Redis.
-- Redis Cluster is sharded by `user_id % num_shards`. A user's timeline always lives on one shard (no cross-shard sorted set operations needed).
+- Redis Cluster shards keys by hash slot (CRC16 of `timeline:{user_id}` mod 16,384). A user's timeline always lives on one shard (no cross-shard sorted set operations needed).
 
 *The hybrid read path in action: pre-computed entries from fan-out on write, merged at read time with the celebrity tweets that were never fanned out.*
 
@@ -403,7 +407,7 @@ sequenceDiagram
 
 ### 7.3 Follower Graph at Scale
 
-Twitter's original solution was **FlockDB**, a MySQL-based graph database optimized for adjacency list lookups. Modern choices:
+Twitter's original solution was **FlockDB**, a MySQL-based [graph database](../../Level-07-Big-Data-and-Specialized/08-Specialized-Databases/README.md) optimized for adjacency list lookups. Modern choices:
 
 - **Nebula Graph / JanusGraph** — native distributed graph, handles billion-edge graphs.
 - **MySQL adjacency table + sharding** — simpler ops, Twitter's original approach.
@@ -437,7 +441,7 @@ Twitter ships two modes:
    - Recency decay
    - Content embeddings (topic affinity)
 
-The Ranking Service sits **between** the Feed Service and the client. It's stateless, horizontally scalable, and operates on a candidate set (top 500 from cache) to produce a final ranked list (top 20 to return).
+The Ranking Service sits **between** the Feed Service and the client. It's [stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md), horizontally scalable, and operates on a candidate set (top 500 from cache) to produce a final ranked list (top 20 to return).
 
 Latency budget: cache read ~5 ms + ranking inference ~30 ms + hydration ~10 ms = ~45 ms server-side, well within 200 ms SLA.
 
@@ -476,7 +480,7 @@ flowchart LR
 | Bottleneck | Symptom | Mitigation |
 |---|---|---|
 | Celebrity tweet | 300 M Redis writes in seconds | Hybrid fan-out; skip push for heavy-hitters |
-| Redis timeline shard | One shard holds all timelines for user_id range | Consistent hashing; autoscaling shard count |
+| Redis timeline shard | One shard holds all timelines for user_id range | [Consistent hashing](../../Level-02-Data-Layer/08-Consistent-Hashing/README.md); autoscaling shard count |
 | Kafka consumer lag | Fan-out queue backs up during viral events | Increase consumer parallelism; partition by author_id |
 | Graph DB read spike | Everyone follows the same celebrity | Cache follower lists (TTL 60 s) in Memcached |
 | Tweet DB write surge | Live event + everyone live-tweeting | Vitess sharding; async write buffer via Kafka |
@@ -485,7 +489,7 @@ flowchart LR
 
 **Redis node failure** — Redis Cluster replicates each slot to N replicas. On primary failure, replica is elected primary within seconds. Timeline writes during this window are lost; the feed shows slightly stale content — acceptable (eventual consistency).
 
-**Fanout Service crash mid-fan-out** — Kafka offset is not committed until fan-out completes. On restart, the service replays the same tweet event. Fan-out writes must be **idempotent** (`ZADD` in Redis is idempotent — re-adding a member with the same score is a no-op).
+**Fanout Service crash mid-fan-out** — Kafka offset is not committed until fan-out completes. On restart, the service replays the same tweet event. Fan-out writes must be **[idempotent](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md)** (`ZADD` in Redis is idempotent — re-adding a member with the same score is a no-op).
 
 **Feed Service cache miss storm (cold start)** — If Redis restarts, every user's first request misses. Use **load-shedding + staggered warm-up**: return partial results from Tweet DB and populate cache asynchronously; never let a cold start stampede kill the DB.
 
@@ -512,7 +516,7 @@ You already analyzed this in §7.1. The key insight for an interview: **pure pus
 
 ### SQL vs NoSQL for Tweet Storage
 
-Twitter uses **MySQL** for tweet metadata despite massive scale — Vitess provides horizontal sharding while preserving SQL semantics, transactions, and a proven ops model. NoSQL (Cassandra, DynamoDB) would also work and is used by some competitors; the trade-off is eventual consistency on counters vs easier ops.
+Twitter historically stored tweets in sharded **MySQL** (via its in-house Gizzard framework) despite massive scale — Vitess provides similar horizontal sharding while preserving SQL semantics, transactions, and a proven ops model. NoSQL (Cassandra, DynamoDB) would also work and is used by some competitors; the trade-off is eventual consistency on counters vs easier ops.
 
 ### Chronological vs Algorithmic Feed
 
@@ -525,30 +529,29 @@ Twitter invented **Snowflake** IDs: 64-bit integers composed of timestamp (41 bi
 ### Caching TTL vs Storage Cost
 
 Keeping 800 tweets × 300 M users × 100 bytes = 24 TB in Redis is expensive. In practice:
-- Only **hot timelines** (last 7 days of activity) are cached → ~20–30 M users → ~2.4 TB.
+- Only **hot timelines** are kept in full: users active in the last few hours, about 30 M at any moment → ~2.4 TB instead of 24 TB.
 - Inactive users' timelines are re-hydrated on demand.
 
 ---
 
 ## 10. 🌐 How It's Actually Done
 
-### Twitter's "Rafting" Architecture (2012–present)
+### Twitter's Timeline Architecture (2012 onward)
 
-Twitter published details of their fan-out system at QCon 2012 and subsequent conferences:
+Twitter described its fan-out system in the "Timelines at Scale" talk (Raffi Krikorian, QCon):
 
-- **Timeline Service** — manages per-user timeline stored in RAM across a distributed cluster. Each timeline is a fixed-size circular buffer of tweet IDs.
-- **Fanout Service** (part of Rafting) — consumes from Kafka; uses a segmented worker pool where each worker "owns" a set of user IDs to avoid contention.
+- **Timeline Service** — keeps every active user's home timeline in RAM across a Redis cluster. Each timeline is a list capped at about 800 tweet IDs, replicated on three machines.
+- **Fanout Service** — takes each new tweet off a queue, looks up the author's followers in the social graph service, and inserts the tweet ID into every follower's timeline. A tweet from an account with millions of followers could take seconds to fan out, which is what motivated the hybrid approach in §7.1.
 - **FlockDB** — custom MySQL-backed graph DB for follower/following lists; later phased toward internal services.
-- **Manhattan** — Twitter's own distributed key-value store (built on RocksDB) used for tweet metadata and user data; replaced some MySQL usage at scale.
+- **Manhattan** — Twitter's own distributed key-value store (with pluggable storage engines) used for tweets, direct messages, and user data; replaced much of its MySQL and Cassandra usage.
 - **Snowflake** — open-sourced in 2010, now the standard for distributed ID generation.
 
 ### 2023 Rewrite (X / "Twitter 2.0")
 
 After the 2022 acquisition, Twitter/X restructured engineering significantly:
 
-- Reduced datacenter footprint by ~50 % via aggressive workload consolidation.
-- Moved more ranking computation to the client to reduce server-side complexity.
-- Open-sourced the **recommendation algorithm** in 2023 — the codebase reveals the "heavy ranker" ML model, candidate sourcing from social graph + network + geolocation, and a Nitter-style real-time pipeline.
+- Consolidated its data center footprint (the Sacramento site was shut down at the end of 2022) and cut cloud spending.
+- Open-sourced the **recommendation algorithm** in 2023 — the codebase reveals the "heavy ranker" ML model, and candidate sourcing split between in-network (RealGraph) and out-of-network sources (SimClusters, GraphJet).
 
 ### Key Lessons from Production
 
@@ -564,18 +567,26 @@ After the 2022 acquisition, Twitter/X restructured engineering significantly:
 | Decision | Choice | Why |
 |---|---|---|
 | Fan-out strategy | **Hybrid** — push for normal users, pull-merge for celebrities | Balances write amplification vs read latency |
-| Timeline storage | **Redis Sorted Set** (score = tweet_id) | O(log N) insert, O(1) range read, fits in RAM |
+| Timeline storage | **Redis Sorted Set** (score = tweet_id) | O(log N) insert, O(log N + M) range read, fits in RAM |
 | Tweet persistence | **MySQL + Vitess** sharded by tweet_id | Proven ops, SQL semantics, horizontal scale |
 | Follower graph | **Adjacency table** (dual-shard) or graph DB | Fast fan-out lookup AND fast "who do I follow" |
 | ID generation | **Snowflake** (64-bit, time-ordered) | No coordination, globally unique, sort-by-time free |
 | Feed ranking | **Chronological first, ML re-rank optional** | Cheap default; ranking is a stateless add-on |
 | Media | **S3 + CDN** | Offloads massive bandwidth; globally cached |
-| Consistency | **Eventual** (timeline lag ≤ 5 s) | Necessary for 100:1 read:write at this scale |
+| Consistency | **Eventual** (timeline lag ≤ 5 s) | Necessary for the heavy read:write skew at this scale |
 
 ### The Three Things to Remember in an Interview
 
-1. **100:1 read:write ratio** → optimize for reads, pre-compute feeds, use cache as the primary read path.
+1. **Heavy read:write skew (~30:1 by requests)** → optimize for reads, pre-compute feeds, use cache as the primary read path.
 2. **Celebrity / hot-key problem** → never push to 100 M timelines synchronously; use the hybrid approach with a follower-count threshold.
 3. **Redis sorted set per user** → the timeline cache is the product; the Tweet DB is the source of truth but should rarely be hit at read time.
 
 If you can whiteboard the hybrid fan-out flow, explain the Beyoncé edge case, and size the Redis cluster, you have a complete senior-level answer.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [05 · Web Crawler](../05-Web-Crawler/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [07 · Instagram](../07-Instagram/README.md)
+
+<!-- nav:end -->

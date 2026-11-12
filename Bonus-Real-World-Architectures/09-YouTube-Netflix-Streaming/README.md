@@ -3,10 +3,11 @@
 > A planet-scale video streaming platform that ingests, transcodes, stores, and delivers billions of hours of video to hundreds of millions of concurrent viewers worldwide.
 
 **Difficulty:** ⭐⭐⭐ · **Builds on:**
-[Level 03 – Replication & Consistency](../../Level-02-Data-Layer/01-Database-Replication/README.md) ·
-[Level 05 – Caching](../../Level-01-Building-Blocks/03-Caching/README.md) ·
-[Level 06 – CDN & Load Balancing](../../Level-01-Building-Blocks/06-CDN/README.md) ·
-[Level 07 – ML & Recommendations](../../Level-07-Big-Data-and-Specialized/05-Recommendation-and-ML-Systems/README.md) ·
+[Level 2 – Database Replication](../../Level-02-Data-Layer/01-Database-Replication/README.md) ·
+[Level 1 – Caching](../../Level-01-Building-Blocks/03-Caching/README.md) ·
+[Level 1 – CDN](../../Level-01-Building-Blocks/06-CDN/README.md) ·
+[Level 2 – Object Storage](../../Level-02-Data-Layer/09-Object-Storage/README.md) ·
+[Level 7 – ML & Recommendations](../../Level-07-Big-Data-and-Specialized/05-Recommendation-and-ML-Systems/README.md) ·
 [08 – WhatsApp Chat](../08-WhatsApp-Chat/README.md) ·
 [10 – Typeahead Autocomplete](../10-Typeahead-Autocomplete/README.md)
 
@@ -22,7 +23,7 @@ You're designing the backend for a platform like YouTube or Netflix. The two pla
 - CDN strategy and Netflix Open Connect
 - Adaptive Bitrate Streaming (HLS / DASH)
 - Metadata storage (titles, thumbnails, view counts)
-- Recommendation hook (see Level-07 link above)
+- Recommendation hook (see Level 7 link above)
 
 **Out of scope:** auth, payments, ads, live streaming, comments at depth.
 
@@ -46,7 +47,7 @@ You're designing the backend for a platform like YouTube or Netflix. The two pla
 | Playback latency (time-to-first-frame) | < 2 s on broadband |
 | Read/write ratio | ~10 000 : 1 (reads dominate massively) |
 | Durability | 11 nines on stored video (S3-class) |
-| Throughput | Netflix ≈ 37 % of downstream internet traffic at peak |
+| Throughput | Netflix ≈ 37 % of North American downstream internet traffic at peak (2015) |
 
 ---
 
@@ -54,20 +55,21 @@ You're designing the backend for a platform like YouTube or Netflix. The two pla
 
 ### Upload (YouTube numbers)
 - **500 hours** of video uploaded every minute
-- Average raw bitrate: ~10 Mbps → 10 MB/s per minute of video
-- 500 × 60 min × 10 MB/s = **300 GB raw video per minute** = **5 GB/s ingest**
+- Average upload bitrate: ~1.3 Mbps (compressed uploads) → ~10 MB per minute of video
+- 500 × 60 min × 10 MB/min = **300 GB of uploaded video per minute** = **5 GB/s ingest**
 
 ### Transcoding jobs
-- Each source video produces ~1 200 encoding jobs (Netflix's actual number)
-- 7 resolutions × 6 codec/bitrate variants × ~30 chunk shards ≈ 1 260 tasks per video
-- At 500 hours/min upload, that is **~8 000 transcode tasks/second**
+- Each source video fans out into roughly 1 200 encoding tasks:
+  7 resolutions × 6 codec/bitrate variants × ~30 chunks ≈ 1 260 tasks per video
+- Assume an average upload of ~10 minutes: 500 hours/min ÷ 10 min ≈ 3 000 videos/min = 50 videos/s
+- 50 videos/s × 1 200 tasks ≈ **~60 000 transcode tasks/second**
 
 ### Storage
 - Raw video retained for 30 days (re-encode if codec improves): 300 GB/min × 60 × 24 × 30 ≈ **~13 PB raw/month**
 - Processed segments (all variants): roughly 3× storage expansion after transcoding → **~40 PB processed/month** (cumulative library grows without bound; YouTube total is estimated at **1 exabyte+**)
 
 ### Streaming (Netflix numbers)
-- **200 M+** paid subscribers; ~70 M concurrent streams at peak
+- **300 M+** paid subscribers; ~70 M concurrent streams at peak
 - Average stream ≈ 5 Mbps → 70 M × 5 Mbps = **350 Tbps** downstream bandwidth
 - CDN cache-hit ratio target: > 95 % (only 5 % of requests touch origin)
 
@@ -155,6 +157,8 @@ erDiagram
     VIDEO ||--o{ VIEW_EVENT : receives
 ```
 
+*Caption: Each video fans out into many encoded variants and view events, while the raw upload is referenced only by its S3 key.*
+
 ### Storage Justification
 
 | Store | What | Why |
@@ -206,7 +210,7 @@ flowchart TD
     subgraph MetadataServices["Metadata & Discovery"]
         VDB["Video DB<br/>(PostgreSQL)"]
         ES["Search Index<br/>(Elasticsearch)"]
-        REC["Recommendation Service<br/>(see Level-07)"]
+        REC["Recommendation Service<br/>(see Level 7)"]
         TH["Thumbnail Service<br/>(FFmpeg frame extract)"]
     end
 
@@ -262,6 +266,8 @@ flowchart TD
     class CDN,ORI delivery
     class VCS,KFK,SP,RD counting
 ```
+
+*Caption: Notice the upload path flows through Kafka into a parallel transcoding farm, while playback reads only from the CDN and falls back to origin on a miss.*
 
 ### Walk-Through
 
@@ -322,6 +328,8 @@ flowchart LR
     class S3O stor
 ```
 
+*Caption: Every GOP-aligned chunk is encoded into every rung of the ladder in parallel, then reassembled per variant and packaged into HLS and DASH manifests.*
+
 **Key insight:** Splitting on GOP (Group of Pictures) boundaries is critical — you cannot start decoding a chunk mid-GOP. The Splitter finds I-frames and cuts there, so each chunk is independently decodable. This enables true parallelism across thousands of encode workers.
 
 Netflix uses **per-title encoding**: a slow-motion cooking show can be compressed far more than a high-motion action movie. Their encoder first runs a complexity analysis pass, then picks optimal bitrate ladders per title — saving ~20 % bandwidth for the same perceived quality.
@@ -356,7 +364,7 @@ Netflix uses **per-title encoding**: a slow-motion cooking show can be compresse
 3. **Quality selection** — pick the highest variant whose bitrate < 80 % of estimated bandwidth (leave headroom).
 4. **Segment prefetch** — request segments 2–3 ahead of playback head to smooth over transient drops.
 
-The player never contacts the origin directly for segments — everything goes through the CDN edge. The manifest URL itself resolves to the nearest CDN PoP via anycast DNS.
+The player never contacts the origin directly for segments — everything goes through the CDN edge. The manifest URL itself resolves to the nearest CDN PoP via anycast [DNS](../../Level-00-Foundations/05-DNS/README.md).
 
 ---
 
@@ -404,12 +412,12 @@ View Event → Kafka topic
 | Bottleneck | Mitigation |
 |---|---|
 | **Upload ingest bandwidth** | Clients PUT directly to S3 via pre-signed URLs; app servers never touch bytes |
-| **Transcoding queue backlog** | Auto-scale GPU worker pool on Kubernetes; prioritise shorter videos |
+| **Transcoding queue backlog** | Auto-scale GPU worker pool on [Kubernetes](../../Level-06-Scale-and-Reliability/07-Containers-and-Orchestration/README.md); prioritise shorter videos |
 | **Metadata DB hot rows** (viral video) | Redis cache in front; read replicas; cache view count separately |
 | **CDN cold cache** (new video) | Warm CDN by pushing popular segments proactively to edges |
 | **Search index lag** | Elasticsearch updated asynchronously via Kafka; eventual consistency acceptable |
 | **Single-region failure** | Multi-region active-active; manifest URLs fail over via DNS health checks |
-| **Transcoding worker crash** | Idempotent tasks — each chunk has a unique key; retry from Kafka offset |
+| **Transcoding worker crash** | [Idempotent](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md) tasks — each chunk has a unique key; retry from Kafka offset |
 | **S3 eventual consistency** | Use strong-read consistency (S3 now offers this) or wait for replication before updating DB |
 
 **Failure scenario — transcoding stuck:** If a worker crashes mid-job, the Job Manager's heartbeat timer fires after 5 minutes and requeues that chunk. Because each task writes to a unique S3 key, retries are safe and idempotent.
@@ -431,7 +439,7 @@ View Event → Kafka topic
 | VP9 | ~30 % better than H.264 | Chrome, Android | Medium |
 | AV1 | ~50 % better than H.264 | Modern Chrome/Firefox/Android | Very high (10–20× slower) |
 
-**Trade-off:** AV1 saves massive bandwidth (critical at Netflix's scale) but encode time is huge. Netflix uses AV1 only for popular titles where the upfront cost amortises over millions of streams.
+**Trade-off:** AV1 saves massive bandwidth (critical at Netflix's scale) but encode time is huge. Netflix started AV1 with its most-watched titles, where the upfront cost amortises over millions of streams, and has widened it across the catalog as encoders got faster and device support grew.
 
 ### Pull CDN vs. Push CDN
 - **Pull CDN** (YouTube model): edge fetches from origin on first miss, then caches. Simple to operate; cold-start latency on new videos.
@@ -447,20 +455,20 @@ View Event → Kafka topic
 
 ### YouTube
 - Runs on Google's global infrastructure (GCP) with Colossus distributed file system for video storage.
-- Uses **VP9** and **AV1** heavily (Google owns both); early adopter of AV1 on YouTube mobile.
-- Search powered by Google's proprietary indexing; recommendations via a two-tower neural retrieval model (candidate generation) + ranking model (see [Level-07](../../Level-07-Big-Data-and-Specialized/05-Recommendation-and-ML-Systems/README.md)).
+- Uses **VP9** and **AV1** heavily (Google created VP9 and co-founded AOMedia, which developed AV1); early adopter of AV1 on YouTube mobile.
+- Search powered by Google's proprietary indexing; recommendations via a two-tower neural retrieval model (candidate generation) + ranking model (see [Level 7](../../Level-07-Big-Data-and-Specialized/05-Recommendation-and-ML-Systems/README.md)).
 - **Vitess** (MySQL sharding layer) used for metadata; Bigtable for event data.
 - **500 hours of video per minute** is the canonical public stat (as of 2022).
 
 ### Netflix
-- Migrated entirely to AWS (three regions: us-east-1 primary, eu-west-1, us-west-2).
-- **1 source video → ~1 200 encoding jobs** — this is their published engineering figure.
+- Migrated entirely to AWS (three active regions: us-east-1, us-west-2, eu-west-1).
+- A single title becomes on the order of a thousand output files across resolutions, bitrates, codecs, audio tracks and subtitles; the work is split into chunks and encoded in parallel.
 - Pioneered **per-title encoding** (2015) and **per-shot encoding** (2018) — encoding complexity varies shot by shot.
 - **Open Connect** CDN: ~17 000 OCA servers inside 1 000+ ISPs globally; handles > 95 % of Netflix traffic.
-- **Chaos Monkey / Chaos Engineering** originated at Netflix — they routinely kill production instances to prove resilience.
-- **37 % of North American downstream internet traffic** at peak (Sandvine report, 2022).
-- Uses **EVS (Encoded Video Store)** — a purpose-built system for managing the asset graph of all encoding variants.
-- Recommendation system is a multi-stage ML pipeline (candidate generation → ranking → diversity filters); outputs are cached per user; explained at [Level-07](../../Level-07-Big-Data-and-Specialized/05-Recommendation-and-ML-Systems/README.md).
+- **Chaos Monkey / [Chaos Engineering](../../Level-06-Scale-and-Reliability/08-Testing-Distributed-Systems/README.md)** originated at Netflix — they routinely kill production instances to prove resilience.
+- **37 % of North American downstream internet traffic** at peak (Sandvine report, 2015).
+- Runs encoding on **Cosmos**, its media computing platform that combines [microservices](../../Level-05-Architecture-Patterns/01-Monolith-vs-Microservices/README.md), asynchronous workflows, and [serverless](../../Level-05-Architecture-Patterns/08-Serverless-Architecture/README.md) functions (it replaced the older monolithic pipeline, Reloaded).
+- Recommendation system is a multi-stage ML pipeline (candidate generation → ranking → diversity filters); outputs are cached per user; explained at [Level 7](../../Level-07-Big-Data-and-Specialized/05-Recommendation-and-ML-Systems/README.md).
 
 ---
 
@@ -480,3 +488,11 @@ View Event → Kafka topic
 | Thumbnails | FFmpeg keyframe at t=10 s, async post-transcode | No upload friction; always available at publish |
 
 **The single most important insight:** video streaming is a **read-dominated, bandwidth-dominated problem**. Every major architectural decision — chunked uploads, parallel transcoding, CDN edge caching, ABR streaming, per-title encoding — exists to make the read path faster and cheaper, because reads outnumber writes by 10 000 : 1 and bandwidth is the dominant cost.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [08 · WhatsApp](../08-WhatsApp-Chat/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [10 · Typeahead / Autocomplete](../10-Typeahead-Autocomplete/README.md)
+
+<!-- nav:end -->

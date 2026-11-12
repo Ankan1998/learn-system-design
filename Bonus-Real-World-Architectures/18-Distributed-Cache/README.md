@@ -4,7 +4,7 @@
 
 **Difficulty:** ⭐⭐⭐⭐⭐ · **Builds on:**
 [Distributed Systems](../../Level-04-Distributed-Systems/README.md) ·
-[Replication & Consistency](../../Level-04-Distributed-Systems/README.md) ·
+[Database Replication](../../Level-02-Data-Layer/01-Database-Replication/README.md) ·
 [Consistent Hashing](../../Level-02-Data-Layer/08-Consistent-Hashing/README.md)
 
 ---
@@ -13,7 +13,7 @@
 
 Every high-traffic service puts a cache in front of its database. But a single-node cache becomes both a bottleneck and a single point of failure. A **distributed cache** spreads data across many nodes, keeps working when nodes fail, and scales horizontally by adding nodes.
 
-We're designing the internals of a system like **Redis Cluster** or **Facebook's Memcached + mcrouter**: multiple cache nodes, automatic sharding, primary/replica replication, and self-healing cluster membership.
+We're designing the internals of a system like **Redis Cluster** or **Facebook's Memcached + mcrouter**: multiple cache nodes, automatic [sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md), primary/replica replication, and self-healing cluster membership.
 
 **In scope:** partitioning strategy (consistent hashing), replication & failover, eviction policies, hot-key mitigation, cache invalidation & write policies, cluster membership/gossip.
 
@@ -32,7 +32,7 @@ We're designing the internals of a system like **Redis Cluster** or **Facebook's
 - Reads can be served from replicas (optional consistency trade-off)
 
 ### Non-Functional
-- GET/SET latency **p99 < 1 ms** (in-memory, same data center)
+- GET/SET latency **[p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) < 1 ms** (in-memory, same data center)
 - Support **1 M operations/s** per cluster
 - Survive loss of up to 1 node per shard without data loss (1 replica per shard)
 - **Hot key** single shard should not bottleneck the cluster
@@ -134,10 +134,12 @@ erDiagram
     SLOT ||--o{ KEY_ENTRY : "stores"
 ```
 
+*Caption: Notice that keys belong to slots, not directly to nodes, so moving a slot between nodes is the unit of rebalancing.*
+
 **Per-node storage (in-memory hash table):**
-- Redis uses a **dict** (open-addressing hash table) with incremental rehashing — never pauses for a full rehash; migrates 1 bucket per request.
+- Redis uses a **dict** (chained hash table) with incremental rehashing — never pauses for a full rehash; migrates 1 bucket per request.
 - Each key-value pair has metadata: LRU clock tick (24 bits), reference count, encoding type, TTL timestamp.
-- Encoding optimization: small integers stored as actual integers (not strings); short strings use embedded string encoding (no malloc).
+- Encoding optimization: small integers stored as actual integers (not strings); short strings use embedded string encoding (object and string in one allocation).
 
 ---
 
@@ -147,13 +149,13 @@ erDiagram
 flowchart TD
     Clients(["📱 Application<br/>Clients (×1000)"])
     Router["🗺️ mcrouter /<br/>Cluster-Aware<br/>Client Library"]
-    P1["Primary Node 1<br/>Slots 0–2730<br/>16 GB RAM"]
-    P2["Primary Node 2<br/>Slots 2731–5460<br/>16 GB RAM"]
-    P3["Primary Node 3<br/>Slots 5461–8191<br/>16 GB RAM"]
+    P1["Primary Node 1<br/>Slots 0–5460<br/>16 GB RAM"]
+    P2["Primary Node 2<br/>Slots 5461–10922<br/>16 GB RAM"]
+    P3["Primary Node 3<br/>Slots 10923–16383<br/>16 GB RAM"]
     R1["Replica 1<br/>(mirrors P1)"]
     R2["Replica 2<br/>(mirrors P2)"]
     R3["Replica 3<br/>(mirrors P3)"]
-    Gossip["Gossip Protocol<br/>(PING/PONG<br/>every 100 ms)"]
+    Gossip["Gossip Protocol<br/>(PING/PONG<br/>~every 1 s)"]
     DB[("🐘 Source-of-Truth<br/>Database")]
 
     Clients --> Router
@@ -181,6 +183,8 @@ flowchart TD
     class Router,Gossip infra
     class Clients,DB ext
 ```
+
+*Caption: Notice the client-side router sends each key straight to the primary owning its slot, while replicas receive asynchronous copies and all nodes gossip membership.*
 
 **Walk-through (GET request):**
 1. Client library computes `HASH(key)` → maps to one of 16 384 slots.
@@ -232,7 +236,7 @@ Each primary has 1+ replicas. Replication is **asynchronous**: primary writes to
 6. Elected replica promotes itself: sends `PONG` with new role, updates slot ownership.
 7. Cluster-aware clients receive slot table update → redirect to new primary.
 
-Typical failover time: **1–5 seconds**.
+Failover time ≈ `cluster-node-timeout` (15 s by default, often tuned down to ~5 s) plus a second or two for the election.
 
 ```mermaid
 sequenceDiagram
@@ -241,9 +245,9 @@ sequenceDiagram
     participant Peers as Other Nodes
     participant Client
 
-    P->>Peers: PING every 100ms
+    P->>Peers: PING ~every 1s
     Note over P: Primary crashes
-    Peers->>Peers: Missed 3 PINGs → PFAIL
+    Peers->>Peers: No PONG within node timeout → PFAIL
     Peers->>Peers: Gossip spreads PFAIL
     Peers->>Peers: Quorum reached → FAIL
     R->>Peers: FAILOVER_AUTH_REQUEST
@@ -252,6 +256,8 @@ sequenceDiagram
     R->>Client: PONG with new slot ownership
     Client->>R: GET key (now routes to R)
 ```
+
+*Caption: Notice failure is declared only after peers agree (PFAIL then FAIL), and the replica needs a majority of votes before promoting itself.*
 
 ### 7.3 Eviction Policies & Memory Management
 
@@ -295,6 +301,8 @@ flowchart LR
     class DB store
 ```
 
+*Caption: Notice most hot-key reads stop at the in-process L1 cache, and the rest spread across suffixed key copies before ever reaching the database.*
+
 ---
 
 ## 8. 📈 Scaling, Bottlenecks & Failure Modes
@@ -305,11 +313,11 @@ flowchart LR
 | Node addition/removal | Key migration window causes miss spike | Migrate slots gradually; source node serves both old and new requests during migration |
 | Network partition | Two cluster halves both believe they're primary | Majority quorum required for writes; minority partition returns errors (prefer correctness) |
 | Memory fragmentation | RSS grows beyond maxmemory | `MEMORY PURGE` periodically; jemalloc with background defrag (Redis 4+) |
-| Gossip overhead | N² messages in large cluster | Gossip is O(log N) messages/round (not O(N²)); each node contacts random subset |
+| Gossip overhead | N² messages in large cluster | Each node pings only a few random peers per second, so traffic grows O(N) per round rather than O(N²), and news still reaches every node in O(log N) rounds |
 
 **Failure modes:**
 - **Network partition** → minority shard becomes read-only or returns errors; majority continues normally; resolves on partition heal.
-- **Split-brain** → prevented by requiring majority quorum (≥ N/2+1 primaries) for a replica to be promoted. If quorum unavailable → no promotion → no split-brain.
+- **[Split-brain](../../Level-04-Distributed-Systems/05-Leader-Election/README.md)** → prevented by requiring majority quorum (≥ N/2+1 primaries) for a replica to be promoted. If quorum unavailable → no promotion → no split-brain.
 - **Cache stampede (thundering herd)** → many cache misses hit DB simultaneously. Mitigate with **probabilistic early expiration**: randomly refresh a key before TTL expires for frequent readers.
 
 ---
@@ -321,16 +329,16 @@ flowchart LR
 | Partitioning | Consistent hashing (16384 slots) | Modular hashing | Minimal key migration on cluster change |
 | Replication | Async (primary ack before replica) | Sync (wait for replica ack) | Sync adds latency; cache is not source of truth; losing last 0.5 ms of cache writes is acceptable |
 | Failover | Quorum election (gossip) | External coordinator (ZooKeeper) | No external dependency; simpler ops; slightly slower failover |
-| Eviction | LFU (default recommendation) | LRU | LFU better handles scan resistance; LRU evicts popular keys accessed in a scan |
+| Eviction | LFU (default recommendation) | LRU | LFU better handles scan resistance; under LRU a one-off scan evicts popular keys |
 | Hot key | L1 local cache + key replication | Read replicas only | L1 removes network RTT entirely for hottest keys |
 
 ---
 
 ## 10. 🌐 How It's Actually Done
 
-**Redis Cluster** (OSS): uses exactly 16 384 CRC16-based hash slots, gossip protocol (PING/PONG every 100 ms), automatic failover with quorum election. `CLUSTER MEET`, `CLUSTER ADDSLOTS`, and `CLUSTER REPLICATE` commands manage topology.
+**Redis Cluster** (OSS): uses exactly 16 384 CRC16-based hash slots, [gossip protocol](../../Level-04-Distributed-Systems/10-Gossip-and-Failure-Detection/README.md) (each node PINGs a few random peers every second), automatic failover with quorum election. `CLUSTER MEET`, `CLUSTER ADDSLOTS`, and `CLUSTER REPLICATE` commands manage topology.
 
-**Facebook Memcached + mcrouter**: described in the 2013 NSDI paper "Scaling Memcache at Facebook." Key insights: (1) **mcrouter** is a proxy that handles sharding, replication, and hot-key fan-out transparently to clients; (2) **lease mechanism** solves stale sets after invalidation (thundering herd prevention); (3) **regional pools** replicate hot data geographically.
+**Facebook Memcached + mcrouter**: described in the 2013 NSDI paper "Scaling Memcache at Facebook." Key insights: (1) **mcrouter** is a proxy that handles sharding, replication, and hot-key fan-out transparently to clients; (2) **lease mechanism** solves stale sets after invalidation (thundering herd prevention); (3) **regional pools** let the frontend clusters in a region share one copy of large, rarely accessed items.
 
 **Pelikan** (Twitter): a cache framework that improves on Memcached's threading model by using a lock-free data structure per core, eliminating mutex contention.
 
@@ -344,9 +352,17 @@ flowchart LR
 |---|---|
 | Partitioning | Consistent hashing with 16 384 slots; virtual nodes for even distribution |
 | Replication | Async primary→replica; 1 replica per shard minimum |
-| Failover | Gossip-based quorum election; 1–5 s typical recovery |
+| Failover | Gossip-based quorum election; recovery ≈ node timeout + 1–2 s |
 | Eviction | LFU (approximated with Morris counter) as default; tunable per use case |
 | Hot keys | L1 in-process cache + key replication (key:0 … key:N) |
 | Write policy | Cache-aside (lazy population) for most; write-through for strong consistency |
 
 The foundational insight is **consistent hashing with virtual nodes**: it's the reason you can add or remove a cache node without invalidating 85% of your cache. Everything else — replication, gossip, eviction — is layered on top of this core partitioning mechanism.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [17 · Payment System](../17-Payment-System/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [19 · Distributed Message Queue](../19-Distributed-Message-Queue/README.md)
+
+<!-- nav:end -->

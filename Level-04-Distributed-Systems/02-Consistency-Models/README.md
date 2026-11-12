@@ -23,7 +23,7 @@ Think of updating your profile photo on a social network:
 - **Linearizability:** The moment you tap "Save," everyone in the world sees your new photo instantly. Like magic — but expensive.
 - **Read-your-writes:** *You* see your new photo immediately. Your friends might see the old one for a few seconds.
 - **Eventual consistency:** The photo will propagate to everyone... eventually. Right after you save it, some of your friends see the old photo and some see the new one.
-- **Strong eventual consistency:** Everyone will converge to the same photo, and no two people will ever see the changes in a different order.
+- **Strong eventual consistency:** Everyone will converge to the same photo — anyone who has received the same set of changes sees the same result, no matter what order those changes arrived in.
 
 Each model trades off freshness, performance, and reasoning complexity.
 
@@ -55,8 +55,8 @@ These are **different** and commonly confused — even in interviews.
 
 ```mermaid
 graph TD
-    A["⬆ Strongest<br/>Linearizability<br/>(Strict / Atomic)"]:::strong
-    B["Strict Serializability<br/>= Linearizable + Serializable"]:::strong
+    A["⬆ Strongest<br/>Strict Serializability<br/>= Linearizable + Serializable"]:::strong
+    B["Linearizability (single objects)<br/>Serializability (transactions)"]:::strong
     C["Sequential Consistency"]:::medium
     D["Causal Consistency<br/>(+ session guarantees)"]:::medium
     E["Monotonic Reads / Writes<br/>Read-Your-Writes"]:::weak
@@ -76,7 +76,7 @@ graph TD
     classDef weakest fill:#f3f4f6,stroke:#9ca3af,color:#000
 ```
 
-*Stronger = more guarantees, higher cost. Weaker = more performance, more application complexity.*
+*Stronger = more guarantees, higher cost. Weaker = more performance, more application complexity. Linearizability and serializability share a rung because neither implies the other: one is about real-time order on a single object, the other about isolation across a transaction.*
 
 ### Consistency Model Definitions
 
@@ -110,6 +110,8 @@ flowchart LR
     style weak fill:#d1fae5,stroke:#059669,color:#000
 ```
 
+*Caption: Notice that client-centric session models only constrain what a single client observes, while the strong and medium models constrain what every node sees.*
+
 ---
 
 ## 🔧 Types / Variations / Strategies
@@ -122,10 +124,10 @@ flowchart LR
 | **Strict Serializability** | Linearizable + serializable transactions | Google Spanner, FoundationDB | Highest |
 | **Serializability** | Transactions appear to run one at a time | PostgreSQL (SERIALIZABLE isolation) | High |
 | **Sequential Consistency** | All nodes agree on operation order, but order may lag real time | Early Lamport papers; some CPUs | Medium |
-| **Causal Consistency** | If A causes B, everyone sees A before B; unrelated ops may differ | Cassandra lightweight transactions, MongoDB causal sessions | Medium |
+| **Causal Consistency** | If A causes B, everyone sees A before B; unrelated ops may differ | COPS (research), MongoDB causal sessions | Medium |
 | **Read-Your-Writes** | After you write, your subsequent reads reflect it | Most web sessions, sticky sessions | Low |
 | **Monotonic Reads** | Once you read a value, you never read an older one | Pinned replica sessions | Low |
-    | **Monotonic Writes** | Your writes are applied in the order you sent them | Most single-threaded clients | Low |
+| **Monotonic Writes** | Your writes are applied in the order you sent them | Most single-threaded clients | Low |
 | **Bounded Staleness** | Reads are at most T seconds or K versions behind | Azure Cosmos DB option | Low-Medium |
 | **Eventual Consistency** | Replicas will converge if writes stop; no ordering guarantee | Cassandra, DynamoDB, DNS | Lowest |
 
@@ -156,6 +158,8 @@ sequenceDiagram
     R2-->>C: x=5 or x=10 ✅ (never x=3)
 ```
 
+*Caption: Both guarantees stop a client from seeing time run backwards when it switches replicas: its own writes are always visible, and a later read never returns older data than an earlier one.*
+
 ---
 
 ## 🏢 Real-World Examples
@@ -165,7 +169,7 @@ Spanner provides externally consistent (strict serializable) transactions global
 
 ### 2. Cassandra — Tunable Consistency
 Cassandra lets you specify the consistency level per operation. The formula:
-- `R + W > N` → strong consistency (quorum reads + writes cover all replicas)
+- `R + W > N` → strong consistency (every read quorum overlaps every write quorum in at least one replica)
 - `W = 1, R = 1` → eventual consistency (fastest, weakest)
 
 With `N=3, R=2, W=2` (quorum), you get strong consistency *without* strict linearizability — two reads in parallel can still see different things if timed just right.
@@ -215,12 +219,14 @@ flowchart LR
     style SS fill:#d1fae5,stroke:#059669,color:#000
 ```
 
+*Caption: Linearizability governs single objects in real-time order, serializability governs multi-object transactions in some serial order, and strict serializability requires both at once.*
+
 ---
 
 ## ✅ When to Use / ❌ When NOT to Use
 
 ### Linearizability — Use When:
-- Distributed locks, leader election, sequence number generation
+- [Distributed locks](../08-Distributed-Locking/README.md), [leader election](../05-Leader-Election/README.md), sequence number generation
 - Any operation where two concurrent actors MUST NOT both think they succeeded
 - Financial account balances where reads must reflect the latest state
 
@@ -266,7 +272,7 @@ flowchart LR
 ## 📝 TL;DR
 
 - Consistency models define what values a read can return relative to prior writes
-- **Linearizability:** every read sees the latest write; operations are instantaneous — strongest and most expensive
+- **Linearizability:** every read sees the latest write; operations appear instantaneous — the strongest single-object guarantee, and expensive
 - **Serializability:** transactions appear to run one at a time — different from linearizability!
 - **Causal consistency:** if A causes B, everyone sees A first — practical middle ground
 - **Read-your-writes, monotonic reads:** session-scoped guarantees — cheap and practical
@@ -294,3 +300,13 @@ flowchart LR
 - **Dynamo (2007):** "Dynamo: Amazon's Highly Available Key-Value Store" — SOSP 2007 — the canonical eventually-consistent system
 - **Bailis et al. (2013):** "Highly Available Transactions: Virtues and Limitations" — VLDB — which consistency models are achievable under high availability
 - **Azure Cosmos DB consistency levels documentation** — excellent interactive diagrams showing each level
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [CAP Theorem](../01-CAP-Theorem/README.md) · 🏠 [Level 4 — Distributed Systems](../README.md) · ➡️ **Next:** [Consensus: Paxos and Raft](../03-Consensus-Paxos-Raft/README.md)
+
+🧩 **See it applied in:** [23 · Distributed Counter & Analytics](../../Bonus-Real-World-Architectures/23-Distributed-Counter-Analytics/README.md) · [27 · Distributed Key-Value Store](../../Bonus-Real-World-Architectures/27-Key-Value-Store/README.md) · [28 · Google Docs Collaborative Editing](../../Bonus-Real-World-Architectures/28-Google-Docs-Collaborative-Editing/README.md) · [39 · Distributed Coordination Service (ZooKeeper / etcd)](../../Bonus-Real-World-Architectures/39-Distributed-Coordination-Service/README.md) · [42 · Social Graph Store (Facebook TAO)](../../Bonus-Real-World-Architectures/42-Social-Graph-Store/README.md)
+
+<!-- nav:end -->

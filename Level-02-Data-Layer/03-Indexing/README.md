@@ -116,7 +116,7 @@ flowchart TD
 Key properties:
 - **Balanced:** all leaf nodes are at the same depth, so lookup time is always O(log n).
 - **Sorted:** range queries (`WHERE name BETWEEN 'alice' AND 'eve'`) are efficient — follow the tree to the start, then scan leaves sequentially.
-- **Fan-out:** each internal node holds many keys (hundreds in practice). A B-Tree with fan-out 500 can index 500³ = 125 billion rows in 3 levels. Real tables almost never need more than 4 levels.
+- **Fan-out:** each internal node holds many keys (hundreds in practice). A B-Tree with fan-out 500 can index 500³ = 125 million rows in 3 levels. Real tables almost never need more than 4 levels.
 - In Postgres/InnoDB, each node = one disk page (typically 8 KB or 16 KB).
 
 ---
@@ -154,6 +154,23 @@ Index: (user_id, created_at)
 ✅ WHERE user_id = 42 AND created_at > X → uses index
 ❌ WHERE created_at > X                  → full scan (user_id is leading column, not filtered)
 ```
+
+```mermaid
+flowchart TD
+    IDX["Index on (user_id, created_at)<br/>sorted by user_id first, then by created_at"]
+    IDX --> E["41, Jan 03<br/>41, Feb 11<br/>42, Jan 07<br/>42, Mar 02<br/>42, Mar 19<br/>43, Jan 01"]
+    E --> Q1["WHERE user_id = 42<br/>one contiguous block: fast"]
+    E --> Q2["WHERE user_id = 42 AND created_at > Mar 01<br/>a slice of that block: fast"]
+    E --> Q3["WHERE created_at > Mar 01<br/>matches are scattered: scan everything"]
+
+    style IDX fill:#dbeafe,color:#000
+    style E fill:#f1f5f9,color:#000
+    style Q1 fill:#dcfce7,color:#000
+    style Q2 fill:#dcfce7,color:#000
+    style Q3 fill:#fecaca,color:#000
+```
+
+*Caption: The leftmost prefix rule falls out of the sort order: all rows for one user sit together, but rows for one date are spread across every user.*
 
 ---
 
@@ -213,7 +230,7 @@ CREATE INDEX idx_users_email_name ON users (email, name);
 **Use an index when:**
 - Columns appear in `WHERE`, `JOIN`, or `ORDER BY` clauses frequently.
 - The column has high **cardinality** (many distinct values — `email`, `user_id`).
-- You're filtering a small fraction of the table (< 10–20% of rows). Below that threshold, a full scan often wins because it's sequential I/O.
+- You're filtering a small fraction of the table (< 10–20% of rows). Above that threshold, a full scan often wins because it's sequential I/O.
 - The table is read-heavy relative to write-heavy.
 
 **Don't add an index when:**
@@ -280,4 +297,13 @@ CREATE INDEX idx_users_email_name ON users (email, name);
 - [Postgres Documentation: Indexes](https://www.postgresql.org/docs/current/indexes.html)
 - [Use The Index, Luke](https://use-the-index-luke.com/) — a free, database-agnostic guide to SQL indexes.
 - [MySQL EXPLAIN Output Format](https://dev.mysql.com/doc/refman/8.0/en/explain-output.html)
-- Previous: [02 — Sharding and Partitioning](../02-Sharding-and-Partitioning/README.md) · Next: [04 — Database Internals](../04-Database-Internals/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Sharding and Partitioning](../02-Sharding-and-Partitioning/README.md) · 🏠 [Level 2 — The Data Layer](../README.md) · ➡️ **Next:** [Database Internals](../04-Database-Internals/README.md)
+
+🧩 **See it applied in:** [10 · Typeahead / Autocomplete](../../Bonus-Real-World-Architectures/10-Typeahead-Autocomplete/README.md) · [43 · Calendar & Scheduling System (Google Calendar)](../../Bonus-Real-World-Architectures/43-Calendar-and-Scheduling/README.md)
+
+<!-- nav:end -->

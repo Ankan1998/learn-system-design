@@ -39,7 +39,7 @@ We are **not** designing a mail client UI or calendar — just the backend that 
 ### Non-Functional
 - **Scale:** 1 B active users, 5 B messages/day sent + received.
 - **Availability:** 99.99% for read access; 99.9% for send (SMTP retries make strict 5-nines unnecessary).
-- **Latency:** Inbox load < 200 ms p99; search < 500 ms p99; outbound delivery best-effort < 30 s.
+- **Latency:** Inbox load < 200 ms [p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md); search < 500 ms p99; outbound delivery best-effort < 30 s.
 - **Durability:** Zero message loss once accepted; replicated across ≥3 AZs.
 - **Storage:** Efficient; attachment bytes on object storage, not hot databases.
 - **Deliverability:** SPF/DKIM/DMARC compliant; low spam-sender reputation score.
@@ -53,7 +53,7 @@ We are **not** designing a mail client UI or calendar — just the backend that 
 | Metric | Value |
 |--------|-------|
 | Active users | 1 B |
-| Messages/day | 5 B (≈ 58 K/s peak) |
+| Messages/day | 5 B (≈ 58 K/s average) |
 | Avg message size (headers + body) | 75 KB |
 | Avg attachment size (when present) | 2 MB; 20% of messages have attachments |
 
@@ -71,7 +71,7 @@ At 5-year retention with compression (≈3:1) and tiered cold storage:
 Compressed data/year: 2.4 PB × 365 / 3  ≈ 290 PB/year (net)
 ```
 
-That's roughly the scale of Gmail's actual storage footprint.
+That is exabyte territory within a few years — the order of magnitude the largest consumer mail services operate at.
 
 **Metadata (indexes, envelopes)**
 
@@ -81,9 +81,9 @@ That's roughly the scale of Gmail's actual storage footprint.
 
 **Search index**
 
-- Inverted index per user; tokens ≈ 10× message count
-- Index growth: ~50 GB/user at 1 M messages (very active user)
-- Average user: ~50 K messages → ~2.5 GB index; median much smaller
+- Inverted index per user; an index runs at roughly 5–10% of the text it covers, about 5 KB per message
+- Very active user (1 M messages): ~5 GB of index
+- Average user: ~50 K messages → ~250 MB index; median much smaller
 
 **Outbound SMTP connections**
 
@@ -169,11 +169,13 @@ erDiagram
     THREAD ||--o{ MESSAGE_ENVELOPE : "contains"
 ```
 
+*Caption: The envelope is the central row and stores only object keys for the body and raw MIME, so message bytes and attachments live outside the database.*
+
 **Storage justification:**
 
 | Data | Store | Why |
 |------|-------|-----|
-| Message envelopes & metadata | Sharded MySQL / Spanner / Cassandra | Structured queries, per-user sharding, strong consistency for flags |
+| Message envelopes & metadata | Sharded MySQL / Spanner / Cassandra | Structured queries, per-user [sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md), strong consistency for flags |
 | Message bodies (text) | [Object Storage](../../Level-02-Data-Layer/09-Object-Storage/README.md) (S3-compatible) | Immutable blobs, cheap, durable; fetched by key |
 | Attachments | Object Storage (separate bucket, lifecycle to cold tier) | Large binary, infrequently accessed |
 | Raw MIME (inbound) | Object Storage (temporary bucket, 30-day TTL) | Needed for re-parsing, legal hold |
@@ -258,11 +260,13 @@ flowchart TD
     style Storage fill:#e0f2fe,color:#000
 ```
 
+*Caption: Sending and receiving are separate Kafka-decoupled paths; outbound mail flows to an MTA pool, while inbound mail passes spam and phishing checks before reaching storage and the index.*
+
 **Walk-through — sending a message:**
 
-1. User's web client calls `POST /v1/messages/send` through the **API Gateway**.
+1. User's web client calls `POST /v1/messages/send` through the **[API Gateway](../../Level-05-Architecture-Patterns/05-API-Gateway/README.md)**.
 2. **Mail Send Service** validates the request, stores body + attachments in **Object Storage**, writes the envelope to **Metadata DB**, then publishes to the `outbound-mail` Kafka topic.
-3. An **Outbound MTA Worker** consumes the job, performs DNS MX lookup for the recipient domain, opens an SMTP/TLS connection, and delivers the message. It retries with exponential back-off (up to 4 days per RFC 5321).
+3. An **Outbound MTA Worker** consumes the job, performs [DNS](../../Level-00-Foundations/05-DNS/README.md) MX lookup for the recipient domain, opens an SMTP/TLS connection, and delivers the message. It retries with exponential back-off (up to 4 days per RFC 5321).
 4. Delivery status (success / bounce / defer) is written back to the Metadata DB.
 
 **Walk-through — receiving a message:**
@@ -361,7 +365,7 @@ See [Object Storage deep dive](../../Level-02-Data-Layer/09-Object-Storage/READM
 
 | Age | Tier | Cost |
 |-----|------|------|
-| 0–90 days | Standard (SSD-backed) | ~$23/TB/month |
+| 0–90 days | Standard | ~$23/TB/month |
 | 90 days – 2 years | Infrequent Access | ~$12/TB/month |
 | 2–7 years | Glacier / Coldline | ~$4/TB/month |
 | 7+ years | Deep Archive | ~$1/TB/month |
@@ -432,6 +436,8 @@ flowchart TD
     style ROUTE fill:#ffedd5,color:#000
 ```
 
+*Caption: Cheap SMTP-layer checks run first, while URL scanning and sender reputation run alongside content classification, and all three scores merge into one routing decision.*
+
 **Layers (defense in depth):**
 
 1. **SMTP-layer rejection** — reject at `RCPT TO` for known-bad IPs (no message stored, cheapest).
@@ -451,7 +457,7 @@ The ML model is retrained daily on fresh labeled data (user "Report Spam" / "Not
 |---------|-----------|
 | **Outbound IP reputation degradation** | Dedicate IP ranges per traffic type; auto-rotate IPs; monitor complaint rates; pause sending on high bounce rates |
 | **Inbound MTA overload (spam storms)** | Rate-limit at TCP layer per source IP; auto-scale MTA cluster; Kafka absorbs spikes |
-| **Metadata DB hot shards** | Consistent hashing + virtual nodes for shard rebalancing; read replicas for envelope list queries |
+| **Metadata DB hot shards** | [Consistent hashing](../../Level-02-Data-Layer/08-Consistent-Hashing/README.md) + virtual nodes for shard rebalancing; [read replicas](../../Level-02-Data-Layer/01-Database-Replication/README.md) for envelope list queries |
 | **Object storage costs** | Content-addressed dedup; aggressive lifecycle tiering; compress text bodies (gzip saves 70%) |
 | **Search index lag** | Kafka backpressure + auto-scale indexing workers; SLA 5 s; pre-warm for new user signups |
 | **MTA grey-listing** | Detect 451 responses (greylisting) → retry after minimum interval without burning retry budget |
@@ -475,11 +481,11 @@ The ML model is retrained daily on fresh labeled data (user "Report Spam" / "Not
 
 ## 10. 🌐 How It's Actually Done
 
-**Gmail (Google):** Uses Bigtable for message metadata, Colossus (Google's distributed file system, successor to GFS) for message bodies, and a custom SMTP infrastructure. Spam filtering uses a combination of rules + deep learning (TensorFlow). Gmail's threading uses a mix of `Message-ID`/`In-Reply-To` headers and subject-line normalization.
+**Gmail (Google):** Message metadata historically lived in Bigtable and has since moved to Spanner; message bodies sit on Colossus (Google's distributed file system, successor to GFS), behind a custom SMTP infrastructure. Spam filtering uses a combination of rules + deep learning (TensorFlow). Gmail's threading uses a mix of `Message-ID`/`In-Reply-To` headers and subject-line normalization.
 
-**Outlook / Microsoft 365:** Uses a massive Exchange Online infrastructure built on top of Azure, with custom MTA clusters ("Receive Connectors"), Exchange mailbox databases, and Azure Blob Storage for attachments. Spam is handled by Microsoft Defender for Office 365 (formerly EOP — Exchange Online Protection), which combines reputation, content filtering, and ML.
+**Outlook / Microsoft 365:** Uses a massive Exchange Online infrastructure built on top of Azure, with custom MTA clusters ("Receive Connectors"), Exchange mailbox databases, and Azure Blob Storage for attachments. Spam is handled by EOP (Exchange Online Protection), extended by Microsoft Defender for Office 365, which combines reputation, content filtering, and ML.
 
-**Fastmail / Proton Mail:** Smaller scale but architecturally similar — open-source components like Dovecot (IMAP server), Postfix (MTA), and SpamAssassin for spam at smaller deployments. Proton adds end-to-end encryption (messages encrypted client-side before storage, which means server-side search isn't possible — they use client-side search index synced to device).
+**Fastmail / Proton Mail:** Smaller scale but architecturally similar — open-source components like Cyrus (Fastmail) or Dovecot (IMAP servers), Postfix (MTA), and SpamAssassin for spam at smaller deployments. Proton adds end-to-end encryption (messages encrypted client-side before storage, which means server-side search isn't possible — they use client-side search index synced to device).
 
 Key real-world lessons:
 - Deliverability is an ongoing operational effort, not a one-time configuration.
@@ -504,4 +510,12 @@ The key insight is the **separation of hot metadata from cold body blobs**: keep
 
 ---
 
-*Siblings: [Google Drive/Dropbox](../14-Google-Drive-Dropbox/README.md) · [Notification Service](../04-Notification-Service/README.md) · [Distributed Message Queue](../19-Distributed-Message-Queue/README.md)*
+**Related:** [Google Drive/Dropbox](../14-Google-Drive-Dropbox/README.md) · [Notification Service](../04-Notification-Service/README.md) · [Distributed Message Queue](../19-Distributed-Message-Queue/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [31 · E-Commerce Platform (Amazon)](../31-E-Commerce-Platform/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [33 · Content Delivery Network (CDN)](../33-Content-Delivery-Network/README.md)
+
+<!-- nav:end -->

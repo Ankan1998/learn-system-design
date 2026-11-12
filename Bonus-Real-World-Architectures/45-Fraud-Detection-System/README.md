@@ -35,8 +35,8 @@ The adversary adapts. Rules written on Monday are routed around by Thursday. The
 - **Review queue** for borderline cases with reasons shown to analysts.
 
 ### Non-Functional
-- **p99 < 100 ms** end-to-end for scoring; the model itself < 10 ms.
-- **20K TPS peak**; 99.99% availability with an explicit **degradation policy** (rules-only → cached score → fail-open below an amount threshold).
+- **[p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) < 100 ms** end-to-end for scoring; the model itself < 10 ms.
+- **20K TPS peak**; 99.99% availability with an explicit **degradation policy** (cached score → rules-only → fail-open below an amount threshold).
 - Real-time features fresh within **seconds**; batch features refreshed daily.
 - Quality targets: block rate on legitimate traffic **< 0.1%**, catch rate on fraud as high as precision allows.
 - **Point-in-time correct** training data — no leakage of future information.
@@ -84,7 +84,7 @@ Review:  GET /review/queue, POST /review/{id}/verdict
 Models:  POST /models/{version}/promote  { stage: shadow | canary(5%) | active }
 ```
 
-Design notes: the score endpoint is called with a **hard deadline** by the payment service; `reasons` are computed for every decision (not just blocks) so reviewers and merchants can understand them; feedback is **idempotent** on `(payment_intent_id, source)`.
+Design notes: the score endpoint is called with a **hard deadline** by the payment service; `reasons` are computed for every decision (not just blocks) so reviewers and merchants can understand them; feedback is **[idempotent](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md)** on `(payment_intent_id, source)`.
 
 ---
 
@@ -115,7 +115,7 @@ erDiagram
         string entity_type PK "card|email|ip|device|merchant"
         string entity_id PK
         string feature_name PK
-        string window "1m|1h|24h|7d|90d"
+        string window PK "1m|1h|24h|7d|90d"
         float value
         timestamp updated_at
     }
@@ -151,6 +151,8 @@ erDiagram
     RISK_DECISION ||--o| REVIEW_CASE : "may open"
     MODEL_VERSION ||--o{ RISK_DECISION : "produced"
 ```
+
+*Caption: Notice that every decision records its model version and a feature snapshot reference, so a label arriving months later can be joined back point-in-time.*
 
 **Storage choices:** transaction events and decisions are **append-only** (Kafka → lake, with a hot copy in a wide-column store for recent lookups); the **online feature store** is an in-memory KV cluster (Redis-class) keyed by `(entity, feature, window)` with TTLs; the **offline feature store** is Parquet in the lake, partitioned by day, holding the same features as *time-series* so training can reconstruct any feature's value at any past instant; rules in a relational DB, compiled and cached in every scoring node; the entity graph as adjacency lists in KV for small neighborhoods plus batch-computed components in the lake.
 
@@ -200,6 +202,8 @@ flowchart LR
     style TRAIN fill:#fde68a,color:#000
     style LBL fill:#fecaca,color:#000
 ```
+
+*Caption: The synchronous path stays inside the scoring node and online feature store; counters, training, and late labels all flow asynchronously through Kafka and the lake.*
 
 **Walk-through (one payment):**
 1. The payment service calls the risk gateway with a **100 ms deadline** and the tokenized transaction.
@@ -294,7 +298,7 @@ The latency budget is the design constraint that touches everything:
 
 - Model **in-process**, features **precomputed**, external lookups **cached**, feature fetch **batched and hedged**, strict per-stage deadlines.
 - A **degradation ladder** the gateway walks when something is slow or down: full model → last cached score for this entity → rules-only → **fail-open below an amount threshold and fail-closed above it**. The fail-open rate is itself a monitored metric, because attackers will notice a fail-open window faster than your dashboards do.
-- **Circuit breakers** on the feature store and external providers; scoring never blocks the payment beyond the deadline.
+- **[Circuit breakers](../../Level-05-Architecture-Patterns/06-Resilience-Patterns/README.md)** on the feature store and external providers; scoring never blocks the payment beyond the deadline.
 
 ### 7.6 Labels, the feedback loop, and safe model rollout
 
@@ -352,7 +356,7 @@ A **review queue** takes the uncertain middle: cases with reasons, entity histor
 
 **Adyen RevenueProtect:** network-level risk with merchant-configurable rules and 3DS optimization; Adyen's documentation is a clear public statement of the "rules plus ML plus authentication" pattern.
 
-**Uber's fraud systems and Michelangelo:** Uber built a general feature store into its ML platform (Michelangelo) largely because fraud and safety models needed the same real-time features across services; the online/offline split with point-in-time correctness comes from that lineage.
+**Uber's Michelangelo:** Uber's ML platform popularized the feature store — a shared catalogue of features computed once and served both offline for training and online for scoring. The online/offline split with point-in-time correctness used in this design comes from that lineage.
 
 **Feast (originally at Gojek):** the open-source feature store that codified the online/offline pattern used here.
 
@@ -378,4 +382,12 @@ The 30-second whiteboard pitch: a fraud system is a real-time feature platform w
 
 ---
 
-[← Back to all real-world architectures](../README.md) · Related: [Payment System (Stripe)](../17-Payment-System/README.md) · [Ad Click Aggregator](../20-Ad-Click-Aggregator/README.md) · [Social Graph Store (TAO)](../42-Social-Graph-Store/README.md)
+**Related:** [Payment System (Stripe)](../17-Payment-System/README.md) · [Ad Click Aggregator](../20-Ad-Click-Aggregator/README.md) · [Social Graph Store (TAO)](../42-Social-Graph-Store/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [44 · Identity & Access Management Service (Auth0 / Okta)](../44-Identity-and-Access-Service/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [46 · Distributed SQL Database (Spanner / CockroachDB)](../46-Distributed-SQL-Database/README.md)
+
+<!-- nav:end -->

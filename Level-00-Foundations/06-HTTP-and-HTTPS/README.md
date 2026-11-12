@@ -76,7 +76,9 @@ Content-Length: 87
 | `PATCH` | Partially update a resource | No | No* |
 | `DELETE` | Remove a resource | No | Yes |
 
-> **Safe** means the method never modifies server state. **Idempotent** means calling it multiple times has the same effect as calling it once — important for retrying failed requests safely.
+> **Safe** means the method never modifies server state. **[Idempotent](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md)** means calling it multiple times has the same effect as calling it once — important for retrying failed requests safely.
+>
+> \* `PATCH` is not *guaranteed* to be idempotent. "Set email to X" gives the same result every time, but "append this item" or "increment this counter" does not, so treat `PATCH` as non-idempotent unless the API documents otherwise.
 
 ### Status Code Families
 
@@ -96,7 +98,7 @@ Key codes you'll encounter every day:
 | 201 | Created | POST succeeded, new resource created |
 | 204 | No Content | Success, but nothing to send back |
 | 301 | Moved Permanently | URL has changed forever; update your bookmarks |
-| 302 | Found (Temporary Redirect) | URL has changed temporarily |
+| 302 | Found | URL has changed temporarily (`307 Temporary Redirect` is the stricter variant that keeps the HTTP method) |
 | 400 | Bad Request | Malformed syntax or invalid parameters |
 | 401 | Unauthorized | Not authenticated — you need to log in |
 | 403 | Forbidden | Authenticated but not allowed — wrong permissions |
@@ -160,7 +162,7 @@ TLS provides three guarantees:
 
 1. **ClientHello** — browser sends: "I support TLS 1.3, here are my cipher suites, here's my random number."
 2. **ServerHello + Certificate** — server sends: "Use this cipher suite, here's my TLS certificate (signed by a trusted CA)."
-3. **Key Exchange** — both sides use the certificate and math (Diffie-Hellman) to agree on a symmetric key *without ever sending it over the wire*.
+3. **Key Exchange** — both sides swap Diffie-Hellman key shares and use them to derive the same symmetric key *without ever sending it over the wire*. The certificate proves the server's share really came from the server.
 4. **Encrypted Channel** — from here on, everything uses the symmetric key. HTTP requests and responses flow inside the tunnel.
 
 ### HTTP Version History
@@ -169,7 +171,7 @@ TLS provides three guarantees:
 |---------|-------------|----------------|-----------------|
 | **HTTP/1.0** | One connection per request | Basic web | Very slow — TCP setup for every request |
 | **HTTP/1.1** | Keep-alive connections, pipelining | Reuse connections | Head-of-line blocking (one slow response blocks all others) |
-| **HTTP/2** | Multiplexing, header compression (HPACK), server push | Multiple requests over one connection simultaneously | TCP head-of-line blocking still exists at transport layer |
+| **HTTP/2** | Multiplexing, header compression (HPACK), stream prioritization | Multiple requests over one connection simultaneously | TCP head-of-line blocking still exists at transport layer |
 | **HTTP/3** | QUIC over UDP, stream-level flow control | Eliminates TCP head-of-line blocking entirely | Still maturing adoption |
 
 ---
@@ -202,11 +204,11 @@ sequenceDiagram
     participant S as Server
 
     C->>S: ClientHello<br/>(TLS version, cipher suites, random nonce)
-    S-->>C: ServerHello<br/>(chosen cipher, random nonce)<br/>+ TLS Certificate
+    S-->>C: ServerHello<br/>(chosen cipher, random nonce, server key share)<br/>+ TLS Certificate
 
     Note over C: Verifies certificate<br/>against trusted CAs
 
-    C->>S: Key Exchange message<br/>(encrypted with server's public key)
+    C->>S: Key Exchange message<br/>(client's Diffie-Hellman key share)
 
     Note over C,S: Both sides derive the<br/>same symmetric session key
 
@@ -227,7 +229,7 @@ sequenceDiagram
 | `GET` | Fetching data, searching, reading | Yes | Yes | `GET /users/42` |
 | `POST` | Creating new resources, submitting forms, triggering actions | No | No | `POST /orders` |
 | `PUT` | Replacing a full resource (send the entire object) | Yes | No | `PUT /users/42` with full user JSON |
-| `PATCH` | Updating specific fields only | No* | No | `PATCH /users/42` with `{"email":"new@example.com"}` |
+| `PATCH` | Updating specific fields only | Not guaranteed | No | `PATCH /users/42` with `{"email":"new@example.com"}` |
 | `DELETE` | Removing a resource | Yes | No | `DELETE /sessions/abc123` |
 | `HEAD` | Checking if a resource exists / getting headers without body | Yes | Yes | `HEAD /files/report.pdf` |
 | `OPTIONS` | Preflight CORS checks, API discovery | Yes | Yes | `OPTIONS /api/products` |
@@ -240,9 +242,9 @@ sequenceDiagram
 | Multiplexing | No (one request at a time per connection) | Yes (streams) | Yes (streams) |
 | Header compression | No | HPACK | QPACK |
 | Head-of-line blocking | TCP + HTTP | TCP (transport level) | Eliminated |
-| Server Push | No | Yes | Yes |
+| Server Push | No | In the spec, but browsers removed it (Chrome in 2022) — use `103 Early Hints` instead | In the spec, unused in practice |
 | TLS | Optional | Effectively required | Required |
-| Adoption (2025) | ~5% new sites | ~60%+ | ~30%+ |
+| Share of web requests (approx., 2025) | Under 10% | ~60% | ~30% |
 | Best for | Legacy systems | Most modern web traffic | High-latency, mobile, video |
 
 *What "head-of-line blocking" means in each version, and why HTTP/3 had to leave TCP behind to fix it.*
@@ -344,14 +346,14 @@ GitHub's REST API returns an `ETag` header with every response — a hash of the
 - You need wide compatibility (every language has an HTTP client).
 - You want human-readable requests (easy to debug with browser DevTools or `curl`).
 
-**Consider WebSockets instead when:**
+**Consider [WebSockets](../../Level-03-Communication/06-WebSockets-and-Realtime/README.md) instead when:**
 - You need **real-time, bidirectional** communication (chat, live collaboration, multiplayer games).
 - You need to push data to the client without the client asking (live stock prices, notifications).
 - HTTP's request-response overhead would be too high for your message frequency.
 
 **Consider gRPC instead when:**
 - You're doing **service-to-service communication** in a microservices backend.
-- You need strict typed contracts (Protocol Buffers).
+- You need strict typed contracts ([Protocol Buffers](../../Level-03-Communication/09-Data-Serialization-and-Schema-Evolution/README.md)).
 - You need high-throughput, low-latency calls with streaming.
 - You don't need human-readable wire format (you have internal tooling).
 
@@ -423,3 +425,13 @@ Traffic between your own microservices can be intercepted if your network is com
 - **MDN Web Docs — HTTP** — [developer.mozilla.org/en-US/docs/Web/HTTP](https://developer.mozilla.org/en-US/docs/Web/HTTP). The best free reference for HTTP headers, methods, and status codes. Bookmark this and use it daily.
 
 - **"High Performance Browser Networking"** — Ilya Grigorik (O'Reilly, free online at [hpbn.co](https://hpbn.co)). Covers TCP, TLS, HTTP/1.1, HTTP/2, WebSockets, and WebRTC in depth with a focus on real-world performance. The HTTP/2 and QUIC chapters are especially excellent.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [DNS — The Internet's Phone Book](../05-DNS/README.md) · 🏠 [Level 0 — Foundations](../README.md) · ➡️ **Next:** [Latency, Throughput, and Performance](../07-Latency-Throughput-Performance/README.md)
+
+🧩 **See it applied in:** [04 · Notification Service](../../Bonus-Real-World-Architectures/04-Notification-Service/README.md) · [17 · Payment System](../../Bonus-Real-World-Architectures/17-Payment-System/README.md) · [25 · Live Streaming (Twitch / YouTube Live)](../../Bonus-Real-World-Architectures/25-Live-Streaming/README.md) · [33 · Content Delivery Network (CDN)](../../Bonus-Real-World-Architectures/33-Content-Delivery-Network/README.md)
+
+<!-- nav:end -->

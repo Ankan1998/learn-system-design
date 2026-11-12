@@ -17,7 +17,7 @@ FROM restaurants
 ORDER BY dist
 LIMIT 20;
 ```
-This computes the distance from every row to the user's location. At 10 million restaurants, this is 10 million distance calculations per query. At 100 000 active users, that's 1 trillion calculations per second. Non-starter.
+This computes the distance from every row to the user's location. At 10 million restaurants, this is 10 million distance calculations per query. At 100 000 queries per second, that's 1 trillion calculations per second. Non-starter.
 
 **Why a normal B-tree index doesn't help:**
 
@@ -47,20 +47,20 @@ A **geohash** interleaves the bits of latitude and longitude, producing a Base-3
 ```
 Latitude  bits:  0 1 1 0 1 0 1 ...
 Longitude bits:  1 0 0 1 1 1 0 ...
-Interleaved:     01 10 01 01 11 10 01 ...
+Interleaved:     10 01 01 10 11 10 01 ...   (longitude bit first)
 ```
 The resulting bitstring, encoded as Base-32, is the geohash.
 
 **Prefix = area:**
 - `9q8y` = a large square (~40 km × 20 km) covering the San Francisco Bay Area.
 - `9q8yy` = a smaller square (~5 km × 5 km), still in the Bay Area.
-- `9q8yyk` = an even smaller square (~600 m × 600 m), near downtown SF.
-- `9q8yykz` = a tiny square (~75 m × 37 m) near a specific intersection.
+- `9q8yyk` = an even smaller cell (~1.2 km × 600 m), near downtown SF.
+- `9q8yykz` = a tiny square (~150 m × 150 m) near a specific intersection.
 
 Each additional character narrows the area by a factor of ~32. Strings that share a longer prefix are geographically closer.
 
 **Radius query with geohash:**
-1. Compute the user's geohash at the desired precision (e.g., length 6 ≈ 600 m cells).
+1. Compute the user's geohash at the desired precision (e.g., length 6 ≈ 1.2 km × 600 m cells).
 2. Get the 8 neighboring cells (the user's cell + 8 surrounding cells).
 3. SELECT WHERE geohash_prefix IN (those 9 cell prefixes).
 4. Apply exact distance filter on the ~hundreds of candidates.
@@ -88,7 +88,7 @@ World
 
 **Advantage over geohash:** quadtrees naturally handle **non-uniform density**. A dense city gets deeply subdivided; a sparse desert gets a single large leaf. This keeps each leaf at roughly the same number of points, making query time predictable regardless of population density.
 
-**Used by:** Twitter's Geospatial Index, spatial databases, Yelp's internal location system, gaming engines for spatial collision detection.
+**Used by:** game engines (collision detection), map-tile pyramids, many in-memory "nearby" services, and the classic interview answer for Yelp-style proximity search.
 
 ### Technique 3 — Google S2 (Hilbert Curve)
 
@@ -116,7 +116,7 @@ Uber open-sourced **H3** in 2018: a hexagonal hierarchical grid over the globe.
 - In a hexagonal grid, **all 6 neighbors are equidistant**. This makes radius queries and neighbor lookups geometrically uniform, which improves accuracy for distance-based clustering and routing.
 - Hexagons also tile the sphere more uniformly than squares, reducing distortion at high latitudes.
 
-**H3 resolution levels:** 16 levels (0–15). At resolution 9, each hexagon covers ~0.1 km². At resolution 12, ~1000 m².
+**H3 resolution levels:** 16 levels (0–15). At resolution 9, each hexagon covers ~0.1 km². At resolution 12, ~300 m².
 
 **Used by:** Uber (driver dispatch, surge pricing, trip analysis), DoorDash, Grab, Lyft.
 
@@ -159,7 +159,7 @@ flowchart TD
         G7["9q8yy6<br/>(SW neighbor)"] --- G8["9q8yy7<br/>(S neighbor)"] --- G9["9q8yy8<br/>(SE neighbor)"]
     end
 
-    G5 -->|"Query these 9 cells"| Q["SELECT * FROM places<br/>WHERE geohash LIKE '9q8yy%'<br/>OR geohash IN (...neighbors...)<br/>-- then apply exact distance filter"]
+    G5 -->|"Query these 9 cells"| Q["SELECT * FROM places<br/>WHERE geohash LIKE '9q8yyk%'<br/>OR geohash IN (...neighbors...)<br/>-- then apply exact distance filter"]
 
     style G5 fill:#fde68a,color:#000
     style G1 fill:#dbeafe,color:#000
@@ -213,7 +213,7 @@ flowchart TD
 | **Quadtree** | Recursive squares | Good | Yes (adaptive depth) | Medium | Non-uniform density, in-memory spatial trees |
 | **R-Tree** | Arbitrary bounding boxes | Excellent | Yes | Medium | PostgreSQL PostGIS, Oracle Spatial, complex geometries |
 | **Google S2** | Spherical (cube-projected) | Excellent (Hilbert curve) | Yes | High | Google-scale location services, precise spherical geometry |
-| **Uber H3** | Hexagonal grid | Excellent (equidistant neighbors) | Yes (15 resolutions) | Medium | Ride-sharing, logistics, spatial analytics |
+| **Uber H3** | Hexagonal grid | Excellent (equidistant neighbors) | Yes (16 resolutions) | Medium | Ride-sharing, logistics, spatial analytics |
 | **KD-Tree** | Recursive hyperplane splits | Good | Moderate | Medium | In-memory k-nearest-neighbor for small datasets |
 
 ### Database/System Support
@@ -222,9 +222,9 @@ flowchart TD
 |--------|----------------------|-------|
 | **PostgreSQL + PostGIS** | R-Tree (GiST index) | Most powerful; supports complex geometries, polygons, projections |
 | **MySQL 8** | R-Tree (spatial index) | Good for basic geospatial; less powerful than PostGIS |
-| **Redis GEO** | Geohash (stored as sorted set) | `GEOADD`, `GEORADIUS`, `GEOPOS` — easy, fast, in-memory |
-| **Elasticsearch** | Geohash + R-Tree hybrid | `geo_point` type; aggregations on geohash tiles |
-| **MongoDB** | 2dsphere index (geohash-based) | `$near`, `$geoWithin` operators |
+| **Redis GEO** | Geohash (stored as sorted set) | `GEOADD`, `GEOSEARCH`, `GEOPOS` — easy, fast, in-memory |
+| **Elasticsearch** | BKD tree (Lucene) | `geo_point` type; aggregations on geohash tiles |
+| **MongoDB** | 2dsphere index (S2-cell-based) | `$near`, `$geoWithin` operators |
 | **Google BigQuery** | S2 cells | `ST_GEOGPOINT`, `ST_DISTANCE` on S2 geometry |
 
 *Choosing among them in an interview: four questions in order.*
@@ -267,13 +267,13 @@ flowchart TD
 Uber uses H3 hexagons for surge pricing: they aggregate driver/rider demand in each hex cell at each resolution level, then use ML to predict supply-demand imbalance. H3's equidistant neighbors make spatial aggregation mathematically clean. Dispatch uses S2-based spatial indexing to find the nearest available driver within milliseconds across millions of active drivers.
 
 ### Google Maps / Google Places
-Google Maps uses S2 internally for all geospatial operations — map tile generation, POI indexing, routing. S2's spherical geometry avoids the distortions of flat projections (Mercator projection makes Greenland look huge; S2 cells don't). The `GEORADIUS`-style queries in Google Places API resolve in < 20 ms for billions of indexed locations.
+Google Maps uses S2 internally for all geospatial operations — map tile generation, POI indexing, routing. S2's spherical geometry avoids the distortions of flat projections (Mercator projection makes Greenland look huge; S2 cells don't). A radius ("nearby") query is answered by covering the search circle with S2 cells and scanning the matching ranges of cell IDs.
 
 ### Yelp
-Yelp stores business locations with PostgreSQL + PostGIS. The `GIST` index on the `location` column (a PostGIS `geometry` type) allows efficient `ST_DWithin(location, user_point, radius)` queries. At query time, the PostGIS R-Tree eliminates most businesses before the exact distance formula is applied.
+Yelp's business search runs on Elasticsearch: each business is indexed with a `geo_point`, and a query combines text relevance with a `geo_distance` filter and distance-aware ranking. Lucene stores the points in a BKD tree, so the geo filter eliminates most businesses before any scoring happens. The relational equivalent is PostGIS: `ST_DWithin(location, user_point, radius)` backed by a GiST (R-tree) index.
 
 ### Tinder / Nearby Friends
-Proximity-based social apps use Redis `GEORADIUS` for simple "people near me" queries. Tinder stores user locations in Redis with `GEOADD` and queries with `GEORADIUS_RO`. The geohash-backed sorted set in Redis makes this extremely fast and easy to update as users move.
+Simple "people near me" features are often built on Redis GEO: `GEOADD` stores each user's position in a geohash-scored sorted set, and `GEOSEARCH` (the replacement for the deprecated `GEORADIUS`) returns everyone within a radius. It is fast and trivial to update as users move. At Tinder's scale the same idea is sharded: users are partitioned into "geoshards" built from S2 cells, and the proximity query runs in Elasticsearch on only the shards that overlap the search circle.
 
 ### DoorDash / Food Delivery
 DoorDash uses H3 hexagons to define delivery zones, estimate delivery time by zone, and route Dashers. Each restaurant is assigned its H3 cell; nearby Dashers query adjacent cells. H3's hierarchical resolution lets them aggregate at multiple zoom levels (city-wide → neighborhood → block level).
@@ -317,7 +317,7 @@ DoorDash uses H3 hexagons to define delivery zones, estimate delivery time by zo
 
 1. **Querying only the user's own geohash cell.** A user right on a cell boundary will miss points just meters away in the adjacent cell. Always include all 8 neighboring cells.
 
-2. **Using the wrong geohash precision.** Length-4 geohash cells are ~40 km wide — useless for "near me." Length-7 cells are ~150 m wide — may return too few results. Calibrate precision to your search radius: roughly, length 5 ≈ 5 km, length 6 ≈ 600 m, length 7 ≈ 75 m.
+2. **Using the wrong geohash precision.** Length-4 geohash cells are ~40 km wide — useless for "near me." Length-7 cells are ~150 m wide — may return too few results. Calibrate precision to your search radius: roughly, length 5 ≈ 5 km, length 6 ≈ 1.2 km × 600 m, length 7 ≈ 150 m.
 
 3. **Not applying an exact distance filter after the index scan.** The geohash/quadtree query returns *candidates* in a bounding square. A restaurant in the corner of a geohash cell might be farther away than the radius. Always apply `ST_DWithin` or Haversine as a post-filter.
 
@@ -366,8 +366,17 @@ DoorDash uses H3 hexagons to define delivery zones, estimate delivery time by zo
 - [Uber Engineering — H3: Uber's Hexagonal Hierarchical Spatial Index](https://www.uber.com/blog/h3/) — the original H3 announcement.
 - [Google S2 Geometry Library](http://s2geometry.io/) — documentation and interactive demos.
 - [PostGIS Documentation](https://postgis.net/docs/) — the most powerful open-source geospatial extension.
-- [Redis GEO Commands](https://redis.io/commands/?group=geo) — `GEOADD`, `GEORADIUS`, `GEOPOS`.
+- [Redis GEO Commands](https://redis.io/commands/?group=geo) — `GEOADD`, `GEOSEARCH`, `GEOPOS`.
 - [Geohash Explorer](https://www.movable-type.co.uk/scripts/geohash.html) — interactive geohash visualization.
-- [Nick Johnson — Geohash and Neighbors](https://www.bigdatarepublic.nl/articles/geohash-neighbors/) — detailed walkthrough of boundary queries.
-- Previous: [06 — Probabilistic Data Structures](../06-Probabilistic-Data-Structures/README.md) · Next: [08 — Specialized Databases](../08-Specialized-Databases/README.md) · Back to [Level 07 Overview](../README.md)
-- See also: [Bonus — Uber](../../Bonus-Real-World-Architectures/README.md) · [Bonus — Google Maps](../../Bonus-Real-World-Architectures/README.md) · [Bonus — Nearby Friends](../../Bonus-Real-World-Architectures/README.md)
+- [Wikipedia — Geohash](https://en.wikipedia.org/wiki/Geohash) — the algorithm, cell sizes per length, and the edge cases at cell boundaries.
+- See also: [Bonus — Uber](../../Bonus-Real-World-Architectures/11-Uber-Ride-Sharing/README.md) · [Bonus — Google Maps](../../Bonus-Real-World-Architectures/15-Google-Maps/README.md) · [Bonus — Nearby Friends](../../Bonus-Real-World-Architectures/29-Nearby-Friends-Proximity/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Probabilistic Data Structures](../06-Probabilistic-Data-Structures/README.md) · 🏠 [Level 7 — Big Data & Specialized Systems](../README.md) · ➡️ **Next:** [Specialized Databases — Time-Series, Graph & NewSQL](../08-Specialized-Databases/README.md)
+
+🧩 **See it applied in:** [12 · Food Delivery (DoorDash / Swiggy)](../../Bonus-Real-World-Architectures/12-Food-Delivery/README.md)
+
+<!-- nav:end -->

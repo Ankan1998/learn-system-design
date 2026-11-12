@@ -122,7 +122,7 @@ sequenceDiagram
 
 ### Approach 3 — Redlock (and Its Controversy)
 
-For higher fault tolerance, antirez (Salvatore Sanfilippo, Redis creator) proposed **Redlock**: acquire the lock on a majority of N Redis nodes (typically 5). If you get it on ≥ 3 nodes within half the TTL, you hold the lock.
+For higher fault tolerance, antirez (Salvatore Sanfilippo, Redis creator) proposed **Redlock**: acquire the lock on a majority of N Redis nodes (typically 5). If you get it on ≥ 3 nodes and the total time taken is less than the TTL (minus a clock-drift allowance), you hold the lock.
 
 **Martin Kleppmann's critique (2016):** In his essay "How to do distributed locking," Kleppmann argued Redlock is not safe under the GC-pause scenario:
 
@@ -133,7 +133,7 @@ For higher fault tolerance, antirez (Salvatore Sanfilippo, Redis creator) propos
 5. Client A resumes, believes it still holds the lock.
 6. **Both A and B think they hold the lock** — safety violated.
 
-antirez countered that Redlock is designed for efficiency (not distributed correctness) and that this scenario requires hardware-level clock drift or extreme GC pauses. The debate remains unresolved in the community.
+antirez countered that Redlock is safe under reasonable clock-drift assumptions, and that a pause after acquiring a lock is a problem for any lock service, not just Redlock. The debate remains unresolved in the community.
 
 **Practical consensus:**
 - For **efficiency** (prevent duplicate work, idempotent operations are acceptable): Redis `SET NX` or Redlock is fine.
@@ -180,7 +180,7 @@ flowchart TD
 
 *Caption: Ephemeral nodes tie the lock to the holder's session, so a crashed holder releases automatically. The sequence number doubles as a fencing token — it only ever increases.*
 
-**etcd** approach: use `PUT` with a lease, watch for key deletion. `etcd`'s `Grant` + `Lease` + `TxN` provides the same guarantee.
+**etcd** approach: use `PUT` with a lease, watch for key deletion. `etcd`'s `Grant` + `Lease` + `Txn` provides the same guarantee.
 
 **Why consensus is stronger:** ZooKeeper and etcd provide linearizable reads and writes — you can't have split-brain under network partition (it prefers consistency over availability). Redis does not guarantee this.
 
@@ -263,7 +263,7 @@ flowchart TD
 | **Redis SET NX PX** | Single Redis instance | Best-effort | Low | Deduplication, idempotent jobs |
 | **Redlock** | Majority of 5 Redis nodes | Better availability (contested) | Medium | High-availability Redis setups |
 | **ZooKeeper ephemeral** | Ephemeral sequential znodes | Linearizable | High | Critical sections, leader election |
-| **etcd lease + TXN** | Lease + conditional PUT | Linearizable | High | Kubernetes, critical sections |
+| **etcd lease + TXN** | Lease + conditional PUT | Linearizable | High | [Kubernetes](../../Level-06-Scale-and-Reliability/07-Containers-and-Orchestration/README.md), critical sections |
 | **Any above + fencing token** | Resource server validates token | Truly safe | Medium add-on | Financial, inventory, any correctness-critical |
 
 ---
@@ -271,13 +271,13 @@ flowchart TD
 ## 🏢 Real-World Examples
 
 ### Apache Hadoop / HDFS — ZooKeeper-based Lock
-HDFS uses ZooKeeper for NameNode leader election (a form of distributed locking). Only one NameNode may be active at a time. ZooKeeper's ephemeral sequential nodes guarantee exactly one holder even across failover.
+HDFS uses ZooKeeper for NameNode leader election (a form of distributed locking). Only one NameNode may be active at a time. The ZKFC failover controller holds an ephemeral lock znode, which guarantees exactly one holder even across failover.
 
 ### Kubernetes — etcd Lease
-Kubernetes uses etcd leases for controller leader election. Every controller (deployment controller, node controller, etc.) tries to acquire a lease. Only the holder runs reconciliation logic. If the holder crashes, the lease expires and another instance takes over.
+Kubernetes uses Lease objects (stored in etcd via the API server) for controller leader election. Every replica of a control-plane component (kube-controller-manager, kube-scheduler, etc.) tries to acquire the lease. Only the holder runs reconciliation logic. If the holder crashes, the lease expires and another instance takes over.
 
 ### Redis `SET NX` in Job Queues
-Many job-queue libraries (Sidekiq Pro, Celery with Redis, Faktory) use Redis `SET NX PX` to implement job uniqueness: "don't allow a second copy of job X to be enqueued while one is already processing." The operation is idempotent, so expiry of the lock is acceptable.
+Job-queue ecosystems (Sidekiq Enterprise's unique jobs, the `celery-once` add-on for Celery) use a Redis lock of the `SET NX PX` kind to implement job uniqueness: "don't allow a second copy of job X to be enqueued while one is already processing." The operation is idempotent, so expiry of the lock is acceptable.
 
 ### Ticketmaster / Seat Reservation
 Seat selection must be locked briefly while a user completes payment. A distributed lock on `seat:event42:row5:seatC` prevents two users from being shown the same seat as available simultaneously. Typically implemented with Redis (short TTL = checkout window, e.g., 10 minutes) + idempotent payment processing.
@@ -310,7 +310,7 @@ Seat selection must be locked briefly while a user completes payment. A distribu
 **Do NOT use distributed locks when:**
 - A database transaction with `SELECT FOR UPDATE` would suffice — use the simplest tool that works.
 - You want to prevent concurrent reads — that's not mutual exclusion, that's access control.
-- The "lock" would be held for minutes or hours — you need a different architecture (e.g., a saga or queue-based workflow).
+- The "lock" would be held for minutes or hours — you need a different architecture (e.g., a [saga](../../Level-05-Architecture-Patterns/07-Saga-and-Orchestration/README.md) or queue-based workflow).
 
 ---
 
@@ -371,5 +371,14 @@ Seat selection must be locked briefly while a user completes payment. A distribu
 - [ZooKeeper Recipes — Distributed Lock](https://zookeeper.apache.org/doc/current/recipes.html#sc_recipes_Locks) — official ZK lock recipe.
 - [etcd — Distributed Locking](https://etcd.io/docs/v3.5/dev-guide/api_concurrency_reference_v3/) — concurrency primitives in etcd.
 - [DDIA Chapter 8 & 9](https://dataintensive.net/) — The Trouble with Distributed Systems; Consistency and Consensus.
-- Previous: [07 — Idempotency and Exactly-Once](../07-Idempotency-and-Exactly-Once/README.md) · Next: [09 — CRDTs & Conflict Resolution](../09-CRDTs-and-Conflict-Resolution/README.md) · Back to [Level 04 Overview](../README.md)
-- See also: [Bonus — Job Scheduler](../../Bonus-Real-World-Architectures/README.md) · [Bonus — Ticketmaster](../../Bonus-Real-World-Architectures/README.md)
+- See also: [Bonus — Job Scheduler](../../Bonus-Real-World-Architectures/21-Distributed-Job-Scheduler/README.md) · [Bonus — Ticketmaster](../../Bonus-Real-World-Architectures/16-Ticketmaster/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Idempotency and Exactly-Once Processing](../07-Idempotency-and-Exactly-Once/README.md) · 🏠 [Level 4 — Distributed Systems](../README.md) · ➡️ **Next:** [CRDTs & Conflict Resolution](../09-CRDTs-and-Conflict-Resolution/README.md)
+
+🧩 **See it applied in:** [13 · Airbnb Booking](../../Bonus-Real-World-Architectures/13-Airbnb-Booking/README.md) · [39 · Distributed Coordination Service (ZooKeeper / etcd)](../../Bonus-Real-World-Architectures/39-Distributed-Coordination-Service/README.md) · [01 · URL Shortener](../../Bonus-Real-World-Architectures/01-URL-Shortener/README.md) · [02 · Pastebin](../../Bonus-Real-World-Architectures/02-Pastebin/README.md) · [11 · Uber Ride-Sharing](../../Bonus-Real-World-Architectures/11-Uber-Ride-Sharing/README.md) · [28 · Google Docs Collaborative Editing](../../Bonus-Real-World-Architectures/28-Google-Docs-Collaborative-Editing/README.md)
+
+<!-- nav:end -->

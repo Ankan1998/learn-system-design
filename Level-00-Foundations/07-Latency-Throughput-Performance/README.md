@@ -14,7 +14,7 @@ Your app works perfectly in development. Ten friends try it and say it feels sna
 - "We handle 200 requests per second but the product team needs 2,000."
 - "Our p99 latency triples when the queue depth exceeds 500 items."
 
-Before you can design systems that scale, you need this vocabulary. Latency, throughput, and bandwidth are the units of measure for everything that follows in this curriculum. Every architectural decision you will ever make — caching, load balancing, database sharding, CDNs, message queues — is ultimately a trade-off denominated in these numbers.
+Before you can design systems that scale, you need this vocabulary. Latency, throughput, and bandwidth are the units of measure for everything that follows in this curriculum. Every architectural decision you will ever make — caching, load balancing, database [sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md), CDNs, message queues — is ultimately a trade-off denominated in these numbers.
 
 This is the last topic in Level 0. By the end, you will have the language to walk into any system design conversation and immediately ask the right questions.
 
@@ -62,7 +62,7 @@ But this breaks down under load due to queuing effects (covered below with Littl
 
 ### Percentiles: Why Averages Lie
 
-Suppose you measure response times for 1,000 requests and calculate an average of 50ms. That sounds fine. But what if 990 requests took 10ms and 10 requests took 5,000ms? The average is ~60ms but 1% of your users are waiting 5 seconds.
+Suppose you measure response times for 1,000 requests and calculate an average of 60ms. That sounds fine. But what if 990 requests took 10ms and 10 requests took 5,000ms? The average is ~60ms but 1% of your users are waiting 5 seconds.
 
 This is why engineers use **percentiles**:
 
@@ -127,7 +127,7 @@ flowchart LR
 
 ### Latency Numbers Every Programmer Should Know
 
-Originally compiled by Jeff Dean (Google), these numbers give you a mental ruler for system design. Memorize the orders of magnitude.
+Popularized by Jeff Dean (Google), building on an earlier list by Peter Norvig, these numbers give you a mental ruler for system design. Memorize the orders of magnitude.
 
 | Operation | Latency | Notes |
 |---|---|---|
@@ -147,7 +147,7 @@ Originally compiled by Jeff Dean (Google), these numbers give you a mental ruler
 | Read 1 MB sequentially from HDD | ~30 ms | Mechanical, sequential is best case |
 | TCP handshake + TLS (same region) | ~5–10 ms | Round-trip cost |
 | Cross-region (US → Europe) | ~60–150 ms | Speed of light across ~7,000 km |
-| Round-trip EU ↔ US | ~150 ms | Physical lower bound |
+| Round-trip EU ↔ US | ~150 ms | Jeff Dean's California ↔ Netherlands figure |
 
 ---
 
@@ -171,21 +171,21 @@ graph LR
     style F fill:#f0b0b0,color:#000
 ```
 
-*Each arrow represents roughly a 10–1,000× jump in latency. Going from L1 cache to a cross-region network call spans a factor of 300,000,000×.*
+*Each arrow represents roughly a 2–1,000× jump in latency. Going from L1 cache to a cross-region network call spans a factor of 300,000,000×.*
 
 ### p50 vs p99: What Percentiles Reveal
 
 ```mermaid
 graph TD
-    A["1,000 requests arrive"] --> B["990 requests<br/>served in 10ms"]
-    A --> C["9 requests<br/>served in 500ms"]
-    A --> D["1 request<br/>served in 5,000ms"]
+    A["1,000 requests arrive"] --> B["988 requests<br/>served in 10ms"]
+    A --> C["10 requests<br/>served in 500ms"]
+    A --> D["2 requests<br/>served in 5,000ms"]
 
     B --> E["p50 = 10ms<br/>p95 = 10ms"]
     C --> F["p99 = 500ms"]
     D --> G["p99.9 = 5,000ms"]
 
-    H["Average = ~65ms<br/>⚠️ Misleading!"]
+    H["Average = ~25ms<br/>⚠️ Misleading!"]
 
     style A fill:#e8e8f0,color:#000
     style B fill:#d0f0d0,color:#000
@@ -197,7 +197,7 @@ graph TD
     style H fill:#ffd0d0,color:#000
 ```
 
-*The average (65ms) hides the fact that 1 in 100 users waits 500ms and 1 in 1,000 waits 5 full seconds.*
+*Sort the 1,000 requests from fastest to slowest: the 500th and 950th both took 10ms (p50, p95), the 990th took 500ms (p99), and the 999th took 5,000ms (p99.9). The average (~25ms) looks healthy while 1 user in 100 waits half a second or more.*
 
 ### Latency Reference Table (With Human Analogies)
 
@@ -207,8 +207,8 @@ graph TD
 | L2 cache | 7 ns | 7 seconds | Still very fast; prefer over RAM |
 | L3 cache | 40 ns | 40 seconds | Shared; watch for cache contention |
 | RAM | 100 ns | 1.7 minutes | In-memory databases (Redis) live here |
-| NVMe SSD | 100 μs | 1.7 days | Fast enough for many DB operations |
-| Network (LAN) | 0.5 ms | 8 days | Cheap cross-service calls within a datacenter |
+| NVMe SSD | 100 μs | 1.2 days | Fast enough for many DB operations |
+| Network (LAN) | 0.5 ms | 5.8 days | Cheap cross-service calls within a datacenter |
 | HDD seek | 10 ms | 4 months | Avoid random HDD I/O at all costs |
 | Cross-region | 150 ms | 4.75 years | Design replication strategies around this |
 
@@ -221,7 +221,7 @@ graph TD
 | Strategy | Description | Latency Impact | Trade-off |
 |---|---|---|---|
 | **Caching** | Store results of expensive operations (RAM, Redis) | Reduces latency 10–1,000× | Stale data; cache invalidation complexity |
-| **Parallelism** | Handle multiple requests concurrently (threads, goroutines) | No direct impact per request | Resource usage; synchronization overhead |
+| **Parallelism** | Handle multiple requests concurrently (threads, [goroutines](../../Level-01-Building-Blocks/08-Concurrency-and-Async-IO/README.md)) | No direct impact per request | Resource usage; synchronization overhead |
 | **Batching** | Group many small operations into one large one | Increases per-item latency | Higher throughput; not suitable for interactive workloads |
 | **Async processing** | Decouple request receipt from work execution (queues) | Improves perceived latency | Eventual consistency; harder debugging |
 | **Connection pooling** | Reuse database/network connections | Reduces per-request overhead | Pool exhaustion under bursty load |
@@ -246,7 +246,7 @@ A *target* for an SLI. The threshold your team commits to internally.
 
 **SLA — Service Level Agreement**
 A *contract* between you and your customers, with financial penalties for violations.
-- Example: "AWS EC2 SLA: if monthly uptime < 99.9%, customers receive a 10% service credit; if < 95%, a 30% credit"
+- Example: "AWS EC2 SLA: if monthly regional uptime < 99.99%, customers receive a 10% service credit; if < 99.0%, a 30% credit"
 - SLAs are usually less strict than internal SLOs (so you have a buffer before violating the customer contract).
 
 **The hierarchy:**
@@ -262,8 +262,8 @@ SLA (external contract, least strict)
 
 ```mermaid
 flowchart TD
-    SLI["SLI — what you measure<br/>share of requests under 200 ms<br/>this month: 99.93%"]
-    SLO["SLO — internal target<br/>99.9% over 28 days<br/>error budget = 0.1% = 43.8 min per month"]
+    SLI["SLI — what you measure<br/>share of requests that succeed<br/>this month: 99.93%"]
+    SLO["SLO — internal target<br/>99.9% per month<br/>error budget = 0.1%, about 43 min of full downtime"]
     SLA["SLA — customer contract<br/>99.5%, credits if breached<br/>looser than the SLO on purpose"]
     BUDGET{"Error budget left?"}
     FAST["Plenty left:<br/>ship features, run experiments"]
@@ -294,10 +294,10 @@ Amazon published research showing that every **100ms of additional latency** cos
 Google ran an experiment in 2006: introducing a **500ms delay** on Google Search results pages caused a **20% drop in searches** — people simply gave up and searched less. Users adapt to speed; when you slow down, they disengage.
 
 **Discord — Serving Millions with Tight Tail Latency**
-Discord serves over 6.5 million concurrent users in real-time voice, video, and text. Their engineering team publicly targets **p99 < 200ms** for message delivery. They achieved this by moving from Python to Elixir (for concurrency) and later Rust (for memory efficiency), and by carefully managing their Cassandra database query patterns to avoid tail latency outliers.
+Discord delivers messages, voice, and video to millions of concurrent users, and its engineering blog is a running case study in fighting tail latency. The real-time gateway is written in Elixir, whose BEAM virtual machine handles millions of lightweight processes. In 2020 Discord rewrote its hot "Read States" service from Go to Rust because garbage-collection pauses caused a latency spike every two minutes. In 2022 it moved trillions of messages from Cassandra to ScyllaDB, cutting **p99 read latency from 40–125ms to about 15ms**.
 
 **Stripe — Payments Under Pressure**
-Stripe's payment API targets **p99 < 250ms** for charge creation. A slow payment API directly causes cart abandonment. Stripe achieves this through geographic distribution (serving users from the nearest region), aggressive connection pooling, and writing idempotency into their API so retries do not cause double-charges.
+Stripe's payment API targets **p99 < 250ms** for charge creation. A slow payment API directly causes cart abandonment. Stripe achieves this through geographic distribution (serving users from the nearest region), aggressive connection pooling, and writing [idempotency](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md) into their API so retries do not cause double-charges.
 
 **Netflix — Latency Budgeting Across Microservices**
 Netflix's architecture involves hundreds of microservices. Each time you press "Play," Netflix orchestrates calls to services for: authentication, entitlement checking, stream URL generation, device manifest selection, and DRM licensing — all in parallel when possible, sequential when not. Netflix assigns a **latency budget** to each service and monitors p99 for each leg. If one service degrades, they have pre-built fallback behaviors (e.g., serving cached content manifests) rather than surfacing the error to the user.
@@ -319,7 +319,7 @@ Netflix's architecture involves hundreds of microservices. Each time you press "
 
 ### Consistency vs. Latency (Preview)
 
-One of the deepest trade-offs in distributed systems is between **consistency** and **latency**. To return consistent data, a database might need to wait for acknowledgment from multiple servers — which adds latency. This is formalized in the **CAP theorem** and **PACELC model**, which you will study in Level 1. For now, internalize this: *the speed of light is a hard constraint*. Two datacenters 10,000 km apart cannot communicate in under ~33ms, period. Any system requiring global consistency must pay that cost.
+One of the deepest trade-offs in distributed systems is between **consistency** and **latency**. To return consistent data, a database might need to wait for acknowledgment from multiple servers — which adds latency. This is formalized in the **[CAP theorem](../../Level-04-Distributed-Systems/01-CAP-Theorem/README.md)** and **PACELC model**, which you will study in Level 1. For now, internalize this: *the speed of light is a hard constraint*. Two datacenters 10,000 km apart cannot communicate in under ~33ms, period. Any system requiring global consistency must pay that cost.
 
 ---
 
@@ -429,8 +429,8 @@ When you suggest adding a cache, say: "A Redis cache call is ~0.5ms within the s
 
 You have just completed all 7 topics in **Level 0: Foundations**. You now have the vocabulary and mental models to talk about *any* system design problem:
 
-- You understand how clients and servers communicate (HTTP, TCP/IP)
-- You know how data is stored and retrieved (databases, file systems)
+- You understand how clients and servers communicate (the client-server model, TCP/UDP, HTTP)
+- You know how a request finds its destination across the internet (IP routing, DNS)
 - You can reason precisely about speed, capacity, and bottlenecks (this topic)
 
 **[Proceed to Level 1: Building Blocks →](../../Level-01-Building-Blocks/README.md)**
@@ -446,3 +446,13 @@ Level 1 takes everything you have learned and shows you the *components* that re
 Every decision in Level 1 is a trade-off in the dimensions you just learned: latency, throughput, bandwidth, and consistency. The vocabulary from Level 0 *is* the language of Level 1.
 
 You are ready. Let's build something.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [HTTP and HTTPS — The Language of the Web](../06-HTTP-and-HTTPS/README.md) · 🏠 [Level 0 — Foundations](../README.md) · ➡️ **Next:** [Level 1 — Building Blocks](../../Level-01-Building-Blocks/README.md)
+
+🧩 **See it applied in:** [01 · URL Shortener](../../Bonus-Real-World-Architectures/01-URL-Shortener/README.md) · [02 · Pastebin](../../Bonus-Real-World-Architectures/02-Pastebin/README.md) · [03 · Rate Limiter](../../Bonus-Real-World-Architectures/03-Rate-Limiter/README.md) · [04 · Notification Service](../../Bonus-Real-World-Architectures/04-Notification-Service/README.md) · [06 · Twitter/X News Feed](../../Bonus-Real-World-Architectures/06-News-Feed-Twitter/README.md) · [08 · WhatsApp](../../Bonus-Real-World-Architectures/08-WhatsApp-Chat/README.md) · [10 · Typeahead / Autocomplete](../../Bonus-Real-World-Architectures/10-Typeahead-Autocomplete/README.md) · [13 · Airbnb Booking](../../Bonus-Real-World-Architectures/13-Airbnb-Booking/README.md) · …and 20 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

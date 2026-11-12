@@ -2,7 +2,7 @@
 
 > A deployment strategy is the method you use to release new code into production while keeping your service available and your users happy.
 
-**Level:** 6 · **Topic:** 4 · **Prerequisites:** [High Availability and DR](../03-High-Availability-and-DR) · [Load Balancing](../../Level-01-Building-Blocks/02-Load-Balancing)
+**Level:** 6 · **Topic:** 4 · **Prerequisites:** [High Availability and DR](../03-High-Availability-and-DR/README.md) · [Load Balancing](../../Level-01-Building-Blocks/02-Load-Balancing/README.md)
 
 ---
 
@@ -98,6 +98,22 @@ You replace instances one at a time (or in small batches). At any moment during 
 - Cheaper than Blue/Green since you don't double your infrastructure
 - Rollback is slower — you have to re-deploy the old version to each instance
 
+```mermaid
+flowchart LR
+    S0["Start<br/>v1 · v1 · v1 · v1"] --> S1["Step 1<br/>v2 · v1 · v1 · v1"]
+    S1 --> S2["Step 2<br/>v2 · v2 · v1 · v1"]
+    S2 --> S3["Step 3<br/>v2 · v2 · v2 · v1"]
+    S3 --> S4["Done<br/>v2 · v2 · v2 · v2"]
+
+    style S0 fill:#dbeafe,color:#000
+    style S1 fill:#e0f2fe,color:#000
+    style S2 fill:#ecfccb,color:#000
+    style S3 fill:#d9f99d,color:#000
+    style S4 fill:#dcfce7,color:#000
+```
+
+*Caption: A rolling deployment replaces a few instances at a time, so capacity barely drops. For a while both versions serve traffic side by side, which is why every change must be backward compatible.*
+
 ---
 
 ## 🔧 Types / Variations / Strategies
@@ -171,7 +187,7 @@ Key principles:
 
 ## 🏢 Real-World Examples
 
-**Netflix** uses a combination of canary deploys and chaos engineering. New versions of their streaming service get rolled out to a small percentage of regions first. Their internal tooling (Spinnaker) automates canary analysis — if error rates or latency spikes beyond a threshold compared to the control group, the deploy is automatically halted and rolled back.
+**Netflix** uses a combination of canary deploys and [chaos engineering](../08-Testing-Distributed-Systems/README.md). A new version first goes to a small canary group of instances that takes a slice of real production traffic next to a same-sized baseline group running the old version. Their tooling (Spinnaker with the Kayenta analysis service) compares the two automatically — if error rates or latency deviate beyond a threshold, the deploy is halted and rolled back. Only then does the rollout continue, one region at a time.
 
 **Facebook / Meta** operates a "push train" — a continuous deployment system that ships code multiple times per day. Changes move through a series of canary stages: internal employees first, then 1% of users, then broader percentages, then full rollout. Each stage has automated and manual health checks. If you're a Meta engineer and your diff causes a 0.1% increase in error rate at the 1% stage, the system pages you before it goes further.
 
@@ -188,7 +204,7 @@ Key principles:
 
 **Canary:**
 - You catch bugs with minimal user impact — only 5% see the broken version before you roll back
-- But you need solid observability: if you can't measure error rates and latency by version, you're flying blind
+- But you need solid [observability](../01-Observability/README.md): if you can't measure error rates and latency by version, you're flying blind
 - Running two versions simultaneously adds complexity, especially for stateful services
 
 **Rolling:**
@@ -291,3 +307,13 @@ Key principles:
 - [Netflix Tech Blog — Deploying the Netflix API](https://netflixtechblog.com/deploying-the-netflix-api-79b6176cc3f0)
 - [Spinnaker — Open Source Multi-Cloud Continuous Delivery](https://spinnaker.io/)
 - [Expand/Contract Pattern — Flyway Blog](https://flywaydb.org/documentation/tutorials/pattern_expand_contract)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [High Availability and Disaster Recovery](../03-High-Availability-and-DR/README.md) · 🏠 [Level 6 — Scale & Reliability](../README.md) · ➡️ **Next:** [Security at Scale](../05-Security-at-Scale/README.md)
+
+🧩 **See it applied in:** [40 · A/B Testing (Experimentation) Platform](../../Bonus-Real-World-Architectures/40-Experimentation-Platform/README.md)
+
+<!-- nav:end -->

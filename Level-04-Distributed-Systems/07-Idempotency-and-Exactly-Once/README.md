@@ -112,6 +112,8 @@ flowchart TD
     style I fill:#fce7f3,stroke:#ec4899,color:#000
 ```
 
+*Caption: Notice that the key is stored only after success or a non-retryable error, so a retryable failure leaves no record and the retry is processed fresh.*
+
 **Important detail:** Only store the idempotency key after **success** (or unretryable error). If the request fails with a retryable error, don't store the key — let the client retry, and process it fresh next time.
 
 ### What Makes an Operation Idempotent?
@@ -154,7 +156,7 @@ Stripe stores the key → response mapping for 24 hours. Same key → same respo
 
 ### Strategy 3 — Sequence Numbers / Deduplication Windows
 
-Message queues (Kafka, SQS) use sequence numbers or message IDs for dedup:
+[Message queues](../../Level-03-Communication/04-Message-Queues/README.md) (Kafka, SQS) use sequence numbers or message IDs for dedup:
 - Producer assigns a monotonic sequence number per message
 - Broker or consumer checks: "have I seen this sequence number?" → skip if yes
 - Kafka EOS (exactly-once semantics) uses producer ID + sequence number at the broker level
@@ -182,9 +184,11 @@ sequenceDiagram
     DB-->>S2: 0 rows updated (version is now 6, not 5) → idempotent ✅
 ```
 
+*Caption: The version check in the WHERE clause makes the second identical update a harmless no-op instead of a duplicate change.*
+
 ### Strategy 5 — The Outbox Pattern (Preview)
 
-For Saga steps and event-driven systems, the **outbox pattern** ensures exactly-once message publishing:
+For [Saga](../../Level-05-Architecture-Patterns/07-Saga-and-Orchestration/README.md) steps and event-driven systems, the **[outbox pattern](../../Level-02-Data-Layer/10-Change-Data-Capture/README.md)** ensures reliable (at-least-once) message publishing that, combined with idempotent consumers, is effectively-once:
 
 ```mermaid
 flowchart LR
@@ -198,6 +202,8 @@ flowchart LR
     style D fill:#fef9c3,stroke:#ca8a04,color:#000
 ```
 
+*Caption: The business change and the message to send are saved in one local transaction, and a separate relay publishes the message afterwards, so neither can exist without the other.*
+
 Write the business change AND the "to-send" message in the same local transaction. A relay process reads from the outbox and publishes to the message broker. The relay can retry safely because consumers are idempotent.
 
 ---
@@ -205,7 +211,7 @@ Write the business change AND the "to-send" message in the same local transactio
 ## 🏢 Real-World Examples
 
 ### Stripe — Idempotency Keys
-Stripe's payment API requires clients to supply an `Idempotency-Key` header for any write operation. Stripe stores the key → result mapping for 24 hours. This is the canonical example of idempotency keys in production. Stripe also handles partial failure: if a charge succeeds but the response is lost, the same key returns the same successful response. If the charge itself failed, it retries internally before returning an error.
+Stripe's payment API lets clients supply an optional `Idempotency-Key` header on any write (POST) request. Stripe stores the key → result mapping for 24 hours. This is the canonical example of idempotency keys in production. Stripe also handles partial failure: if a charge succeeds but the response is lost, the same key returns the same successful response. If the first attempt failed, Stripe saves that result too and replays it, so a retry with the same key can never produce a second charge.
 
 ### Kafka — Exactly-Once Semantics (EOS)
 Kafka EOS (introduced in 0.11) uses two mechanisms:
@@ -237,7 +243,7 @@ Double-entry bookkeeping is naturally idempotent at the transaction level. Each 
 Every dedup strategy has a time limit:
 - Stripe keeps idempotency keys for 24 hours
 - SQS FIFO deduplicates within 5 minutes
-- Kafka EOS uses sequence numbers (no expiry on producer lifetime)
+- Kafka's idempotent producer uses per-partition sequence numbers; the broker forgets an idle producer's state after `producer.id.expiration.ms` (one day by default)
 
 After the window, the same key is treated as a new request. This is acceptable for most use cases — retries don't happen days later.
 
@@ -289,7 +295,7 @@ After the window, the same key is treated as a new request. This is acceptable f
 
 - **Lead with the impossibility:** "Exactly-once delivery is impossible in distributed systems — you can't distinguish 'server got it but response was lost' from 'server never got it.' The practical solution is at-least-once delivery plus idempotent consumers."
 - **Explain idempotency keys concisely:** "The client generates a UUID per logical operation. The server checks: has this key been processed? If yes, return cached result. If no, process and store result."
-- **Stripe is the canonical example** — name it. "Stripe's payment API requires an Idempotency-Key header and caches results for 24 hours."
+- **Stripe is the canonical example** — name it. "Stripe's payment API accepts an Idempotency-Key header and caches results for 24 hours."
 - **Kafka EOS** — know that it's producer sequence numbers + transactions + `read_committed` isolation. Don't claim "Kafka guarantees exactly-once" without explaining the mechanism.
 - **Connect to Saga** — "Saga compensating transactions must also be idempotent. If the Saga engine retries a compensation, it can't refund twice."
 - **Common interview question:** "How do you prevent double-charging a customer?" Answer: idempotency key from client, dedup table on server, unique constraint on transaction_id in the ledger.
@@ -326,8 +332,18 @@ After the window, the same key is treated as a new request. This is acceptable f
 - **Stripe idempotency docs:** stripe.com/docs/api/idempotent_requests — the best real-world documentation of idempotency keys in production
 - **Kafka EOS (2017):** "Exactly-Once Semantics Are Possible: Here's How Kafka Does It" — Confluent engineering blog — detailed explanation of producer IDs, sequence numbers, and transactions
 - **DDIA Chapter 11:** *Designing Data-Intensive Applications* by Martin Kleppmann — "Stream Processing" — covers exactly-once semantics in message queues
-- **"You Cannot Have Exactly-Once Delivery" (2015):** Kyle Kingsbury (Aphyr) blog — clear proof of why exactly-once delivery is impossible
+- **"You Cannot Have Exactly-Once Delivery" (2015):** Tyler Treat (Brave New Geek) blog — clear proof of why exactly-once delivery is impossible
 - **Outbox pattern:** microservices.io/patterns/data/transactional-outbox.html — Chris Richardson's pattern catalog
-- **Dynamo (2007):** "Dynamo: Amazon's Highly Available Key-Value Store" — SOSP — Section 4.4 on handling failures and vector clocks
-- **"Idempotency is not a silver bullet" (2021):** Brandur Leach (Stripe) blog — nuanced treatment of where idempotency keys don't help
+- **Dynamo (2007):** "Dynamo: Amazon's Highly Available Key-Value Store" — SOSP — Section 4.4 on data versioning with vector clocks
+- **"Implementing Stripe-like Idempotency Keys in Postgres" (2017):** Brandur Leach — brandur.org/idempotency-keys — a complete worked design with atomic phases and recovery points
 - **Connection to payment systems:** [Bonus Real-World Architectures](../../Bonus-Real-World-Architectures/README.md) — see payment system design, which applies idempotency end-to-end
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Clocks and Ordering](../06-Clocks-and-Ordering/README.md) · 🏠 [Level 4 — Distributed Systems](../README.md) · ➡️ **Next:** [Distributed Locking](../08-Distributed-Locking/README.md)
+
+🧩 **See it applied in:** [04 · Notification Service](../../Bonus-Real-World-Architectures/04-Notification-Service/README.md) · [13 · Airbnb Booking](../../Bonus-Real-World-Architectures/13-Airbnb-Booking/README.md) · [16 · Ticketmaster](../../Bonus-Real-World-Architectures/16-Ticketmaster/README.md) · [17 · Payment System](../../Bonus-Real-World-Architectures/17-Payment-System/README.md) · [19 · Distributed Message Queue](../../Bonus-Real-World-Architectures/19-Distributed-Message-Queue/README.md) · [20 · Ad Click Aggregator](../../Bonus-Real-World-Architectures/20-Ad-Click-Aggregator/README.md) · [21 · Distributed Job Scheduler](../../Bonus-Real-World-Architectures/21-Distributed-Job-Scheduler/README.md) · [24 · Stock Exchange](../../Bonus-Real-World-Architectures/24-Stock-Exchange/README.md) · …and 13 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

@@ -168,12 +168,35 @@ The client-server model has a well-known alternative: **peer-to-peer (P2P)**, wh
 
 P2P is powerful for distributing load across many nodes, but it comes with trade-offs around consistency, moderation, and discoverability — which is why most consumer products still use client-server.
 
+```mermaid
+flowchart LR
+    subgraph CS["Client-Server"]
+        direction TB
+        C1["Client"] --> S["Server<br/>holds the data,<br/>enforces the rules"]
+        C2["Client"] --> S
+        C3["Client"] --> S
+    end
+    subgraph PP["Peer-to-Peer"]
+        direction TB
+        P1["Peer"] <--> P2["Peer"]
+        P2 <--> P3["Peer"]
+        P3 <--> P1
+        P1 <--> P4["Peer"]
+        P4 <--> P3
+    end
+
+    style CS fill:#dbeafe,color:#000
+    style PP fill:#dcfce7,color:#000
+```
+
+*Caption: In client-server, every client talks to a central server that owns the data. In peer-to-peer, every node is both client and server, so there is no single point of control and no single point of failure.*
+
 ---
 
 ## 🏢 Real-World Examples
 
 **Google Search (Thin Client)**
-When you search on Google, almost nothing happens in your browser. Your browser sends your query to Google's servers, which crawl billions of indexed pages, rank results, and return polished HTML. Your browser just displays it. The client is as thin as it gets — a display window for server-side intelligence.
+When you search on Google, almost nothing happens in your browser. Your browser sends your query to Google's servers, which search billions of indexed pages, rank results, and return polished HTML. Your browser just displays it. The client is as thin as it gets — a display window for server-side intelligence.
 
 **Netflix (Both Models Depending on Interface)**
 If you watch Netflix in a browser, you're using a thin-ish client — the video stream comes from Netflix's CDN (Content Delivery Network) servers. But if you use the Netflix app on a smart TV or phone, you're using a **thick client**: the app manages local caching, adaptive bitrate switching, and DRM decryption locally. The same service, two different client thicknesses.
@@ -237,7 +260,7 @@ A very common beginner mistake is assuming the server "remembers" who you are be
 In a system design interview, the question "design a URL shortener" involves multiple client-server relationships: the user's browser, the shortener's backend, and possibly a separate database server. Mapping these out early shows structured thinking.
 
 **Mention that servers can be clients of other servers.**
-In microservices architectures, an API gateway (server) forwards requests to an auth service (where the gateway acts as a client), which in turn queries a user database (auth service is now a client). Demonstrating this fluency signals that you understand real distributed systems, not just browser-to-server interactions.
+In microservices architectures, an [API gateway](../../Level-05-Architecture-Patterns/05-API-Gateway/README.md) (server) forwards requests to an auth service (where the gateway acts as a client), which in turn queries a user database (auth service is now a client). Demonstrating this fluency signals that you understand real distributed systems, not just browser-to-server interactions.
 
 **Bring up statelessness and what it enables.**
 Stateless servers can be horizontally scaled — you can add more server instances behind a load balancer without any of them needing to know about the others. This is a fundamental scalability insight. Mention it when discussing how to handle traffic growth.
@@ -278,3 +301,11 @@ Interviewers appreciate candidates who treat network calls as expensive — in b
 - **MDN Web Docs: An overview of HTTP** — [https://developer.mozilla.org/en-US/docs/Web/HTTP/Overview](https://developer.mozilla.org/en-US/docs/Web/HTTP/Overview) — A free, beginner-friendly deep-dive into HTTP requests, responses, headers, and status codes written by the people who document the web platform.
 - **MDN Web Docs: How the Web works** — [https://developer.mozilla.org/en-US/docs/Learn_web_development/Getting_started/Web_standards/How_the_web_works](https://developer.mozilla.org/en-US/docs/Learn_web_development/Getting_started/Web_standards/How_the_web_works) — A gentle walkthrough of DNS, TCP, and HTTP aimed at complete beginners.
 - **High Performance Browser Networking** by Ilya Grigorik (free online at [https://hpbn.co](https://hpbn.co)) — If you want to go deeper on what happens inside that single arrow in the diagram, this book covers TCP, TLS, HTTP/1.1, HTTP/2, and WebRTC in accessible detail.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [What is System Design?](../01-What-is-System-Design/README.md) · 🏠 [Level 0 — Foundations](../README.md) · ➡️ **Next:** [How the Internet Works](../03-How-the-Internet-Works/README.md)
+
+<!-- nav:end -->

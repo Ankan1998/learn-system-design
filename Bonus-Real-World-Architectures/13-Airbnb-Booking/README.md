@@ -2,7 +2,7 @@
 
 > A platform where guests search listings by location, dates, and filters, then book and pay for short-term stays — all without double-bookings, stale availability, or payment failures.
 
-**Difficulty:** ⭐⭐⭐⭐ · **Builds on:** [Transactions & Consistency](../../Level-04-Distributed-Systems/README.md), [SQL vs NoSQL](../../Level-02-Data-Layer/README.md), [CAP Theorem](../../Level-04-Distributed-Systems/01-CAP-Theorem/README.md)
+**Difficulty:** ⭐⭐⭐⭐ · **Builds on:** [ACID & Transactions](../../Level-02-Data-Layer/05-ACID-and-Transactions/README.md), [SQL vs NoSQL](../../Level-01-Building-Blocks/04-Databases-SQL-vs-NoSQL/README.md), [Distributed Locking](../../Level-04-Distributed-Systems/08-Distributed-Locking/README.md), [CAP Theorem](../../Level-04-Distributed-Systems/01-CAP-Theorem/README.md)
 
 ---
 
@@ -13,7 +13,7 @@ Airbnb is a two-sided marketplace: **hosts** list properties, **guests** discove
 1. **Search** — find relevant listings by geo-proximity, available date ranges, guest count, amenities, and price, ranked by relevance and conversion probability, at low latency.
 2. **Double-booking prevention** — two guests must never successfully book the same listing for overlapping dates. This is a classic concurrency problem under high write contention.
 3. **Availability calendar** — hosts set nightly availability and pricing; the system must reflect this in real time and block dates atomically on booking.
-4. **Payment escrow & payout** — collect money from guests at booking, hold it in escrow, then release to hosts after check-in, with idempotency so retries never double-charge.
+4. **Payment escrow & payout** — collect money from guests at booking, hold it in escrow, then release to hosts after check-in, with [idempotency](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md) so retries never double-charge.
 
 **Out of scope:** messaging, reviews display, host onboarding, photo storage, fraud scoring, dynamic pricing ML model training (but we'll mention the read path).
 
@@ -35,13 +35,13 @@ Airbnb is a two-sided marketplace: **hosts** list properties, **guests** discove
 
 | Attribute | Target |
 |---|---|
-| Search latency (p99) | < 200 ms |
+| Search latency ([p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md)) | < 200 ms |
 | Booking creation latency (p99) | < 1 s |
 | Availability freshness | Near-real-time (< 5 s after update) |
 | Double-booking probability | Zero — strong consistency required |
 | Uptime (booking + payment) | 99.99% |
 | Read/write ratio (search) | ~1000:1 |
-| Peak load | 500k concurrent searches, 10k bookings/min |
+| Peak load | ~10,000 search QPS, ~100 bookings/second (6,000/min) |
 
 ---
 
@@ -78,7 +78,7 @@ Airbnb is a two-sided marketplace: **hosts** list properties, **guests** discove
 
 ## 4. 🔌 API Design
 
-All endpoints are REST/JSON over HTTPS, authenticated via JWT (guests/hosts) or service tokens (internal).
+All endpoints are REST/JSON over HTTPS, authenticated via [JWT](../../Level-03-Communication/08-Authentication-and-Authorization/README.md) (guests/hosts) or service tokens (internal).
 
 ### Search Listings
 
@@ -248,14 +248,16 @@ erDiagram
     BOOKING ||--o{ REVIEW : "generates"
 ```
 
+*Caption: Availability is stored as one calendar row per listing per date, which is what lets a booking lock and block exactly the nights it needs.*
+
 **Storage justification**
 
 | Store | What lives there | Why |
 |---|---|---|
-| **PostgreSQL** (sharded) | `bookings`, `payments`, `users` | ACID transactions are mandatory for booking + payment atomicity; row-level locking for double-booking prevention |
-| **PostgreSQL** (separate cluster) | `listings`, `availability_calendar` | Relational integrity with host; `availability_calendar` uses composite PK `(listing_id, date)` — perfect for point lookups and range scans |
+| **PostgreSQL** (sharded by `listing_id`) | `bookings`, `availability_calendar`, `payments` | A booking and the calendar rows it blocks live on the same shard, so one local ACID transaction covers both (no two-phase commit); row-level locking prevents double-booking. `availability_calendar` uses composite PK `(listing_id, date)` — perfect for point lookups and range scans |
+| **PostgreSQL** (separate cluster) | `listings`, `users` | Mostly-read reference data; relational integrity with host |
 | **Elasticsearch** | Listing search index (geo, text, amenities, price, availability bitmap) | Geo-distance queries, full-text search, aggregations, and availability-filtered date range queries at <100 ms |
-| **Redis** | Pessimistic lock tokens (booking reservation), session cache, rate limiting | Sub-millisecond distributed locking via `SET NX PX`; listing metadata cache for detail pages |
+| **Redis** | Pessimistic lock tokens (booking reservation), session cache, [rate limiting](../../Level-03-Communication/07-Rate-Limiting/README.md) | Sub-millisecond distributed locking via `SET NX PX`; listing metadata cache for detail pages |
 | **S3 + CDN** | Listing photos, user avatars | Blob storage with global CDN for low-latency photo delivery |
 | **Kafka** | Booking events, calendar change events, payment events | Decouples booking flow from search index refresh, notification fan-out, analytics |
 
@@ -276,7 +278,7 @@ flowchart TD
     APIGW["API Gateway<br/>(Auth · Rate Limit · Routing)"]
 
     subgraph CoreServices["Core Services"]
-        SearchSvc["Search Service<br/>(Ernie / ES query builder)"]
+        SearchSvc["Search Service<br/>(ES query builder)"]
         ListingSvc["Listing Service<br/>(CRUD + calendar mgmt)"]
         BookingSvc["Booking Service<br/>(reservation + locking)"]
         PaymentSvc["Payment Service<br/>(escrow + payout)"]
@@ -341,6 +343,8 @@ flowchart TD
     style Kafka fill:#fff7ed,color:#000
     style ExternalPay fill:#fee2e2,color:#000
 ```
+
+*Caption: Follow the numbered Booking Service edges for the synchronous critical path, while Kafka feeds index refresh, payouts, and notifications asynchronously.*
 
 **Numbered walk-through**
 
@@ -459,6 +463,8 @@ sequenceDiagram
     PG-->>G2: rows returned, status=blocked → 409 Conflict
 ```
 
+*Caption: Only Guest 1 wins the Redis NX lock, and by the time Guest 2 reaches PostgreSQL the dates are already blocked, so it gets a 409.*
+
 **How it works**:
 1. Redis distributed lock (`SET NX PX`) ensures only one booking request for a given listing+date-range enters the critical section at a time. TTL (10 s) auto-releases the lock if the service crashes.
 2. Inside the lock, a PostgreSQL transaction selects the `availability_calendar` rows `FOR UPDATE` — this is a row-level DB lock as a second guard.
@@ -490,7 +496,7 @@ A background job (or Redis TTL + expiry callback) sweeps expired `reserved` rows
 
 The `availability_calendar` table uses the composite primary key `(listing_id, date)`. This gives:
 
-- O(1) point lookup for a single date.
+- O(log N) B-tree point lookup for a single date.
 - O(N) range scan for `WHERE listing_id = X AND date BETWEEN A AND B` using the index efficiently (dates are stored in order).
 - Atomic multi-row updates inside a single transaction.
 
@@ -541,8 +547,8 @@ This means a client can safely retry `POST /v2/bookings` on network timeout with
 
 | Component | Strategy |
 |---|---|
-| Search (ES) | Horizontal sharding (7M docs → trivial for ES); geo-aware shard routing; replica reads |
-| Listing Service | Stateless; scale horizontally; Redis caches hot listing metadata (TTL 60 s) |
+| Search (ES) | Horizontal [sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md) (7M docs → trivial for ES); geo-aware shard routing; replica reads |
+| Listing Service | [Stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md); scale horizontally; Redis caches hot listing metadata (TTL 60 s) |
 | Booking Service | Stateless; horizontal scale; all state in Redis + Postgres |
 | PostgreSQL (bookings) | Range-shard by `listing_id`; read replicas for booking history queries |
 | PostgreSQL (calendar) | Range-shard by `listing_id`; hot listings (Eiffel Tower Airbnb) get dedicated shard |
@@ -563,7 +569,7 @@ This means a client can safely retry `POST /v2/bookings` on network timeout with
 | Kafka consumer lag | ES index stale → stale search results | Monitor consumer lag; scale consumers; alert at >30 s lag |
 | Stripe outage | New bookings fail payment | Queue payment retries; surface friendly error; avoid overbooking by holding `reserved` state |
 | Calendar DB shard failure | Reads and writes for affected listings fail | Multi-AZ Postgres with automatic failover (RDS Multi-AZ); bookings for affected listings return 503 |
-| Double-booking despite locking | Theoretical: two processes both read `available`, both write before commit | `SELECT FOR UPDATE` inside a serializable or repeatable-read transaction prevents this; unique constraint on `(listing_id, date, status='blocked')` as safety net |
+| Double-booking despite locking | Theoretical: two processes both read `available`, both write before commit | `SELECT FOR UPDATE` inside the transaction prevents this; as a last line of defence, a PostgreSQL exclusion constraint on `bookings` (`EXCLUDE USING gist (listing_id WITH =, daterange(check_in, check_out) WITH &&)`) makes overlapping confirmed bookings impossible at the database level |
 
 ---
 
@@ -587,7 +593,7 @@ Storing one row per `(listing_id, date)` is simple, correct, and queryable. An a
 
 ### Monolith vs. Microservices
 
-At Airbnb's scale, the services described (Search, Listing, Booking, Payment) are separate deployable units. At early-stage startup scale, a well-structured monolith with the same logical separation is cheaper to operate and just as correct. Split when operational independence becomes worth the complexity.
+At Airbnb's scale, the services described (Search, Listing, Booking, Payment) are separate deployable units. At early-stage startup scale, a well-structured [monolith](../../Level-05-Architecture-Patterns/01-Monolith-vs-Microservices/README.md) with the same logical separation is cheaper to operate and just as correct. Split when operational independence becomes worth the complexity.
 
 ---
 
@@ -595,11 +601,11 @@ At Airbnb's scale, the services described (Search, Listing, Booking, Payment) ar
 
 Airbnb has published extensively on their engineering blog:
 
-- **Ernie** — Airbnb's search ranking system, built on Elasticsearch with custom ML re-ranking. They use a `function_score` query to blend textual relevance, geo-proximity, and a neural network score computed offline and stored as a field. Blog: *"Scaling Airbnb's Experimentation Platform"* (2021).
-- **Chronos** — Airbnb's internal task scheduling system (similar to Quartz but distributed), used to schedule payout jobs with retry semantics. Blog: *"Chronos: A Fault-Tolerant Distributed Job Scheduler"* (2013).
-- **Payment System** — Airbnb processes payments in 190+ countries with multiple currency conversion, VAT, and regulatory complexity. They built an internal payment orchestration layer on top of Stripe/Braintree/Adyen that handles idempotency, retries, and reconciliation. Blog: *"Building Airbnb's Payment System"* (2019).
-- **Availability Calendar** — They store availability as event-sourced records: a `calendar_event` log (blocked, unblocked, booked) from which the current state is derived. This gives a full audit trail and makes cancellations straightforward (add an "unblocked" event).
-- **Dynamic Pricing (Aerosolve)** — Airbnb open-sourced their ML pricing model. Hosts see a suggested nightly price based on demand signals; the search service reads the accepted price from the calendar row.
+- **Search ranking** — Airbnb's search runs on an in-house Lucene-based backend with ML re-ranking; their move from gradient-boosted trees to neural-network ranking is described in the paper *"Applying Deep Learning to Airbnb Search"* (KDD 2019).
+- **Chronos** — Airbnb's open-source, fault-tolerant job scheduler that runs on Mesos, built to replace cron for dependent, retryable jobs. Blog: *"Chronos: A Replacement for Cron"* (2013).
+- **Payment System** — Airbnb processes payments in 190+ countries with multiple currency conversion, VAT, and regulatory complexity. They built an internal payment orchestration layer on top of several payment processors that handles idempotency, retries, and reconciliation. Blog: *"Avoiding Double Payments in a Distributed Payments System"* (2019), which describes Orpheus, their idempotency library.
+- **Availability Calendar** — A common hardening step, and a good interview extension: keep an append-only `calendar_event` log (blocked, unblocked, booked) next to the current-state rows. It gives a full audit trail for host disputes and turns a cancellation into a new event instead of an in-place edit.
+- **Dynamic Pricing (Aerosolve)** — Airbnb open-sourced the ML library behind their pricing suggestions. Hosts see a suggested nightly price based on demand signals; the search service reads the accepted price from the calendar row.
 
 ---
 
@@ -618,7 +624,8 @@ The single most important thing to nail in an interview: **the booking critical 
 
 ---
 
-**See also**
+<!-- nav:start -->
 
-- Previous: [Food Delivery (DoorDash/Uber Eats)](../12-Food-Delivery/README.md) — another geo-search + real-time dispatch system with similar availability and double-assignment problems.
-- Next: [Google Drive / Dropbox](../14-Google-Drive-Dropbox/README.md) — distributed file storage, chunking, deduplication, and sync protocols.
+⬅️ **Previous:** [12 · Food Delivery (DoorDash / Swiggy)](../12-Food-Delivery/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [14 · Google Drive / Dropbox](../14-Google-Drive-Dropbox/README.md)
+
+<!-- nav:end -->

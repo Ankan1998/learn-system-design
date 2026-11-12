@@ -2,7 +2,7 @@
 
 > Rate limiting controls the number of requests a client can make to a service within a time window, protecting systems from abuse, ensuring fair usage, and keeping costs predictable.
 
-**Level:** 3 · **Topic:** 7 · **Prerequisites:** [API Design & REST](../01-API-Design-REST/README.md), [Caching concepts (Level-02)](../../Level-01-Building-Blocks/03-Caching/README.md)
+**Level:** 3 · **Topic:** 7 · **Prerequisites:** [API Design & REST](../01-API-Design-REST/README.md), [Caching (Level 1)](../../Level-01-Building-Blocks/03-Caching/README.md)
 
 ---
 
@@ -31,7 +31,7 @@ Rate limiting answers three questions:
 2. **What** counts as a request? (every API call, or by endpoint, or by "cost")
 3. **What happens** when the limit is hit? (reject with 429, queue, or throttle)
 
-Limiting is enforced at the **API Gateway** layer (before requests reach your services), so application servers don't need to implement it.
+Limiting is enforced at the **[API Gateway](../../Level-05-Architecture-Patterns/05-API-Gateway/README.md)** layer (before requests reach your services), so application servers don't need to implement it.
 
 ---
 
@@ -118,6 +118,8 @@ graph LR
     style REJ fill:#f8d7da,color:#000
 ```
 
+*Caption: Tokens arrive at a steady rate and each request spends one, so a full bucket allows a burst while the long-run rate can never exceed the refill rate.*
+
 - **Allows bursts** up to `capacity` requests (when bucket is full)
 - **Sustained rate** is capped by the refill rate
 - Two params: `capacity` (burst size) and `refill_rate` (steady-state)
@@ -150,6 +152,8 @@ graph TD
     style OUT fill:#fff3cd,color:#000
     style DR fill:#f8d7da,color:#000
 ```
+
+*Caption: Requests wait in a bounded queue that drains at a constant rate, so the downstream service sees perfectly smooth traffic and anything beyond the queue's capacity is rejected.*
 
 - **No bursts allowed** — output is always the fixed drain rate
 - Smooths traffic for downstream systems that can't handle spikes
@@ -197,16 +201,26 @@ The key `rate:42:<window_bucket>` changes each minute. `INCR` is atomic — no r
 For token bucket, you need to atomically: read current tokens, calculate refill, update tokens, check. A **Lua script** runs atomically on the Redis server:
 
 ```lua
-local tokens = tonumber(redis.call('GET', KEYS[1]) or ARGV[1])
-local refill = (now - last_refill) * rate
-tokens = math.min(capacity, tokens + refill)
+-- KEYS[1] = bucket key (a hash)    ARGV = capacity, refill rate per second, now (seconds)
+local capacity = tonumber(ARGV[1])
+local rate     = tonumber(ARGV[2])
+local now      = tonumber(ARGV[3])
+
+local bucket = redis.call('HMGET', KEYS[1], 'tokens', 'ts')
+local tokens = tonumber(bucket[1]) or capacity        -- first request: start with a full bucket
+local ts     = tonumber(bucket[2]) or now
+
+tokens = math.min(capacity, tokens + (now - ts) * rate)   -- refill for the time that has passed
+
+local allowed = 0
 if tokens >= 1 then
     tokens = tokens - 1
-    redis.call('SET', KEYS[1], tokens)
-    return 1  -- allowed
-else
-    return 0  -- rejected
+    allowed = 1
 end
+
+redis.call('HSET', KEYS[1], 'tokens', tokens, 'ts', now)
+redis.call('EXPIRE', KEYS[1], math.ceil(capacity / rate) * 2)   -- idle buckets clean themselves up
+return allowed   -- 1 = allowed, 0 = rejected
 ```
 
 Atomicity guarantees no two requests simultaneously "see" the same token count.
@@ -227,6 +241,8 @@ sequenceDiagram
     R-->>S2: 101 (> limit → reject 429)
 ```
 
+*Caption: Notice that both API servers increment the same Redis key, so the count is global and the request that pushes it past 100 is rejected regardless of server.*
+
 ---
 
 ## 🔧 Where to Enforce Rate Limiting
@@ -244,6 +260,8 @@ graph LR
     style S2 fill:#d1ecf1,color:#000
     style S3 fill:#d1ecf1,color:#000
 ```
+
+*Caption: The gateway is the single choke point every client request passes through, while internal services may add their own optional limits.*
 
 | Layer | Pros | Cons |
 |-------|------|------|
@@ -278,13 +296,13 @@ Good clients use `Retry-After` to implement **exponential backoff** and avoid ha
 
 ## 🏢 Real-World Examples
 
-**Stripe** — Token bucket per API key. Free plans: 100 req/s. Exceeding returns `429` with `Retry-After`. Idempotency keys help with safe retries.
+**Stripe** — Token bucket per API key. Default live-mode limit: about 100 req/s. Exceeding returns `429` with `Retry-After`. [Idempotency keys](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md) help with safe retries.
 
 **GitHub API** — Fixed window: 5,000 authenticated requests/hour. Returns `X-RateLimit-Remaining` and `X-RateLimit-Reset` headers on every response.
 
 **Cloudflare** — Sliding window counter at massive scale (handles trillions of requests). Enforces at the edge (PoP level), not at origin.
 
-**Twitter/X API** — Tiered limits by plan. Free tier: 1,500 tweets/month. Basic: 3,000/month. Rate limits per endpoint.
+**Twitter/X API** — Tiered limits by plan: each paid tier buys a larger monthly quota of posts and reads. On top of that, every endpoint has its own short-window limit (classically, requests per 15 minutes), reported in `x-rate-limit-limit`, `x-rate-limit-remaining`, and `x-rate-limit-reset` response headers.
 
 **AWS API Gateway** — Built-in token bucket per stage/method. Default: 10,000 req/s steady state, 5,000 burst.
 
@@ -311,7 +329,7 @@ Good clients use `Retry-After` to implement **exponential backoff** and avoid ha
 - **Webhook receivers** — protect your internal services from external floods
 
 **Be careful with:**
-- **Internal service-to-service** — rate limiting here adds latency for legitimate traffic; use circuit breakers instead
+- **Internal service-to-service** — rate limiting here adds latency for legitimate traffic; use [circuit breakers](../../Level-05-Architecture-Patterns/06-Resilience-Patterns/README.md) instead
 - **Admin APIs** — usually need higher limits or exclusion for operations tooling
 
 ---
@@ -366,5 +384,13 @@ Good clients use `Retry-After` to implement **exponential backoff** and avoid ha
 - [GitHub REST API Rate Limiting](https://docs.github.com/en/rest/overview/rate-limits-for-the-rest-api)
 - [Redis INCR Command](https://redis.io/commands/incr/)
 - [System Design — Designing a Rate Limiter (ByteByteGo)](https://bytebytego.com/courses/system-design-interview/design-a-rate-limiter)
-- Previous: [06-WebSockets-and-Realtime](../06-WebSockets-and-Realtime/README.md)
-- Next: [08-Authentication-and-Authorization](../08-Authentication-and-Authorization/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [WebSockets and Real-Time Communication](../06-WebSockets-and-Realtime/README.md) · 🏠 [Level 3 — Communication](../README.md) · ➡️ **Next:** [Authentication & Authorization](../08-Authentication-and-Authorization/README.md)
+
+🧩 **See it applied in:** [03 · Rate Limiter](../../Bonus-Real-World-Architectures/03-Rate-Limiter/README.md) · [04 · Notification Service](../../Bonus-Real-World-Architectures/04-Notification-Service/README.md) · [38 · LLM Chat Service (ChatGPT)](../../Bonus-Real-World-Architectures/38-LLM-Chat-Service/README.md) · [41 · Online Code Judge (LeetCode / HackerRank)](../../Bonus-Real-World-Architectures/41-Online-Code-Judge/README.md) · [44 · Identity & Access Management Service (Auth0 / Okta)](../../Bonus-Real-World-Architectures/44-Identity-and-Access-Service/README.md) · [02 · Pastebin](../../Bonus-Real-World-Architectures/02-Pastebin/README.md) · [11 · Uber Ride-Sharing](../../Bonus-Real-World-Architectures/11-Uber-Ride-Sharing/README.md) · [13 · Airbnb Booking](../../Bonus-Real-World-Architectures/13-Airbnb-Booking/README.md) · …and 4 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

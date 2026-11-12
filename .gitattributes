@@ -1,0 +1,9 @@
+# Keep line endings identical on every platform, so the generated navigation
+# footers and the CI checks never differ between Windows and Linux checkouts.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary

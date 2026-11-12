@@ -17,7 +17,7 @@ Every non-trivial system needs scheduled work: send a weekly digest email, charg
 
 - Accepts **one-time** jobs (run at epoch T) and **recurring** jobs (run every cron expression).
 - **Guarantees** each job fires **at least once**, and with idempotency guards — effectively **exactly once** from the business perspective.
-- Scales to **millions of registered schedules** and **hundreds of thousands of executions/day**.
+- Scales to **millions of registered schedules** and **tens of millions of executions/day**.
 - Gives operators **visibility**: execution history, logs, retries, alerting on missed jobs.
 
 Real analogues: **Apache Airflow**, **Quartz Scheduler**, **Google Cloud Scheduler**, **Uber Cadence / Temporal**, **Amazon EventBridge Scheduler**.
@@ -35,11 +35,11 @@ Real analogues: **Apache Airflow**, **Quartz Scheduler**, **Google Cloud Schedul
 
 ### Non-Functional
 - **Scale:** 10 million registered jobs, peak 50,000 executions per minute.
-- **Timeliness:** fire within ≤5 s of scheduled time (p99).
+- **Timeliness:** fire within ≤5 s of scheduled time ([p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md)).
 - **Reliability:** zero missed fires during scheduler node failures; at-least-once delivery.
 - **Durability:** job definitions and execution records survive full cluster restarts.
 - **Availability:** 99.99 % uptime; no SPOF.
-- **Observability:** per-job history, alerting on SLA violations.
+- **[Observability](../../Level-06-Scale-and-Reliability/01-Observability/README.md):** per-job history, alerting on SLA violations.
 
 ---
 
@@ -47,8 +47,8 @@ Real analogues: **Apache Airflow**, **Quartz Scheduler**, **Google Cloud Schedul
 
 ```
 Registered jobs:     10,000,000
-Avg executions/day:  20 per job  →  200,000,000 executions/day
-Peak:                200M / 86,400 s  ≈  2,315 exec/s  →  round to 50,000 exec/min (bursty)
+Avg executions/day:  2 per job  →  20,000,000 executions/day
+Peak:                20M / 86,400 s  ≈  231 exec/s avg  →  ~3.6× burst ≈ 50,000 exec/min (bursty)
 
 Schedule scan interval: 10 s buckets
 Jobs due per 10 s:  50,000 / 6  ≈  8,333 jobs per tick
@@ -58,8 +58,8 @@ Storage — job definitions:
   10M × 500 B = 5 GB   → fits in a modern DB, well-indexed
 
 Storage — execution history:
-  200M rows/day, retain 90 days = 18 B rows
-  1 row ≈ 200 B  →  18 B × 200 B = 3.6 TB  (partitioned by day, archived to cold storage)
+  20M rows/day, retain 90 days = 1.8 B rows
+  1 row ≈ 200 B  →  1.8 B × 200 B = 360 GB  (partitioned by day, archived to cold storage)
 
 Throughput to workers:
   50,000 exec/min  →  833 exec/s
@@ -148,11 +148,13 @@ erDiagram
     JOB ||--o{ SCHEDULE_BUCKET : "placed-in"
 ```
 
+*Caption: Notice each job fans out into pre-materialised schedule-bucket rows with a claimed flag, separate from the execution records that track every attempt.*
+
 **Storage choices:**
 - **Job definitions** — PostgreSQL (strong consistency, ACID, rich queries). Indexed on `(status, next_run_at)`.
 - **Schedule buckets** — PostgreSQL (same DB, row-level locking for claim).
 - **Execution history** — PostgreSQL time-partitioned table (partition by day); offload partitions > 30 days to S3/Parquet for analytics.
-- **Distributed locks** — Redis (`SET NX PX`) or ZooKeeper ephemeral nodes.
+- **[Distributed locks](../../Level-04-Distributed-Systems/08-Distributed-Locking/README.md)** — Redis (`SET NX PX`) or ZooKeeper ephemeral nodes.
 - **Work queue** — Kafka or SQS (durable, replay-safe).
 
 ---
@@ -216,11 +218,13 @@ flowchart TD
     classDef ext fill:#eeeeee,stroke:#888888,color:#000
 ```
 
+*Caption: Notice only the leader scheduler polls the database and publishes to Kafka, while workers report results through the Execution Broker rather than writing directly.*
+
 **Walk-through:**
 1. **Register** — client POSTs to Job API; row written to PostgreSQL with computed `next_run_at`.
 2. **Pre-populate buckets** — the Scheduler Engine (leader only) periodically scans jobs and inserts rows into `schedule_bucket` for the next N minutes (a "look-ahead window").
-3. **Tick loop** — every 10 s, the leader scans `schedule_bucket` for `bucket_epoch ≤ now AND claimed = false`, atomically claims rows (UPDATE … WHERE claimed = false RETURNING …), and publishes one Kafka message per job to the `job-ready` topic.
-4. **Worker consumption** — workers pull from Kafka, invoke the target (HTTP callback, Lambda, gRPC), write result to the Execution Broker.
+3. **Tick loop** — every 10 s, the leader scans `schedule_bucket` for `bucket_epoch ≤ now AND claimed = false`, atomically claims rows (UPDATE … WHERE claimed = false RETURNING …) and, in the same transaction, writes one outbox row per job. A relay then publishes each outbox row to the `job-ready` Kafka topic, so a crash between claiming and publishing cannot lose a job.
+4. **Worker consumption** — workers pull from Kafka, invoke the target (HTTP callback, Lambda, [gRPC](../../Level-03-Communication/03-gRPC-and-RPC/README.md)), write result to the Execution Broker.
 5. **Result collection** — Execution Broker updates the execution row; on failure schedules a retry message with exponential backoff.
 6. **Leader failover** — if the leader misses its ZooKeeper heartbeat, a standby promotes itself in <30 s; unclaimed bucket rows are picked up on the next tick.
 
@@ -269,9 +273,9 @@ sequenceDiagram
     participant K as Kafka
     participant W as Worker
 
-    S->>DB: BEGIN → UPDATE schedule_bucket SET claimed=true<br/>WHERE NOT claimed RETURNING job_ids → COMMIT
-    S->>K: produce(job_id, execution_id, scheduled_at)
-    Note over K: Kafka offset committed only after publish succeeds
+    S->>DB: BEGIN → UPDATE schedule_bucket SET claimed=true<br/>WHERE NOT claimed RETURNING job_ids<br/>+ INSERT INTO outbox (job_id, execution_id) → COMMIT
+    S->>K: relay publishes outbox rows (job_id, execution_id, scheduled_at)
+    Note over S,K: A crash between COMMIT and publish loses nothing,<br/>the outbox row is published after restart (at-least-once)
     W->>K: consume(job_id, execution_id)
     W->>DB: INSERT execution (status=RUNNING, worker_id, attempt)<br/>ON CONFLICT (job_id, scheduled_at, attempt) DO NOTHING
     alt DB insert returned 0 rows (duplicate)
@@ -281,6 +285,8 @@ sequenceDiagram
         W->>DB: UPDATE execution SET status=SUCCESS/FAILED
     end
 ```
+
+*Caption: The claim and the outbox row commit together, so a job is never lost between claiming and publishing, and the unique execution row makes a duplicate delivery a harmless no-op.*
 
 The `(job_id, scheduled_at, attempt)` unique constraint is the idempotency key. If the worker crashes after starting but before writing SUCCESS, the Execution Broker detects the RUNNING row has exceeded `timeout_secs` and enqueues a retry with `attempt+1`.
 
@@ -304,6 +310,8 @@ flowchart TD
     S2 -->|try create ephemeral /leader/B| Z
     Z -->|success → B is new leader| S2
 ```
+
+*Caption: Notice leadership is tied to an ephemeral node, so when the leader's session expires the node vanishes and a watching standby claims leadership.*
 
 - Each scheduler node creates an ephemeral node in ZooKeeper on startup.
 - The node with the **lowest sequence number** (or whichever wins the CREATE race) is leader.
@@ -342,7 +350,7 @@ Max attempts reached → move to Dead-Letter Queue (DLQ)
 | Hot partitions (many jobs at :00) | Add sub-second jitter at registration time to spread load |
 
 **Failure modes checklist:**
-- Scheduler leader crash → ZK session expires, standby promotes in <30 s, at most one missed 10-s tick.
+- Scheduler leader crash → ZK session expires, standby promotes in <30 s; the few 10-s ticks in that gap are delayed, not lost (unclaimed rows are picked up on the next tick).
 - Worker crash mid-job → Kafka re-delivers; idempotency key prevents double execution.
 - DB primary failure → PostgreSQL failover (Patroni), ~30 s downtime; scheduler stalls but resumes.
 - Target unreachable → retry with backoff → DLQ after max_retries.
@@ -357,22 +365,22 @@ Max attempts reached → move to Dead-Letter Queue (DLQ)
 | Schedule store | PostgreSQL + bucket table | Redis sorted set (ZADD job score=fire_time) | DB gives ACID; Redis is faster but needs separate persistence |
 | Queue | Kafka | SQS / RabbitMQ | Kafka replay is key for debugging; higher throughput |
 | Leader election | ZooKeeper | etcd / DB-based advisory lock | ZooKeeper is battle-tested; etcd is a modern alternative with similar guarantees |
-| Worker isolation | Kubernetes pods | Threads in same process | Pod isolation prevents one runaway job from starving others |
+| Worker isolation | [Kubernetes](../../Level-06-Scale-and-Reliability/07-Containers-and-Orchestration/README.md) pods | Threads in same process | Pod isolation prevents one runaway job from starving others |
 | Cron parsing | Server-side next_run_at | Store raw cron, evaluate per tick | Pre-computed `next_run_at` makes DB queries trivial |
 
 ---
 
 ## 10. 🌐 How It's Actually Done
 
-**Apache Airflow** uses a Python-based scheduler that polls a PostgreSQL/MySQL metadata DB. Airflow 2.x introduced a HA scheduler using optimistic locking on a `dag_run` table — multiple schedulers race to claim DAG runs.
+**Apache Airflow** uses a Python-based scheduler that polls a PostgreSQL/MySQL metadata DB. Airflow 2.x introduced a HA scheduler using row-level locks (`SELECT … FOR UPDATE SKIP LOCKED`) in the metadata DB — multiple schedulers race to claim DAG runs.
 
-**Quartz Scheduler** (Java) uses a `QRTZ_TRIGGERS` table with a DB advisory lock (`LOCK TABLE`) to claim triggers. Every scheduler node runs the same SQL; the one that wins the lock fires the job.
+**Quartz Scheduler** (Java) uses a `QRTZ_TRIGGERS` table with a row lock on the `QRTZ_LOCKS` table (`SELECT … FOR UPDATE`) to claim triggers. Every scheduler node runs the same SQL; the one that wins the lock fires the job.
 
-**Google Cloud Scheduler** is a fully managed service backed by an internal globally distributed cron system. Jobs are stored in Spanner (for global consistency). The scheduler uses Google's Chubby (similar to ZooKeeper) for leader election per region.
+**Google Cloud Scheduler** is a fully managed cron service: each job fires an HTTP, Pub/Sub, or App Engine target with configurable retries and at-least-once delivery, so targets must be idempotent. Its internals are not public; the closest published description is the "Distributed Periodic Scheduling with Cron" chapter of the Google SRE book, which describes a Paxos-replicated cron service that records every launch so a new leader neither skips nor double-fires a job.
 
 **Uber Cadence / Temporal** goes further: instead of plain job scheduling, it implements *durable workflows* — long-running code that survives process restarts by replaying an event log. Job state is captured as a Workflow History, enabling exactly-once semantics natively. This is the gold standard for complex retry/compensation logic.
 
-**Amazon EventBridge Scheduler** stores schedules in DynamoDB, uses kinesis streams internally to distribute triggers to workers, and guarantees at-least-once delivery with SQS-backed retry.
+**Amazon EventBridge Scheduler** is a [serverless](../../Level-05-Architecture-Patterns/08-Serverless-Architecture/README.md) scheduler for one-time and recurring schedules, millions of them per account. It offers flexible time windows that spread invocations out, built-in retries with a dead-letter queue, and at-least-once delivery to hundreds of AWS service targets.
 
 ---
 
@@ -386,3 +394,11 @@ A production-grade distributed job scheduler rests on four pillars:
 4. **Observability and retry pipeline** — execution history, DLQ, SLA alerting, and operator replay capability.
 
 In a senior interview, nail the distinction: **at-least-once** (Kafka re-delivery) + **idempotency key** (DB unique constraint) = **effective exactly-once** from the business perspective. That combination is the core insight.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [20 · Ad Click Aggregator](../20-Ad-Click-Aggregator/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [22 · Google Search](../22-Google-Search/README.md)
+
+<!-- nav:end -->

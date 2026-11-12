@@ -34,10 +34,10 @@ During a Taylor Swift on-sale, 14 million people simultaneously try to buy from 
 
 ### Non-Functional
 - **Consistency over availability** for seat booking (no double-sells)
-- Seat hold must be acquired in **< 500 ms** p99
+- Seat hold must be acquired in **< 500 ms** [p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md)
 - Seat-map page load **< 1 s** p99 under normal load
 - Support **50 000 concurrent checkout sessions** per major event
-- On-sale spike: **500 000 req/s** arriving in the first 30 seconds
+- On-sale spike: **~700 000 req/s** arriving in the first minute (see §3)
 - 99.99% uptime for booking paths; 99.9% for browsing
 
 ---
@@ -58,8 +58,8 @@ During a Taylor Swift on-sale, 14 million people simultaneously try to buy from 
 - 1 M concurrent holds × 256 bytes = **256 MB** — fits in Redis
 
 **Tickets issued**
-- 500 M tickets/year → **~16 tickets/s** average; 200 000/s peak on-sale day
-- Ticket PDF ≈ 200 KB → 100 TB/year object storage
+- 500 M tickets/year → **~16 tickets/s** average; a hot on-sale sells ~50 000 seats in a few minutes, a few hundred purchases/s at the admitted rate (the 700 000 req/s spike is people *trying* to buy)
+- Ticket PDF ≈ 200 KB → 100 TB/year [object storage](../../Level-02-Data-Layer/09-Object-Storage/README.md)
 
 **Throughput target (checkout service)**
 - 60 000 seat holds × 2 retries avg = 120 000 DB writes/on-sale event
@@ -159,6 +159,8 @@ erDiagram
     TICKET ||--|| SEAT : "for"
 ```
 
+*Caption: Each seat row carries its own status and hold reference, so the seat table itself is the single source of truth for availability.*
+
 **Storage choices:**
 - **PostgreSQL (sharded by eventId)** — seat & hold tables; row-level locking guarantees no double-booking; ACID transactions
 - **Redis** — hold TTL timers (`EXPIREAT`), seat-availability bitmap per event, waiting-room queue (sorted set by join time)
@@ -219,6 +221,8 @@ flowchart TD
     class Users user
 ```
 
+*Caption: Flash-sale traffic must pass through the waiting room before reaching the API Gateway, and only the Hold and Payment services write to the sharded PostgreSQL.*
+
 **Walk-through (happy path during flash sale):**
 1. **Traffic enters the waiting room** — users are queued in Redis sorted set ordered by arrival time. Tokens are drip-released at a rate the system can handle (e.g., 500 tokens/s).
 2. **Admitted users hit API Gateway** — per-user rate limiting (1 hold attempt/s); DDoS protection.
@@ -275,6 +279,8 @@ sequenceDiagram
     DB-->>U2: 409 Conflict
 ```
 
+*Caption: User 2's SELECT FOR UPDATE blocks until User 1 commits, then sees the seat already HELD, so the second buyer can never double-book it.*
+
 ### 7.2 Seat Hold & TTL Release
 
 Hold lifecycle: **AVAILABLE → HELD → (SOLD | AVAILABLE)**
@@ -317,16 +323,18 @@ flowchart LR
     class C decision
 ```
 
+*Caption: The waiting room turns a stampede into a steady drip: everyone gets a queue position at once, but only as many users per second as the backend can serve receive an admission token.*
+
 - Queue stored in Redis sorted set: `ZADD event:{id}:queue <timestamp> <userId>`
 - Admission controller drips tokens at a rate calibrated to backend capacity
-- Signed JWT prevents users from bypassing the queue
+- Signed [JWT](../../Level-03-Communication/08-Authentication-and-Authorization/README.md) prevents users from bypassing the queue
 - Position estimate: `(position / drip_rate) = estimated_wait_seconds`
 
 ### 7.4 Idempotent Payment
 
 A user submits payment, the network times out, and they hit retry. Without idempotency they'd be charged twice.
 
-Payment Service uses an **idempotency key** = `SHA256(holdId + userId + attemptNumber)`. On retry, the key is the same.
+Payment Service uses an **idempotency key** = `SHA256(holdId + userId + attemptNumber)`. On a network retry, the key is the same (`attemptNumber` only increments when the user deliberately starts a new payment attempt).
 
 ```
 POST /v1/holds/{holdId}/purchase
@@ -345,11 +353,11 @@ See [Idempotency & Exactly-Once](../../Level-04-Distributed-Systems/07-Idempoten
 
 | Bottleneck | Symptom | Mitigation |
 |---|---|---|
-| Hot event DB shard | Lock contention spikes latency | One PostgreSQL shard per active event; connection pooling via PgBouncer |
+| Hot event DB shard | Lock contention spikes latency | One PostgreSQL shard per active event; [connection pooling](../../Level-02-Data-Layer/06-Connection-Pooling/README.md) via PgBouncer |
 | Redis waiting-room queue | Single sorted set = hot key | Partition queue by user-id range; merge at read time |
 | Seat-map polling | 14M users × 5s poll = 2.8M req/s | Cache seat-map HTML in CDN; push availability delta via SSE/WebSocket |
 | Hold expiry storm | Thousands of holds expire simultaneously | Jitter expiry times ±30 s when creating holds |
-| PSP timeout | Payment hangs, hold expires | Async PSP webhook + saga: extend hold if PSP ack received but result pending |
+| PSP timeout | Payment hangs, hold expires | Async PSP webhook + [saga](../../Level-05-Architecture-Patterns/07-Saga-and-Orchestration/README.md): extend hold if PSP ack received but result pending |
 | Seat-map stale data | User picks already-held seat → 409 | Acceptable UX; retry with fresh map; 409 rate < 5% is fine |
 
 **Failure modes:**
@@ -375,11 +383,11 @@ See [Idempotency & Exactly-Once](../../Level-04-Distributed-Systems/07-Idempoten
 
 **Ticketmaster** encountered catastrophic failures during Taylor Swift's Eras Tour on-sale (Nov 2022): bots and genuine traffic overwhelmed their queue system, leading to degraded service for millions of users. Their post-incident response highlighted the need for better bot mitigation (CAPTCHA, device fingerprinting), more elastic capacity, and better waiting-room UX.
 
-**Queue-it** and **Fastly** provide SaaS waiting-room solutions used by many ticketing platforms. They handle queue management externally, so the origin only sees admitted traffic.
+**Queue-it** and **Cloudflare Waiting Room** provide SaaS waiting-room solutions used by many ticketing platforms. They handle queue management externally, so the origin only sees admitted traffic.
 
-**Seat locking at scale:** some platforms use a **Redis-based distributed lock** (SETNX with TTL) for the hold step to avoid DB lock contention entirely, but this requires careful crash-recovery logic. PostgreSQL row locks are simpler and correct.
+**Seat locking at scale:** some platforms use a **Redis-based [distributed lock](../../Level-04-Distributed-Systems/08-Distributed-Locking/README.md)** (SETNX with TTL) for the hold step to avoid DB lock contention entirely, but this requires careful crash-recovery logic. PostgreSQL row locks are simpler and correct.
 
-**Virtual tickets (NFT-backed):** Ticketmaster has experimented with blockchain-based tickets (Ticketmaster Tokens) to prevent scalping and provide verifiable provenance.
+**Rotating barcodes (SafeTix):** Ticketmaster's mobile tickets carry a barcode that refreshes every few seconds and is tied to the holder's account, so a screenshot cannot be resold and transfers must go through the platform. It has also issued NFT collectibles and token-gated presales alongside tickets.
 
 ---
 
@@ -392,6 +400,14 @@ See [Idempotency & Exactly-Once](../../Level-04-Distributed-Systems/07-Idempoten
 | Flash-sale traffic | Virtual waiting room (Redis sorted set) drip-releasing admission tokens |
 | Payment safety | Idempotency key on every purchase; PSP webhook for async confirmation |
 | Seat-map reads | CDN-cached + SSE delta pushes; Redis bitmap for fast availability checks |
-| Scale target | 50 000 concurrent checkouts; 500 000 req/s spike handled by waiting room |
+| Scale target | 50 000 concurrent checkouts; ~700 000 req/s spike handled by waiting room |
 
 The key insight: **the waiting room turns an impossible spike into a manageable steady stream.** Everything downstream — the shard, the lock, the hold timer — is designed for correctness, not raw throughput, because 60 000 seats is a small number. The hard problem is letting 14 million people compete fairly for those seats without crashing the system.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [15 · Google Maps](../15-Google-Maps/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [17 · Payment System](../17-Payment-System/README.md)
+
+<!-- nav:end -->

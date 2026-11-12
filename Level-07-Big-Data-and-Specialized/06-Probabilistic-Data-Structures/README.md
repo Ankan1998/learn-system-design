@@ -4,7 +4,7 @@
 
 ---
 
-**Level:** 7 · **Topic:** 6 of 6 · **Prerequisites:** [Level 04 — Distributed Systems](../../Level-04-Distributed-Systems/README.md) · [01 — Batch Processing](../01-Batch-Processing/README.md)
+**Level:** 7 · **Topic:** 6 of 9 · **Prerequisites:** [Level 4 — Distributed Systems](../../Level-04-Distributed-Systems/README.md) · [01 — Batch Processing](../01-Batch-Processing/README.md)
 
 ---
 
@@ -22,7 +22,7 @@ The exact solutions:
 
 Total: 160 GB per node, replicated. Prohibitively expensive.
 
-The probabilistic solutions: **~50 MB total** — with answers that are 99%+ accurate.
+The probabilistic solutions: **~600 MB total** (almost all of it the 1%-FP Bloom filter) — with answers that are 99%+ accurate.
 
 ---
 
@@ -43,7 +43,7 @@ That's the key trade-off: **false positives possible, false negatives impossible
 All probabilistic data structures exploit one insight: **most applications don't need exact answers**.
 
 - "Has this URL been seen?" — a 0.1% false positive rate means 1 in 1,000 cache misses becomes an unnecessary cache check. That's fine.
-- "How many times was this URL called?" — being off by 2–5% is acceptable for rate limiting.
+- "How many times was this URL called?" — being off by 2–5% is acceptable for [rate limiting](../../Level-03-Communication/07-Rate-Limiting/README.md).
 - "How many unique users today?" — being within 1–2% is fine for dashboards.
 
 The trade: correctness for the vast majority of answers, huge memory savings, and often O(1) time.
@@ -100,16 +100,16 @@ flowchart TD
 - **No false negatives:** if a bit is 0, the element was never inserted — guaranteed
 - **False positive rate:** p = (1 - e^(-kn/m))^k where n = elements inserted
 - **Cannot delete** elements (setting bits back to 0 would affect other elements)
-- **Space:** a typical Bloom filter with n=10M elements and 1% FP rate needs ~96 MB. An exact hash set needs ~500 MB+.
+- **Space:** a typical Bloom filter with n=10M elements and 1% FP rate needs ~96 million bits (~12 MB). An exact hash set needs ~500 MB+.
 
 **Practical Bloom filter sizing:**
 
 | n (elements) | Target FP Rate | Bits needed (m) | # Hash functions (k) | Memory |
 |-------------|----------------|-----------------|----------------------|--------|
-| 1 million | 1% | 9.59 MB | 7 | 1.2 MB |
-| 10 million | 1% | 95.9 MB | 7 | 12 MB |
-| 100 million | 1% | 959 MB | 7 | 120 MB |
-| 100 million | 0.1% | 1.44 GB | 10 | 180 MB |
+| 1 million | 1% | 9.59 Mbit | 7 | 1.2 MB |
+| 10 million | 1% | 95.9 Mbit | 7 | 12 MB |
+| 100 million | 1% | 959 Mbit | 7 | 120 MB |
+| 100 million | 0.1% | 1.44 Gbit | 10 | 180 MB |
 
 Formula: `m = -n * ln(p) / (ln(2))²` and `k = m/n * ln(2)`
 
@@ -183,7 +183,7 @@ flowchart LR
 
 **HyperLogLog properties:**
 - **Memory:** ~12 KB for 2^14 buckets — fixed, regardless of cardinality (1K or 1 trillion)
-- **Error:** ±2% for 2^14 buckets (1.04 / √m standard error)
+- **Error:** ~0.81% standard error for 2^14 buckets (1.04 / √m), so ~±2% at high confidence
 - **Merge-able:** HLL registers from two time periods can be merged without reprocessing
 - **Redis:** `PFADD key elem` and `PFCOUNT key` — built-in HyperLogLog
 
@@ -222,11 +222,11 @@ Every SSTable (immutable disk file) in Cassandra has a Bloom filter in memory. B
 ### Redis — Built-in HyperLogLog
 Redis ships HyperLogLog as a first-class data type. Instagram uses Redis `PFADD` / `PFCOUNT` to track unique visitors per post — each post's HLL uses ~12 KB regardless of whether the post has 100 or 10 million unique viewers. Without HLL, storing unique user IDs for a viral post with 10M viewers would cost ~80 MB per post. With HLL: always 12 KB, ±2% accuracy — perfectly acceptable for dashboard metrics.
 
-### CDN Deduplication (Akamai, Cloudflare)
-CDNs use Bloom filters to detect if a URL has been seen recently (within the last hour). If "probably yes" → serve from cache. If "definitely no" → fetch from origin, add to Bloom filter. False positives (saying a URL is cached when it isn't) just cause an unnecessary origin check — harmless. This allows CDNs to maintain "have I seen this?" state for billions of URLs across edge nodes using megabytes of RAM per node.
+### CDN "Cache on Second Hit" (Akamai)
+Roughly three quarters of the URLs an edge server sees are requested exactly once ("one-hit wonders"), and writing them to the disk cache is wasted work. Akamai's servers keep a Bloom filter of recently requested URLs. If the filter says "definitely not seen" → serve the response from origin *without* caching it, and add the URL to the filter. If it says "probably seen" → this is at least the second request, so cache the object. A false positive merely caches a one-hit wonder — harmless. The published result: disk writes fell by nearly half and cache hit rates went up, all for a few megabytes of RAM per node.
 
-### Google BigQuery — HyperLogLog for COUNT(DISTINCT)
-When you run `SELECT COUNT(DISTINCT user_id) FROM events` over billions of rows in BigQuery, the exact answer would require storing all user IDs in a large hash set during aggregation — expensive across distributed machines. BigQuery uses HyperLogLog++ to compute an approximation (±1–2%) without materializing the full set, enabling sub-second responses for cardinality queries over terabytes of data.
+### Google BigQuery — HyperLogLog++ for Approximate Distinct Counts
+When you run `SELECT COUNT(DISTINCT user_id) FROM events` over billions of rows in BigQuery, the exact answer would require storing all user IDs in a large hash set during aggregation — expensive across distributed machines (standard SQL `COUNT(DISTINCT)` is exact). BigQuery's `APPROX_COUNT_DISTINCT` and `HLL_COUNT.*` functions use HyperLogLog++ to compute an approximation (±1–2%) without materializing the full set, enabling sub-second responses for cardinality queries over terabytes of data.
 
 ### LinkedIn — Count-Min Sketch for Top-K Trending Topics
 LinkedIn uses Count-Min Sketch to track the most-mentioned terms across millions of posts per minute — identifying trending topics in near-real-time. The CMS uses ~2 MB of RAM to track frequencies across 50 million unique terms per hour. A heap paired with the CMS maintains the current top-1000 trending terms. Exact counting would require ~800 MB for the same frequency map.
@@ -294,7 +294,7 @@ LinkedIn uses Count-Min Sketch to track the most-mentioned terms across millions
 - **Probabilistic data structures** trade small, controlled error for enormous memory savings.
 - **Bloom filter:** "Is X in this set?" — no false negatives, configurable false positive rate, fixed bit array. Used in Cassandra, CDNs.
 - **Count-Min Sketch:** "How often did X appear?" — slight overcount only. Used for trending topics, rate limiting.
-- **HyperLogLog:** "How many distinct elements?" — ±2% error using only 12 KB. Used in Redis, BigQuery's COUNT(DISTINCT).
+- **HyperLogLog:** "How many distinct elements?" — ±2% error using only 12 KB. Used in Redis, BigQuery's APPROX_COUNT_DISTINCT.
 - The common thread: hash multiple times, summarize into a fixed-size structure, accept bounded error.
 
 ---
@@ -316,7 +316,15 @@ LinkedIn uses Count-Min Sketch to track the most-mentioned terms across millions
 - [HyperLogLog: The Analysis of a Near-Optimal Cardinality Estimation Algorithm](http://algo.inria.fr/flajolet/Publications/FlFuGaMe07.pdf) — Original paper by Flajolet et al.
 - [Count-Min Sketch](https://people.cs.umass.edu/~mcgregor/711S12/sketches1.pdf) — Original paper by Cormode & Muthukrishnan
 - [Redis HyperLogLog](https://redis.io/commands/pfadd/) — Production documentation
-- [Cassandra Bloom Filters](https://cassandra.apache.org/doc/latest/cassandra/operating/bloom_filters.html) — How Cassandra tunes FP rates per table
-- Previous: [05 — Recommendation & ML Systems](../05-Recommendation-and-ML-Systems/README.md)
-- Level overview: [Level 07 — Big Data & Specialized](../README.md)
+- [Cassandra Bloom Filters](https://cassandra.apache.org/doc/latest/cassandra/managing/operating/bloom_filters.html) — How Cassandra tunes FP rates per table
 - Bonus: [19 — Distributed Message Queue](../../Bonus-Real-World-Architectures/19-Distributed-Message-Queue/README.md) · [20 — Ad Click Aggregator](../../Bonus-Real-World-Architectures/20-Ad-Click-Aggregator/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Recommendation & ML Systems](../05-Recommendation-and-ML-Systems/README.md) · 🏠 [Level 7 — Big Data & Specialized Systems](../README.md) · ➡️ **Next:** [Geospatial Indexing](../07-Geospatial-Indexing/README.md)
+
+🧩 **See it applied in:** [05 · Web Crawler](../../Bonus-Real-World-Architectures/05-Web-Crawler/README.md) · [23 · Distributed Counter & Analytics](../../Bonus-Real-World-Architectures/23-Distributed-Counter-Analytics/README.md) · [45 · Real-Time Fraud Detection System (Stripe Radar)](../../Bonus-Real-World-Architectures/45-Fraud-Detection-System/README.md) · [06 · Twitter/X News Feed](../../Bonus-Real-World-Architectures/06-News-Feed-Twitter/README.md) · [10 · Typeahead / Autocomplete](../../Bonus-Real-World-Architectures/10-Typeahead-Autocomplete/README.md) · [25 · Live Streaming (Twitch / YouTube Live)](../../Bonus-Real-World-Architectures/25-Live-Streaming/README.md) · [27 · Distributed Key-Value Store](../../Bonus-Real-World-Architectures/27-Key-Value-Store/README.md) · [35 · Gaming Leaderboard](../../Bonus-Real-World-Architectures/35-Gaming-Leaderboard/README.md)
+
+<!-- nav:end -->

@@ -47,7 +47,7 @@ Protocol Buffers' field numbers are exactly these box numbers. The rules of sche
 | Speed | Slow to parse (text scanning) | Fast (fixed layouts, varints) |
 | Type safety | Weak (numbers, dates, binary are ambiguous) | Strong |
 
-A user record that is ~120 bytes in JSON is typically ~40 bytes in Protobuf. At a billion messages a day that's terabytes of bandwidth and a meaningful slice of CPU spent on parsing.
+A user record that is ~120 bytes in JSON is typically ~40 bytes in Protobuf. At a billion messages a day that's ~80 GB a day (terabytes a month) of bandwidth and a meaningful slice of CPU spent on parsing.
 
 ### Step 2 — Schema-driven binary encodings
 
@@ -129,7 +129,7 @@ flowchart LR
 
     subgraph Wire["Bytes on the wire (old writer)"]
         W1["tag 1, varint, 42"]
-        W2["tag 2, length 15, alice@example.com"]
+        W2["tag 2, length 17, alice@example.com"]
     end
 
     subgraph Readers["Readers"]
@@ -216,7 +216,7 @@ flowchart TD
 | **Avro** | Registry / file header | ~0.25–0.4× | Writer vs reader schema resolution by name | Kafka, Hadoop, data lakes |
 | **MessagePack / CBOR** | None | ~0.6–0.8× | Same as JSON | Caches, Redis values |
 | **Parquet** | File footer | very small (columnar + compressed) | Column IDs, additive changes | Analytics, lakehouses |
-| **FlatBuffers / Cap'n Proto** | Compiled | ~0.4× | Zero-copy access, tag-based | Games, mobile, low-latency |
+| **FlatBuffers / Cap'n Proto** | Compiled | ~0.5–0.8× (alignment padding; they optimize for access speed, not size) | Zero-copy access, tag-based | Games, mobile, low-latency |
 
 ---
 
@@ -235,7 +235,7 @@ Stripe's public JSON API has made breaking changes many times, but each customer
 Facebook created Thrift in 2007 for cross-language RPC between its C++, PHP, and Java services. Its numbered-field model is the same idea as Protobuf, and its longevity at Meta, Twitter, and Airbnb shows the pattern is the point, not the specific tool.
 
 ### Netflix — Avro in the data pipeline, tolerant readers at the edge
-Netflix's Keystone pipeline moves trillions of events a day using Avro with registry-managed schemas, while its API gateways follow the tolerant-reader principle so that hundreds of device types on many client versions keep working as the backend evolves.
+Netflix's data pipeline (Keystone and its successor, Data Mesh) moves trillions of events a day, with Avro schemas managed in a registry, while its API gateways follow the tolerant-reader principle so that hundreds of device types on many client versions keep working as the backend evolves.
 
 ### Apache Iceberg — schema evolution for data lakes
 Iceberg tracks every column by a **stable ID** rather than by name or position, so you can rename, reorder, add, or drop columns and still query files written under any previous schema. It's the Protobuf tag-number idea applied to petabytes of Parquet.
@@ -275,7 +275,7 @@ Iceberg tracks every column by a **stable ID** rather than by name or position, 
 
 1. **Reusing a field number.** Deleting `int32 age = 4` and later adding `string city = 4` makes every old message decode age bytes as city. Mark deleted tags `reserved` forever.
 2. **JSON numbers and 64-bit IDs.** JavaScript represents numbers as IEEE doubles — integers above 2⁵³ silently lose precision. Snowflake IDs and Twitter IDs must be sent as **strings** in JSON. This bug appears in production constantly.
-3. **proto3 scalar defaults hide "unset."** A `count = 0` is indistinguishable from "no count sent." Use `optional` (proto3.15+) or wrapper types when presence matters.
+3. **proto3 scalar defaults hide "unset."** A `count = 0` is indistinguishable from "no count sent." Use `optional` (protobuf 3.15+) or wrapper types when presence matters.
 4. **Floats for money.** Serialize amounts as integers in minor units (cents) or as decimal strings. Never as `float`/`double`.
 5. **Timestamps without zones.** `"2025-03-01 09:00"` means different instants in different offices. Use RFC 3339 with a UTC offset, or epoch milliseconds, and say which.
 6. **Unknown enum values crash old readers.** Adding `STATUS_PAUSED` breaks consumers that `switch` exhaustively without a default. Always handle the unknown case.
@@ -311,7 +311,7 @@ Iceberg tracks every column by a **stable ID** rather than by name or position, 
 
 1. A teammate deletes `int32 discount = 6` from a Protobuf message and a month later adds `string coupon_code = 6`. Nothing fails in tests. Explain what happens when a consumer reads a message written before the deletion, and what the `reserved` keyword would have prevented.
 2. Define backward and forward compatibility. Which one does a rolling deploy of *consumers* require, and which one does reprocessing a year of archived events require?
-3. Your mobile app displays wrong user IDs for about 1 in 20 users after you switched IDs to Snowflake format. The API returns them as JSON numbers. Diagnose the bug and fix the API contract.
+3. Your web app displays slightly wrong user IDs (the last few digits are off) for almost every user after you switched IDs to Snowflake format. The API returns them as JSON numbers. Diagnose the bug and fix the API contract.
 4. Compare Avro and Protobuf on the wire: why is Avro smaller, and what does that force you to provide at read time that Protobuf does not?
 5. A schema registry is configured with compatibility `BACKWARD` (not `_TRANSITIVE`). Describe a sequence of three schema versions that each pass the check but leave a consumer on version 1 broken.
 
@@ -326,5 +326,14 @@ Iceberg tracks every column by a **stable ID** rather than by name or position, 
 - [Tolerant Reader — Martin Fowler](https://martinfowler.com/bliki/TolerantReader.html) — the principle behind forgiving consumers.
 - [Apache Avro Specification — Schema Resolution](https://avro.apache.org/docs/current/specification/#schema-resolution) — how writer and reader schemas are reconciled.
 - [Apache Iceberg: Schema Evolution](https://iceberg.apache.org/docs/latest/evolution/) — column IDs for data lakes.
-- Previous: [08 — Authentication & Authorization](../08-Authentication-and-Authorization/README.md) · Next Level: [Level 04 — Distributed Systems](../../Level-04-Distributed-Systems/README.md) · Back to [Level 03 Overview](../README.md)
 - See also: [Schema Migrations](../../Level-02-Data-Layer/11-Schema-Migrations/README.md) · [Event-Driven Architecture](../../Level-05-Architecture-Patterns/02-Event-Driven-Architecture/README.md) · [Data Warehouses & Lakes](../../Level-07-Big-Data-and-Specialized/03-Data-Warehouses-and-Lakes/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Authentication & Authorization](../08-Authentication-and-Authorization/README.md) · 🏠 [Level 3 — Communication](../README.md) · ➡️ **Next:** [Level 4 — Distributed Systems](../../Level-04-Distributed-Systems/README.md)
+
+🧩 **See it applied in:** [15 · Google Maps](../../Bonus-Real-World-Architectures/15-Google-Maps/README.md) · [19 · Distributed Message Queue](../../Bonus-Real-World-Architectures/19-Distributed-Message-Queue/README.md)
+
+<!-- nav:end -->

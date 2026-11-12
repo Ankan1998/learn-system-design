@@ -2,7 +2,7 @@
 
 > A distributed file storage and synchronization service that lets users store, sync, and share files across devices and collaborators — reliably at petabyte scale.
 
-**Difficulty:** ⭐⭐⭐⭐ · **Builds on:** [Object Storage](../../Level-02-Data-Layer/README.md), [CDN](../../Level-06-Scale-and-Reliability/README.md), [Consistent Hashing](../../Level-02-Data-Layer/08-Consistent-Hashing/README.md)
+**Difficulty:** ⭐⭐⭐⭐ · **Builds on:** [Object Storage](../../Level-02-Data-Layer/09-Object-Storage/README.md), [CDN](../../Level-01-Building-Blocks/06-CDN/README.md), [Consistent Hashing](../../Level-02-Data-Layer/08-Consistent-Hashing/README.md)
 
 ---
 
@@ -19,7 +19,7 @@ You are designing a cloud file storage and sync service — think Google Drive o
 - Deduplication (don't store the same bytes twice)
 
 **Out of scope:**
-- Real-time collaborative editing (Google Docs mode — that's a separate CRDT/OT problem)
+- Real-time collaborative editing (Google Docs mode — that's a separate [CRDT](../../Level-04-Distributed-Systems/09-CRDTs-and-Conflict-Resolution/README.md)/OT problem)
 - Video streaming with adaptive bitrate
 - Full-text search inside documents
 
@@ -61,8 +61,8 @@ You are designing a cloud file storage and sync service — think Google Drive o
 
 ### Daily Upload Traffic
 
-- Each DAU uploads ~2 files/day, average size 5 MB
-- **Daily uploads:** 200M × 2 × 5 MB = **2,000 TB/day** ≈ **23 GB/s** raw ingress
+- Each DAU uploads ~10 files/day, average size 1 MB
+- **Daily uploads:** 200M × 10 × 1 MB = **2,000 TB/day** ≈ **23 GB/s** raw ingress
 
 With **block-level dedup** across all users (identical chunks are stored once):
 - Dedup ratio conservatively ~2×, so actual new bytes written ≈ **11.5 GB/s**
@@ -71,12 +71,12 @@ With **block-level dedup** across all users (identical chunks are stored once):
 
 - Each file record: ~500 bytes (name, path, owner, size, checksum, timestamps, version pointer)
 - 2B new files/day → **1 TB/day** of new metadata rows
-- Total metadata at 10 years: ~3.6 PB — fits comfortably in a sharded relational DB
+- Total metadata at 10 years: ~3.6 PB — far too big for one machine, but workable for a relational store sharded by user or namespace across a few thousand nodes
 
 ### Bandwidth
 
-- Downloads assume 3× read:write ratio → **34.5 GB/s** egress
-- CDN offloads ~80% of downloads → **origin egress: ~7 GB/s**
+- Downloads assume 3× read:write ratio on raw bytes (dedup doesn't shrink downloads) → **~69 GB/s** egress
+- CDN offloads ~80% of downloads → **origin egress: ~14 GB/s**
 
 ### Block Store Sizing
 
@@ -88,13 +88,13 @@ With **block-level dedup** across all users (identical chunks are stored once):
 
 ## 4. 🔌 API Design
 
-All endpoints require `Authorization: Bearer <token>` (OAuth 2.0).
+All endpoints require `Authorization: Bearer <token>` ([OAuth 2.0](../../Level-03-Communication/08-Authentication-and-Authorization/README.md)).
 
 ### Upload a Chunk (resumable, content-addressable)
 
 ```
 POST /v1/upload/initiate
-Body: { "file_name": "report.pdf", "total_size": 524288000, "chunk_count": 64, "checksum": "sha256:abc..." }
+Body: { "file_name": "report.pdf", "total_size": 524288000, "chunk_count": 63, "checksum": "sha256:abc..." }
 Response: { "upload_id": "ulid_xxx", "chunk_urls": ["https://upload.drive.example.com/chunk/ulid_xxx/0", ...] }
 ```
 
@@ -223,6 +223,8 @@ erDiagram
     USER ||--o{ SYNC_CURSOR : tracks
 ```
 
+*Caption: A file version is just an ordered list of block references, so identical blocks are shared across versions and users via ref counts.*
+
 ### Storage Justification
 
 | Layer | Technology | Why |
@@ -282,8 +284,8 @@ flowchart TD
     C1 & C2 & C3 -->|"large file bytes"| CDN
     CDN -->|"cache miss"| BLOCKSTORE
 
-    UL -->|"1. write blocks"| BLOCKSTORE
-    UL -->|"2. check dedup"| DEDUP
+    UL -->|"2. write blocks"| BLOCKSTORE
+    UL -->|"1. check dedup"| DEDUP
     UL -->|"3. update metadata"| METADB
     UL -->|"4. emit FileCreated/Modified"| KAFKA
 
@@ -314,6 +316,8 @@ flowchart TD
     style Cache fill:#fff9c4,color:#000
 ```
 
+*Caption: File bytes go straight between clients, CDN, and the Block Store, while only metadata and change events pass through the API layer and Kafka.*
+
 ### Numbered Walk-Through
 
 1. **Client authenticates** via Auth Service → receives a short-lived JWT.
@@ -325,7 +329,7 @@ flowchart TD
 7. Upload Service publishes a `FileModified` event to Kafka.
 8. **Sync Fanout Worker** reads the event, looks up all devices belonging to the file's collaborators, and wakes their long-poll connections via Redis pub/sub.
 9. **Other devices** receive the change notification through their `/v1/changes?cursor=...` long-poll and download only the changed chunks.
-10. **Download path**: Metadata Service issues a CDN-signed URL; the client fetches bytes directly from CDN edge (Block Store as origin fallback).
+10. **Download path**: Download Service issues a CDN-signed URL; the client fetches bytes directly from CDN edge (Block Store as origin fallback).
 
 ---
 
@@ -361,7 +365,7 @@ sequenceDiagram
 ```
 
 **Why content-addressable?**
-- Two users uploading the same 8 MB chunk of a popular PDF → stored once, referenced twice. Global dedup ratio at Dropbox has historically been reported at ~70%+ bytes saved.
+- Two users uploading the same 8 MB chunk of a popular PDF → stored once, referenced twice. How much this saves depends on the content mix: shared documents, installers, and re-uploads deduplicate very well, while personal photos and videos barely deduplicate at all.
 - Chunk identity is its SHA-256 hash. If a user renames a 10 GB video file, zero bytes move — only the metadata row changes.
 - Makes **delta sync** trivial: for a 1 GB file where you edit page 2, only the 1–2 chunks covering that page region are re-uploaded.
 
@@ -384,9 +388,9 @@ These are fundamentally different workloads — mixing them kills you.
 | Concern | Metadata Service | Block Store |
 |---|---|---|
 | Data shape | Structured rows (file trees, permissions, versions) | Opaque binary blobs |
-| Consistency | Strong (ACID — you never want "file exists" and "no chunks" to be simultaneously true) | Eventual (S3-style PUT eventually consistent is fine) |
+| Consistency | Strong (ACID — you never want "file exists" and "no chunks" to be simultaneously true) | Eventual is fine (blocks are immutable and content-addressed) |
 | Query patterns | Rich queries: "list all files in folder X shared with user Y, sorted by modified date" | Key-value: GET /blk/sha256:abc → bytes |
-| Scaling axis | Shard by user_id; read replicas for list queries | Distributed object store; erasure coding across AZs |
+| Scaling axis | Shard by user_id; [read replicas](../../Level-02-Data-Layer/01-Database-Replication/README.md) for list queries | Distributed object store; erasure coding across AZs |
 | Failure mode | Unavailable metadata → nothing works | Unavailable block → can still read metadata, queue download retry |
 
 The Metadata DB owns the **source of truth for the file tree**. Block Store is content-only. A file is only "complete" once the Metadata DB has a committed version row pointing to all its block IDs.
@@ -423,6 +427,8 @@ sequenceDiagram
     DeviceB->>BlockStore: Download only changed chunks
     DeviceB->>DeviceB: Reconstruct file from local cache + new chunks
 ```
+
+*Caption: Device B is only woken by a notification, then pulls the change list and downloads just the changed chunks rather than the whole file.*
 
 **Key design choices:**
 - **Long-polling** over persistent WebSockets: simpler to load balance; a 30-second timeout means a client re-connects ~2× per minute — perfectly fine at scale.
@@ -478,7 +484,7 @@ Deleting a file version reduces chunk ref counts. A **background GC worker** run
 1. Scan `FILE_VERSION` rows marked deleted older than 30 days.
 2. For each referenced `block_id`, decrement `ref_count`.
 3. Any block with `ref_count = 0` gets a DELETE from Block Store.
-4. Must be idempotent — GC crashes and restarts must not double-decrement.
+4. Must be [idempotent](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md) — GC crashes and restarts must not double-decrement.
 
 ### Failure Modes
 
@@ -487,7 +493,7 @@ Deleting a file version reduces chunk ref counts. A **background GC worker** run
 | Metadata DB primary failure | Uploads stall; downloads via cached metadata still work | Multi-AZ with automatic failover; ~30s RTO |
 | Block Store regional outage | Reads fail for that region | Erasure coding across regions; read from replica |
 | Kafka lag spike | Sync notifications delayed | Consumer group auto-scaling; alert on consumer lag > 10s |
-| Upload Service OOM on large file | Chunks are already in Block Store; client retries `complete` | Stateless service; completion is idempotent (same block IDs) |
+| Upload Service OOM on large file | Chunks are already in Block Store; client retries `complete` | [Stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md) service; completion is idempotent (same block IDs) |
 | Client dedup index corruption | Over-uploads (correctness unaffected) | Server re-validates checksums; client rebuilds index on startup |
 
 ---
@@ -500,7 +506,7 @@ Deleting a file version reduces chunk ref counts. A **background GC worker** run
 |---|---|---|
 | Dedup quality | Good for identical files | Excellent — works across insertions |
 | Implementation complexity | Low | Medium (need rolling hash) |
-| Who uses it | Simple implementations | Dropbox (since ~2013), Restic, Bup |
+| Who uses it | Simple implementations, Dropbox (4 MB blocks) | Restic, Bup, Borg |
 
 **Verdict:** For interview purposes, start with fixed 4–8 MB chunks. Mention content-defined chunking as an optimization for document editing workloads.
 
@@ -508,7 +514,7 @@ Deleting a file version reduces chunk ref counts. A **background GC worker** run
 
 | | Long-Poll | Server-Sent Events | WebSocket |
 |---|---|---|---|
-| Load balancer friendly | Yes (HTTP/1.1) | Yes | Requires sticky sessions or proxy support |
+| [Load balancer](../../Level-01-Building-Blocks/02-Load-Balancing/README.md) friendly | Yes (HTTP/1.1) | Yes | Requires sticky sessions or proxy support |
 | Firewall/proxy compatibility | Excellent | Good | Sometimes blocked |
 | Bi-directional | No | No | Yes |
 | Implementation complexity | Low | Low | Medium |
@@ -520,7 +526,7 @@ Deleting a file version reduces chunk ref counts. A **background GC worker** run
 - **Relational (PostgreSQL):** ACID, rich joins for permission checks, well-understood. Slightly harder to shard.
 - **Document (DynamoDB):** Near-infinite scale, but no joins — permission checks require denormalization or secondary indexes. More operational complexity for complex queries.
 
-**Verdict:** Start relational. Dropbox uses MySQL at scale; Google uses Spanner (globally distributed SQL).
+**Verdict:** Start relational. Dropbox runs its metadata on sharded MySQL (Edgestore); Google built Spanner, its globally distributed SQL database, for exactly this kind of workload.
 
 ---
 
@@ -528,15 +534,15 @@ Deleting a file version reduces chunk ref counts. A **background GC worker** run
 
 ### Dropbox
 
-- **Magic Pocket** (2016): Dropbox moved exabytes off AWS S3 onto its own in-house distributed block store. Cells of ~50 machines each hold ~1 EB of data with erasure coding (14+6 RS codes = ~43% overhead vs ~200% for 3-replica). Reduced storage cost by ~40%.
-- **Nucleus**: Dropbox's internal metadata store — a custom distributed MySQL cluster with Raft replication for the file tree.
+- **Magic Pocket** (2016): Dropbox moved ~500 PB off AWS S3 onto its own in-house distributed block store. Storage is organised into cells protected with erasure coding (14+6 RS codes = ~43% overhead vs ~200% for 3-replica). Dropbox's IPO filing credited the move with cutting infrastructure costs by about $75 million over two years.
+- **Edgestore**: Dropbox's internal metadata store — a graph-style store built on top of sharded MySQL.
 - **Block chunking**: 4 MB fixed-size blocks, SHA-256 fingerprinted, globally deduped. A block is immutable once written.
-- **Sync engine** (2019 rewrite): Rewritten from Python to Rust for performance. The client-side sync engine computes diffs locally and communicates changed block lists, not file bytes, to the server.
+- **Sync engine** (Nucleus, rolled out 2019–2020): Rewritten from Python to Rust for performance. The client-side sync engine computes diffs locally and communicates changed block lists, not file bytes, to the server.
 
 ### Google Drive
 
-- **Colossus**: Google's second-generation distributed file system (successor to GFS). Drive's blob content sits on Colossus; metadata lives in Spanner.
-- **Google Workspace integration**: Drive leverages Google's internal RPC framework (gRPC / Stubby) and pub/sub infrastructure (built on top of Chubby / Bigtable) for real-time change propagation.
+- **Colossus**: Google's second-generation distributed file system (successor to GFS). Drive's blob content sits on Colossus, with metadata in Google's distributed databases (the Bigtable and Spanner family).
+- **Google Workspace integration**: Drive leverages Google's internal RPC framework (Stubby, the ancestor of [gRPC](../../Level-03-Communication/03-gRPC-and-RPC/README.md)) and its internal messaging infrastructure for real-time change propagation.
 - **Chunk size**: Google Drive uses a variable chunk size depending on file type; Docs/Sheets/Slides use their own operational transform engine and don't go through the file chunking pipeline at all.
 - **Global dedup**: Applied within a user's storage quota calculation, and in some cases cross-user for identical blocks (policy varies by product tier).
 
@@ -559,6 +565,8 @@ The key insight that makes this system work is the **separation of metadata from
 
 ---
 
-**Related designs:**
-- Previous: [Airbnb Booking System](../13-Airbnb-Booking/README.md)
-- Next: [Google Maps](../15-Google-Maps/README.md)
+<!-- nav:start -->
+
+⬅️ **Previous:** [13 · Airbnb Booking](../13-Airbnb-Booking/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [15 · Google Maps](../15-Google-Maps/README.md)
+
+<!-- nav:end -->

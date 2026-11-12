@@ -29,9 +29,9 @@ By the end of this level you will be able to:
 
 Before starting this level you should be comfortable with:
 
-- **[Level-02 · Database Replication](../Level-02-Data-Layer/01-Database-Replication/README.md)** — leader/follower, lag, failover
-- **[Level-02 · Sharding and Partitioning](../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md)** — why data lives on multiple nodes
-- **[Level-02 · ACID and Transactions](../Level-02-Data-Layer/05-ACID-and-Transactions/README.md)** — what we're trying to preserve across machines
+- **[Level 2 · Database Replication](../Level-02-Data-Layer/01-Database-Replication/README.md)** — leader/follower, lag, failover
+- **[Level 2 · Sharding and Partitioning](../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md)** — why data lives on multiple nodes
+- **[Level 2 · ACID and Transactions](../Level-02-Data-Layer/05-ACID-and-Transactions/README.md)** — what we're trying to preserve across machines
 
 ---
 
@@ -39,8 +39,8 @@ Before starting this level you should be comfortable with:
 
 | Format | Time |
 |---|---|
-| Read-only (skim) | 4–6 hours |
-| Read + diagrams + notes | 8–12 hours |
+| Read-only (skim) | 5–7 hours |
+| Read + diagrams + notes | 10–14 hours |
 | Full mastery (test yourself) | 2–3 days |
 
 ---
@@ -113,7 +113,7 @@ flowchart TD
 2. **Draw diagrams from memory** after each topic. Raft especially only sticks when you can sketch it cold.
 3. **Connect to real systems.** Every topic names real databases/services — look them up in their own docs.
 4. **Use the "Test Yourself" sections** before moving on.
-5. **Return here after Level 05** (Architecture Patterns) — Saga in [Level-05-Architecture-Patterns/07-Saga-and-Orchestration](../Level-05-Architecture-Patterns/07-Saga-and-Orchestration/README.md) extends what you learn in Topic 04.
+5. **Return here after Level 5** (Architecture Patterns) — [Saga and Orchestration](../Level-05-Architecture-Patterns/07-Saga-and-Orchestration/README.md) extends what you learn in Topic 04.
 
 ---
 
@@ -147,3 +147,11 @@ flowchart LR
 ---
 
 *You're about to enter the deep end. Take it one topic at a time — and enjoy it. This is the stuff that makes distributed systems beautiful.*
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous level:** [Level 3 — Communication](../Level-03-Communication/README.md) · 🏠 [Curriculum home](../README.md) · ➡️ **Start this level:** [CAP Theorem](01-CAP-Theorem/README.md)
+
+<!-- nav:end -->

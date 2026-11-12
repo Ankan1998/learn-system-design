@@ -46,7 +46,7 @@ You're building the backend for a service like TinyURL or Bitly. Users paste a l
 | Property | Target |
 |---|---|
 | Availability | 99.99 % uptime (≤ 52 min downtime/yr) |
-| Redirect latency | p99 < 50 ms globally |
+| Redirect latency | [p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) < 50 ms globally |
 | Durability | Zero URL loss once written |
 | Write latency | p99 < 200 ms |
 | Read:write ratio | ~100 : 1 (reads dominate) |
@@ -223,7 +223,7 @@ Cache-Control: no-store
 **URLs → Cassandra (or DynamoDB)**
 
 The access pattern is 100% point lookups by `short_key`. You never need joins, transactions across rows, or complex queries. Cassandra gives you:
-- Linear write scalability via consistent hashing (see [Sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md))
+- Linear write scalability via [consistent hashing](../../Level-02-Data-Layer/08-Consistent-Hashing/README.md) (see [Sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md))
 - Tunable consistency — you can write at `QUORUM` for durability and read at `LOCAL_ONE` for speed
 - Multi-region replication built-in
 
@@ -295,15 +295,17 @@ flowchart TD
     class User user
 ```
 
+*Caption: Notice the three separate paths — redirects served via CDN and Redis before Cassandra, shortens drawing keys from KGS, and click events flowing asynchronously through Kafka to ClickHouse.*
+
 ### Request Flow Walk-through
 
 **Redirect (read path — the hot path):**
 1. Browser hits `GET tny.io/aB3kZ9`. CDN edge checks its cache.
-2. **CDN HIT** (for 301 redirects) — browser is redirected immediately, zero origin traffic. Otherwise, CDN forwards to the Load Balancer.
-3. Load balancer routes to any stateless API server (L7, round-robin or least-connections).
+2. **CDN HIT** (for 301 redirects) — browser is redirected immediately, zero origin traffic. Otherwise, CDN forwards to the [Load Balancer](../../Level-01-Building-Blocks/02-Load-Balancing/README.md).
+3. Load balancer routes to any [stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md) API server (L7, round-robin or least-connections).
 4. API server checks **Redis** for `aB3kZ9`.
 5. **Redis HIT** — returns the long URL, server emits a 302 redirect response. Also publishes a click event to Kafka asynchronously (fire-and-forget).
-6. **Redis MISS** — API server queries Cassandra by primary key. Sub-millisecond on a local replica. Writes result back to Redis (write-back caching), then responds.
+6. **Redis MISS** — API server queries Cassandra by primary key. Sub-millisecond on a local replica. Writes result back to Redis (cache-aside), then responds.
 
 **Shorten (write path):**
 1. Client POSTs `{ long_url, custom_alias?, ttl? }` to any API server.
@@ -325,7 +327,7 @@ Generating a globally unique, short, non-guessable key is the central problem. T
 
 ```
 MD5(long_url) → 128-bit hash
-Take first 43 bits → base62 encode → 7-char key
+Take first 41 bits → base62 encode → 7-char key
 ```
 
 Simple, but collisions are guaranteed at scale (birthday paradox). You'd need a retry loop: hash, check DB, if taken hash with a salt and retry. Under heavy write load this creates unpredictable latency spikes and DB read pressure on the write path.
@@ -363,7 +365,9 @@ flowchart LR
     class API api
 ```
 
-An offline batch job pre-generates all 6–7 char base62 combinations (~56 B unique keys for 7 chars) and stores them in a dedicated DB table. KGS loads batches of 10 K keys into memory, marking them used in the DB atomically (CAS / two-phase). API servers request a key via a cheap RPC — it's just a memory pop, no DB touch on the hot write path.
+*Caption: Notice that API servers only pop keys from the KGS in-memory buffer; the key-pool database is touched only when KGS claims a new batch.*
+
+A background job keeps a few days' worth of unused keys ahead of demand in a dedicated DB table: random 7-char base62 strings drawn from the ~3.5 T possible, de-duplicated against keys already issued. (Generating all 3.5 T up front would cost tens of terabytes for no benefit.) KGS loads batches of 10 K keys into memory, marking them used in the DB atomically (CAS / two-phase). API servers request a key via a cheap RPC — it's just a memory pop, no DB touch on the hot write path.
 
 **Failure handling:**
 - KGS holds keys in RAM: a crash loses at most one in-memory batch (10 K keys) — acceptable.
@@ -399,6 +403,8 @@ flowchart LR
     style B4 fill:#fef2f2,stroke:#dc2626,color:#000
 ```
 
+*Caption: Compare the two browsers — after a 301 the repeat visit never reaches the server, while every 302 repeat visit hits origin again.*
+
 | | 301 Permanent | 302 Temporary |
 |---|---|---|
 | Browser caches | Yes — client skips server forever | No — every click hits origin |
@@ -410,7 +416,7 @@ flowchart LR
 **The right answer depends on your use case:**
 - If you need accurate analytics → use **302**. The load is manageable with CDN + Redis.
 - If you want maximum performance and don't care about analytics → use **301** with a long `Cache-Control: max-age`.
-- Bitly uses **301** for standard links (performance) and a JavaScript beacon for analytics bypass.
+- Bitly uses **301** for standard links but with a short, private cache lifetime (`Cache-Control: private, max-age=90`) so repeat clicks still reach its servers for analytics.
 - If you care about both: serve **302** initially, collect analytics via an async beacon or edge function, then optionally upgrade to 301 after the first N clicks.
 
 ---
@@ -425,7 +431,7 @@ VALUES ('summer-sale', 'https://...', now())
 IF NOT EXISTS;
 ```
 
-This is a Paxos-backed CAS — only one writer wins. The loser gets a 409 Conflict response. LWTs have ~2× latency vs a regular write (requires a round of Paxos) — acceptable for the rare custom-alias write path.
+This is a Paxos-backed CAS — only one writer wins. The loser gets a 409 Conflict response. An LWT costs about four round trips between replicas (Paxos prepare, read, propose, commit) instead of one, so expect several times the latency of a regular write — acceptable for the rare custom-alias write path.
 
 For generated keys, there are no collisions by construction (KGS guarantees uniqueness), so you skip the LWT overhead entirely.
 
@@ -437,9 +443,9 @@ Expiration has two parts:
 
 **Serving expired links:** API servers check `expires_at` on every cache-miss DB read and return 410 Gone if expired. Redis TTL is set to match `expires_at` so cached entries auto-evict. No scan needed on the read path.
 
-**Storage reclamation:** A nightly background job (`DELETE WHERE expires_at < NOW() AND expires_at IS NOT NULL`) runs against Cassandra in batches of 1,000 rows with pacing (to avoid overwhelming compaction). Alternatively, Cassandra's native TTL column automatically tombstones rows — simpler but tombstones accumulate; periodic `nodetool compact` is needed.
+**Storage reclamation:** Cassandra cannot run `DELETE … WHERE expires_at < now()` (it has no way to find those rows without scanning the whole table), so use its native TTL instead: write each expiring row with `USING TTL <seconds>` and Cassandra removes it on its own. Expired cells become tombstones that ordinary compaction purges after `gc_grace_seconds` (10 days by default); for TTL-heavy tables, Time Window Compaction drops whole expired SSTables cheaply.
 
-Reclaimed `short_key` values can be returned to the KGS key pool (mark `is_used = false`) if you want to reuse 7-char space, or simply left retired (56 B keys is effectively infinite for realistic scale).
+Reclaimed `short_key` values can be returned to the KGS key pool (mark `is_used = false`) if you want to reuse 7-char space, or simply left retired (3.5 T keys is ~95 years at 36.5 B new URLs/yr).
 
 ---
 
@@ -451,9 +457,9 @@ Reclaimed `short_key` values can be returned to the KGS key pool (mark `is_used 
 | Write throughput | Cassandra nodes at capacity | Add nodes — Cassandra scales linearly. Or batch writes with a write buffer queue. |
 | KGS single point of failure | KGS crashes, writes stall | Active-active KGS pair with non-overlapping key ranges; client retries with exponential backoff |
 | Analytics write spike | Kafka consumer lag grows | Add Kafka partitions + more consumer workers; ClickHouse handles batched inserts well |
-| Cache stampede on popular new URL | First redirect floods DB | Probabilistic early expiration (PER) or a "lock and load" pattern — first miss acquires a distributed lock, fetches DB, warms cache; others spin briefly |
+| Cache stampede on popular new URL | First redirect floods DB | Probabilistic early expiration (PER) or a "lock and load" pattern — first miss acquires a [distributed lock](../../Level-04-Distributed-Systems/08-Distributed-Locking/README.md), fetches DB, warms cache; others spin briefly |
 | Region failure | Single-region Cassandra goes down | Multi-region Cassandra replication (NetworkTopologyStrategy, RF=3 per region); LB fails over to healthy region. See [Multi-Region](../../Level-06-Scale-and-Reliability/06-Multi-Region-and-Geo-Distribution/README.md) |
-| DB overload during cold start | Cache is empty after deploy | Pre-warm cache from a recent DB snapshot on startup; or accept briefly elevated DB load post-deploy with circuit breaker protecting the DB |
+| DB overload during cold start | Cache is empty after deploy | Pre-warm cache from a recent DB snapshot on startup; or accept briefly elevated DB load post-deploy with [circuit breaker](../../Level-05-Architecture-Patterns/06-Resilience-Patterns/README.md) protecting the DB |
 
 ---
 
@@ -491,19 +497,17 @@ Writing click events synchronously on the redirect path adds ~5–20 ms and risk
 
 ## 10. 🌐 How It's Actually Done
 
-**Bitly** shards its MySQL database by hash of the short key and uses a custom in-house KGS. Their 2014 blog post ("Lessons Learned from Building a Production URL Shortener") confirmed the read:write ratio of ~100:1 and heavy reliance on Memcached for the hot set.
+**Bitly** is built as many small services connected by asynchronous messaging — it created and open-sourced the NSQ message queue to carry click events between them. The redirect path does the bare minimum; analytics, spam checks, and everything else happen off the queue. That is the same split this design makes between the redirect and the analytics pipeline.
 
-**TinyURL** runs a simpler architecture: a counter-based key generator with a MySQL backend, sharded and read-replicated. They use Varnish for HTTP caching at the edge.
+**TinyURL** (2002) is the original. Its early links were handed out roughly in sequence, which made them short but guessable — the reason this design issues unpredictable keys instead.
 
-**Twitter's t.co** (acquired from their own URL shortener project) is notable for running click analytics *synchronously* on the redirect using a streaming pipeline — they prioritize analytics fidelity over the ~10 ms latency cost.
+**Twitter's t.co** wraps every link posted to the platform. Its main purposes are safety (each click passes through Twitter, so a link later found to be malicious can be blocked for everyone) and measurement. It is also why any URL counts as a fixed 23 characters toward the length of a post.
 
 **Relevant engineering posts:**
-- Bitly Engineering Blog — "Lessons Learned Building URL Shortener at Scale" (2014)
-- High Scalability — "How TinyURL Works" (architecture walkthrough)
-- AWS Blog — "Building a URL Shortener with API Gateway + DynamoDB + Lambda" (serverless approach)
-- Pinterest Engineering — "URL shortener design at Pinterest" (custom alias handling)
+- High Scalability — "Bitly: Lessons Learned Building a Distributed System that Handles 6 Billion Clicks a Month" (2014)
+- AWS Compute Blog — "Building a serverless URL shortener app without AWS Lambda" (2020; API Gateway + DynamoDB)
 
-**The serverless alternative:** API Gateway → Lambda → DynamoDB handles the MVP in an afternoon. DynamoDB's on-demand pricing and auto-scaling make it appealing for unpredictable traffic. The catch: cold starts add 50–200 ms on the redirect path and Lambda has a 15-min max execution limit (irrelevant here but illustrates serverless constraints).
+**The [serverless](../../Level-05-Architecture-Patterns/08-Serverless-Architecture/README.md) alternative:** API Gateway → Lambda → DynamoDB handles the MVP in an afternoon. DynamoDB's on-demand pricing and auto-scaling make it appealing for unpredictable traffic. The catch: cold starts add 50–200 ms on the redirect path and Lambda has a 15-min max execution limit (irrelevant here but illustrates serverless constraints).
 
 ---
 
@@ -517,8 +521,16 @@ A URL shortener is deceptively simple on the surface but forces you to make care
 - **Read path:** 302 redirect + Redis cache + CDN edge. The working set is only ~12 GB. Cache hit rates above 95% are realistic, dropping origin load to a tiny fraction of total QPS.
 - **Analytics:** Async via Kafka so the redirect is never blocked. A columnar store (ClickHouse) makes GROUP BY aggregations fast and cheap.
 - **Expiration:** Redis TTL handles cache auto-eviction; a nightly background job reclaims DB storage.
-- **Custom aliases:** Cassandra Lightweight Transactions (CAS) prevent race conditions with one round of Paxos — only needed on the rare custom-alias write path.
+- **Custom aliases:** Cassandra Lightweight Transactions (CAS) prevent race conditions using Paxos, at roughly four times the round trips of a normal write — only needed on the rare custom-alias write path.
 
 ### What made this one hard
 
 The challenge isn't any single component — it's the **read:write skew** (100:1) forcing you to build an aggressive, multi-layer caching strategy, combined with the **uniqueness requirement** at 100 B+ scale where simple hashing breaks down. Add the nuance of 301 vs 302 (performance vs analytics accuracy), the global low-latency requirement driving multi-region replication, and the thundering-herd problem on viral links — and you have a case study that touches nearly every distributed systems concept in the curriculum.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [All designs (overview)](../README.md) · ➡️ **Next:** [02 · Pastebin](../02-Pastebin/README.md)
+
+<!-- nav:end -->

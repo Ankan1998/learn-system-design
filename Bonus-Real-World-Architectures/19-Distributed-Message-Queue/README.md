@@ -11,7 +11,7 @@
 
 ## 1. 🎯 Problem & Scope
 
-Traditional message queues (RabbitMQ) delete messages after delivery. A log-based message queue never deletes — it appends every message to an ordered, immutable log. Consumers track their own position (offset) and can replay from any point.
+Traditional [message queues](../../Level-03-Communication/04-Message-Queues/README.md) (RabbitMQ) delete messages after delivery. A log-based message queue never deletes on consumption — it appends every message to an ordered, immutable log. Consumers track their own position (offset) and can replay from any point.
 
 This enables **decoupling at scale**: producers don't know about consumers; consumers can join days later and catch up; different teams can consume the same event stream for entirely different purposes (analytics, notifications, ML training).
 
@@ -19,7 +19,7 @@ We're designing the internals of **Apache Kafka**: brokers, topics, partitions, 
 
 **In scope:** message ingestion, partitioning, replication (ISR), consumer groups & offsets, retention, delivery semantics, controller & metadata.
 
-**Out of scope:** Kafka Streams/ksqlDB (stream processing built on top), Schema Registry, Kafka Connect connectors.
+**Out of scope:** Kafka Streams/ksqlDB (stream processing built on top), [Schema Registry](../../Level-03-Communication/09-Data-Serialization-and-Schema-Evolution/README.md), Kafka Connect connectors.
 
 ---
 
@@ -35,8 +35,8 @@ We're designing the internals of **Apache Kafka**: brokers, topics, partitions, 
 - Partition count and replication factor configurable per topic
 
 ### Non-Functional
-- Write throughput: **1 M messages/s** per cluster (100-byte messages)
-- End-to-end latency (producer → consumer): **< 10 ms** p99
+- Write throughput: **1 M messages/s** per cluster (~1 KB messages)
+- End-to-end latency (producer → consumer): **< 10 ms** [p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md)
 - Durability: messages survive loss of up to `replication_factor - 1` brokers
 - Ordering guarantee: **per-partition** total order
 - Delivery semantics: at-least-once by default; exactly-once available
@@ -49,7 +49,7 @@ We're designing the internals of **Apache Kafka**: brokers, topics, partitions, 
 **Write throughput**
 - 1 M messages/s × 1 KB avg = **1 GB/s** raw ingest
 - With replication factor 3 → 3 GB/s total network writes across cluster
-- Batch writes (producers batch 100 messages) → 10 000 batch writes/s per producer thread
+- Batch writes (producers batch 100 messages) → 10 000 batch writes/s cluster-wide
 
 **Storage**
 - 1 GB/s × 7 days retention = **~600 TB** total cluster storage
@@ -88,7 +88,7 @@ props.put("retries", Integer.MAX_VALUE);
 // Consumer API
 consumer.subscribe(Arrays.asList("user-events"));
 while (true) {
-    ConsumerRecords<String, String> records = consumer.poll(Duration.ofMs(100));
+    ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
     for (ConsumerRecord<String, String> record : records) {
         process(record.value());
     }
@@ -158,6 +158,8 @@ erDiagram
     BROKER ||--o{ PARTITION : "leads"
 ```
 
+*Caption: Notice offsets are tracked per consumer group and partition, independent of the topic data, which is why groups can replay at their own pace.*
+
 **Storage on broker disk:**
 - Each partition = directory of **segment files** (default 1 GB each)
 - Active segment is append-only; older segments immutable
@@ -208,6 +210,8 @@ flowchart TD
     class Meta meta
 ```
 
+*Caption: Notice each broker leads some partitions and follows others, producers write only to leaders, and the metadata store tracks leaders and ISR lists.*
+
 **Walk-through (producer write):**
 1. Producer fetches metadata (once, cached): learns Partition 0's leader is Broker 1.
 2. Producer batches messages locally (up to `batch.size` bytes or `linger.ms` time).
@@ -230,10 +234,10 @@ The core abstraction is beautiful: a partition is just a **directory of files**,
 /data/topics/user-events/partition-0/
     00000000000000000000.log    (segment: offsets 0 – 999 999)
     00000000000000000000.index
-    00000000001000000000.log    (segment: offsets 1M – 1.999 999M)
-    00000000001000000000.index
-    00000000002000000000.log    (active segment, append-only)
-    00000000002000000000.index
+    00000000000001000000.log    (segment: offsets 1M – 1.999 999M)
+    00000000000001000000.index
+    00000000000002000000.log    (active segment, append-only)
+    00000000000002000000.index
 ```
 
 **Why sequential writes?** A modern HDD does **200 MB/s sequential** but only **~100 random writes/s** (7200 RPM). By only ever appending, Kafka saturates HDD throughput without SSDs.
@@ -291,7 +295,7 @@ flowchart LR
 
 ### 7.3 ISR Replication & Leader Election
 
-**In-Sync Replicas (ISR)** = the set of replicas that are "caught up" with the leader (within `replica.lag.time.max.ms = 10 s`).
+**In-Sync Replicas (ISR)** = the set of replicas that are "caught up" with the leader (within `replica.lag.time.max.ms`, default 30 s).
 
 ```
 ISR for Partition 0: [Broker1 (leader), Broker2, Broker3]
@@ -309,7 +313,7 @@ Producer acks=0:   fire-and-forget (best throughput, possible loss)
 
 **Out-of-sync replica:** If Broker 3 lags > `replica.lag.time.max.ms`, it's removed from ISR. Writes proceed with ISR = [Broker1, Broker2]. When Broker 3 catches up, it rejoins ISR. This prevents a slow replica from blocking producers.
 
-**Unclean leader election:** If all ISR replicas die, Kafka can optionally elect an out-of-ISR replica (`unclean.leader.election.enable=true`). This trades durability for availability — the elected replica may be missing committed messages. Default is `false` (prefer correctness).
+**Unclean [leader election](../../Level-04-Distributed-Systems/05-Leader-Election/README.md):** If all ISR replicas die, Kafka can optionally elect an out-of-ISR replica (`unclean.leader.election.enable=true`). This trades durability for availability — the elected replica may be missing committed messages. Default is `false` (prefer correctness).
 
 ### 7.4 Delivery Semantics & Exactly-Once
 
@@ -341,16 +345,16 @@ Consumers with `isolation.level=read_committed` only see messages from committed
 | Bottleneck | Symptom | Mitigation |
 |---|---|---|
 | Hot partition | One partition receives 90% of writes | Use message keys with better cardinality; custom partitioner; increase partition count |
-| Controller overload | Slow leader elections; metadata delays | KRaft removes ZooKeeper bottleneck; controller is now a Raft group of 3+ brokers |
+| Controller overload | Slow leader elections; metadata delays | KRaft removes ZooKeeper bottleneck; controller is now a [Raft](../../Level-04-Distributed-Systems/03-Consensus-Paxos-Raft/README.md) group of 3+ brokers |
 | Consumer lag | Consumer group falls behind producer | Add consumers (up to partition count); optimize consumer processing; scale downstream |
-| Disk full | Broker stops accepting writes | Monitor disk; increase retention on hot topics to auto-delete; expand cluster |
+| Disk full | Broker stops accepting writes | Monitor disk; reduce retention on hot topics to auto-delete; expand cluster |
 | Rebalance storm | Slow consumer triggers frequent rebalances | Increase `session.timeout.ms`; use incremental cooperative rebalancing; optimize consumer poll loop |
 
 **Failure modes:**
-- **Broker crash (not controller)** → ISR replicas elect new leader in ~30 s (configurable); producer retries transparently; consumers lag temporarily.
-- **Controller crash** → KRaft Raft group elects new controller in ~5 s; no data loss.
-- **Network partition** → minority brokers become followers only; writes go to majority shard; heals on partition resolve.
-- **Full ISR loss (all replicas dead)** → topic partition unavailable until a broker restarts; unclean election possible if configured.
+- **Broker crash (not controller)** → the controller notices the lost broker session (9 s by default under KRaft) and promotes an in-sync replica to leader for each affected partition within seconds; producers retry transparently; consumers stall briefly.
+- **Controller crash** → the KRaft quorum elects a new active controller within seconds; no data loss, and partitions keep serving in the meantime.
+- **Network partition** → a leader cut off from the controller and its followers shrinks its ISR and, with `acks=all` and `min.insync.replicas=2`, rejects the writes it cannot replicate; the majority side elects new leaders and keeps going. When the partition heals, the stale replicas truncate their divergent tail and catch up.
+- **Full ISR loss (all in-sync replicas dead)** → the partition is unavailable until one of them restarts; an out-of-sync replica can take over only if unclean leader election is enabled, at the cost of losing acknowledged messages.
 
 ---
 
@@ -372,7 +376,7 @@ Consumers with `isolation.level=read_committed` only see messages from committed
 
 **KRaft mode (Kafka 3.3+):** removes the ZooKeeper dependency entirely. The controller quorum is 3 brokers running Raft consensus. Metadata is stored in a dedicated `__cluster_metadata` topic, enabling much faster controller failover (~milliseconds vs. 30+ seconds with ZooKeeper).
 
-**Confluent** (commercial Kafka): adds schema registry, Kafka Streams, ksqlDB, and Tiered Storage (offload old segments to S3, store only recent data on local disk).
+**Confluent** (commercial Kafka): adds schema registry, ksqlDB, and Tiered Storage (offload old segments to S3, store only recent data on local disk).
 
 **AWS Kinesis** takes a similar partition (shard) + offset approach but limits shard throughput to 1 MB/s write / 2 MB/s read and manages infrastructure for you.
 
@@ -393,3 +397,11 @@ Consumers with `isolation.level=read_committed` only see messages from committed
 | Controller | KRaft Raft group (3 brokers); no ZooKeeper in Kafka 3.3+ |
 
 The genius of Kafka is that an **append-only log** — the simplest possible durable data structure — turns out to be exactly the right abstraction for event streaming: it's fast (sequential I/O), replayable (seek to any offset), multi-consumer (each group tracks its own position), and naturally ordered within a partition.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [18 · Distributed Cache](../18-Distributed-Cache/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [20 · Ad Click Aggregator](../20-Ad-Click-Aggregator/README.md)
+
+<!-- nav:end -->

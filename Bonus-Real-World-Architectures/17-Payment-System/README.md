@@ -34,7 +34,7 @@ We're designing a **Stripe-like payment processing platform**: merchants integra
 ### Non-Functional
 - **Zero double-charges** — retries must be idempotent
 - **Exactly-once ledger entries** — every debit has a matching credit
-- Charge API p99 latency **< 800 ms** (PSP round-trip dominates)
+- Charge API [p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) latency **< 800 ms** (PSP round-trip dominates)
 - **99.999% availability** (5 nines) for charge creation
 - Financial data must be **strongly consistent** — no eventual consistency on money
 - PCI-DSS Level 1 compliance; card data never touches merchant servers
@@ -176,6 +176,8 @@ erDiagram
     IDEMPOTENCY_KEY }o--|| MERCHANT : "scoped to"
 ```
 
+*Caption: Notice that every money-related entity hangs off CHARGE, while idempotency keys are scoped per merchant so retries dedupe within one merchant's namespace.*
+
 **Storage choices:**
 - **PostgreSQL** — CHARGE, LEDGER_ENTRY, REFUND: ACID transactions, row-level locks, strong consistency. Sharded by `merchantId` for write scale.
 - **Redis** — IDEMPOTENCY_KEY store: TTL-based expiry, sub-millisecond lookup, ~38 GB fits comfortably
@@ -233,6 +235,8 @@ flowchart TD
     class PSP,Bank,Merchant ext
     class APIGW,Vault infra
 ```
+
+*Caption: Notice the idempotency layer sits before the Charge Service, and card data reaches the PSP only through the Vault's PCI boundary.*
 
 **Walk-through (successful charge):**
 1. Merchant POSTs `/v1/charges` with `Idempotency-Key: order-abc-001`.
@@ -295,20 +299,22 @@ sequenceDiagram
     API-->>M: 200 ch_xyz (same response, no new charge)
 ```
 
+*Caption: The first request claims the key and does the work, and the retry finds the stored result and returns it without touching the payment provider again.*
+
 ### 7.2 Double-Entry Ledger
 
 Every financial transaction is recorded as **balanced debit/credit pairs**. This is a 500-year-old accounting principle that makes bugs visible: if debits ≠ credits, something is wrong.
 
-**Example: $20 charge with $0.58 Stripe fee**
+**Example: $20 charge with $0.58 processing fee**
 
 | account | entry_type | amount |
 |---|---|---|
 | customer:cust_abc | DEBIT | +$20.00 |
-| merchant:merch_xyz | CREDIT | +$19.42 |
+| merchant:merch_xyz | CREDIT | +$20.00 |
+| merchant:merch_xyz | DEBIT | +$0.58 |
 | revenue:fees | CREDIT | +$0.58 |
-| liability:pending_settlement | DEBIT | +$20.00 |
 
-Sum of debits = Sum of credits = $20.00. ✓
+Sum of debits = Sum of credits = $20.58. ✓
 
 The ledger is **append-only** — entries are never updated or deleted. A refund is a new set of offsetting entries, not a deletion. This creates a complete audit trail.
 
@@ -331,7 +337,7 @@ flowchart LR
 
 ### 7.3 The Authorize → Capture Saga
 
-For physical goods (e.g., hotel, car rental), merchants authorize at booking but capture at delivery. The authorize and capture are two separate PSP calls, separated by hours or days.
+For delayed fulfillment (e.g., hotel, car rental), merchants authorize at booking but capture at delivery. The authorize and capture are two separate PSP calls, separated by hours or days.
 
 This is a **distributed saga** (see [Saga Pattern](../../Level-05-Architecture-Patterns/07-Saga-and-Orchestration/README.md)):
 
@@ -369,15 +375,15 @@ Reconciliation runs on S3-stored batch files using a Spark job, joining ~5 M row
 
 | Bottleneck | Symptom | Mitigation |
 |---|---|---|
-| PSP latency | 95th percentile charge latency degrades | Circuit breaker; async capture with webhook; multiple PSP providers |
-| Ledger write hot spots | High-revenue merchants → hot DB shard | Shard ledger by `accountId` hash, separate from charge shard |
+| PSP latency | 95th percentile charge latency degrades | [Circuit breaker](../../Level-05-Architecture-Patterns/06-Resilience-Patterns/README.md); async capture with webhook; multiple PSP providers |
+| Ledger write hot spots | High-revenue merchants → hot DB shard | Keep each charge and its ledger entries on the merchant's shard (one local transaction), give very large merchants a dedicated shard, and move balance aggregation off the hot path into an async rollup |
 | Idempotency key lookup | Redis becomes bottleneck | Redis Cluster; key scoped per merchant (data locality) |
 | Webhook delivery | Slow merchant endpoint backs up queue | Per-merchant delivery queue; timeout after 10 s; max 5 retries |
 | Reconciliation lag | Discrepancies undetected for 24h | Supplement batch with real-time PSP webhook events |
 
 **Failure modes:**
 - **PSP timeout during authorization** — CHARGE stays PENDING; idempotency key in PROCESSING; sweeper times out and marks FAILED; client gets clear error on retry.
-- **Server crash after PSP auth, before ledger write** — On restart, CHARGE is PENDING with PSP shows AUTHORIZED; reconciliation detects this; manual remediation or automated void.
+- **Server crash after PSP auth, before ledger write** — On restart, CHARGE is PENDING while PSP shows AUTHORIZED; reconciliation detects this; manual remediation or automated void.
 - **Idempotency Redis failure** — Fall back to DB-based idempotency table (slower, but correct). Pre-provision DB table as fallback.
 
 ---
@@ -390,13 +396,13 @@ Reconciliation runs on S3-stored batch files using a Spark job, joining ~5 M row
 | Ledger storage | Relational (PostgreSQL) | Append-only Kafka log | Relational joins needed for balance queries and reconciliation |
 | Idempotency store | Redis (fast) | DB table | Sub-ms dedup check; DB fallback for Redis failure |
 | PSP integration | Synchronous auth + async webhook | Fully async | Sync gives immediate user feedback; webhook for reliability |
-| Shard key | `merchantId` | `chargeId` | All merchant data co-located for balance queries; hot merchant mitigated by DB routing layer |
+| [Shard key](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md) | `merchantId` | `chargeId` | All merchant data co-located for balance queries; hot merchant mitigated by DB routing layer |
 
 ---
 
 ## 10. 🌐 How It's Actually Done
 
-**Stripe** uses a MySQL-based (InnoDB) system with a custom sharding layer called Vitess. Their idempotency implementation is exactly as described — idempotency keys stored with PROCESSING/COMPLETE states, scoped to the API version and endpoint.
+**Stripe** stores its core data in DocDB, an in-house database-as-a-service built on MongoDB with a custom sharding and data-movement layer. Their idempotency implementation is exactly as described — idempotency keys stored with PROCESSING/COMPLETE states, scoped to the API version and endpoint.
 
 **Stripe's ledger** is described in public talks as a double-entry bookkeeping system with append-only rows. They perform a "ledger check" where total debits must equal total credits; any imbalance triggers an immediate incident.
 
@@ -417,6 +423,14 @@ Reconciliation runs on S3-stored batch files using a Spark job, joining ~5 M row
 | PSP integration | Sync auth + async capture webhook; circuit breaker; multiple PSPs |
 | Auth→capture flow | Distributed saga with compensating void on failure/expiry |
 | Reconciliation | Nightly batch join (PSP CSV vs. DB) + real-time webhook cross-check |
-| PCI compliance | Card Vault tokenization at the TLS edge; PAN never in application layer |
+| PCI compliance | Card Vault tokenization at the [TLS](../../Level-00-Foundations/06-HTTP-and-HTTPS/README.md) edge; PAN never in application layer |
 
 The two non-negotiable pillars are **idempotency** (no double charges on retry) and **double-entry ledger** (every dollar has a matching debit and credit). Every other design decision flows from these two correctness requirements.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [16 · Ticketmaster](../16-Ticketmaster/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [18 · Distributed Cache](../18-Distributed-Cache/README.md)
+
+<!-- nav:end -->

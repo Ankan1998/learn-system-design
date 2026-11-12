@@ -17,7 +17,7 @@ A stock exchange is the most demanding correctness-and-latency combination in so
 
 - Every order must be processed in **strict time-priority** order (price-time priority).
 - A matching error — a trade reported but not executed, or executed twice — is a regulatory violation with real financial consequences.
-- Latency is a competitive moat: major exchanges (NASDAQ, NYSE, LSE) advertise **nanosecond-to-microsecond** order-to-acknowledgment times.
+- Latency is a competitive moat: major exchanges (NASDAQ, NYSE, LSE) advertise order-to-acknowledgment times measured in **tens of microseconds**.
 - Thousands of market participants (brokers, HFTs, market makers) connect simultaneously and receive real-time **market data feeds**.
 
 We design the core matching engine and supporting systems used by an exchange like **NASDAQ**, **LMAX**, or **Cboe**.
@@ -36,8 +36,8 @@ We design the core matching engine and supporting systems used by an exchange li
 - Maintain a complete **audit trail** for regulatory compliance.
 
 ### Non-Functional
-- **Latency:** order-to-acknowledgment p99 < 1 ms (software matching); LMAX achieves < 1 µs for hardware-accelerated paths.
-- **Throughput:** 1,000,000 orders/s per instrument; 10,000+ instruments simultaneously.
+- **Latency:** order-to-acknowledgment [p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) < 1 ms (software matching); FPGA-accelerated gateways and market-data paths reach single-digit microseconds.
+- **Throughput:** 1,000,000 orders/s across all instruments; 10,000+ instruments simultaneously.
 - **Correctness:** zero double-fills, zero missed matches, strict price-time priority.
 - **Availability:** 99.999 % during market hours; planned maintenance only during off-hours.
 - **Durability:** every order and trade persisted to replicated storage before acknowledgment.
@@ -57,9 +57,9 @@ Order message size:             ~200 bytes (FIX protocol fields)
 Inbound throughput:             1M × 200 B = 200 MB/s ingest
 
 Market data fan-out:
-  10,000 instruments × 10 book updates/order ≈ 100,000 book events/s
+  1M orders/s × ~1 book update/order ≈ 1,000,000 book events/s
   5,000 connected market-data subscribers
-  Total fan-out: 100,000 × 5,000 = 500 M messages/s  (use multicast UDP)
+  Total fan-out: 1,000,000 × 5,000 = 5 B messages/s  (use multicast UDP)
 
 Audit log:
   1M orders/s + 500k trades/s = 1.5M records/s × 500 bytes = 750 MB/s
@@ -151,10 +151,12 @@ erDiagram
     ORDER_BOOK_LEVEL ||--o{ ORDER : "contains"
 ```
 
+*Caption: Notice orders and trades both carry a sequence number, the field that makes replay deterministic, while book levels aggregate resting orders per price.*
+
 **Storage choices:**
 - **Order book (in-memory)** — custom C++ `std::map<price, queue<Order>>` per instrument per side; never touches disk on the hot path.
-- **Event log (journal)** — append-only file on NVMe RAID (fsync per entry); replicated to standby via Raft/Paxos. This is the source of truth.
-- **Trade & order history** — Apache Kafka → relational DB (PostgreSQL / Oracle) for T+2 settlement and regulatory reporting.
+- **Event log (journal)** — append-only file on NVMe RAID (fdatasync per entry); replicated to standby via Raft/Paxos. This is the source of truth.
+- **Trade & order history** — Apache Kafka → relational DB (PostgreSQL / Oracle) for T+1 settlement and regulatory reporting.
 - **Market data** — Aeron / custom multicast UDP ring buffer; low-latency fan-out to subscribers.
 
 ---
@@ -193,7 +195,7 @@ flowchart TD
     subgraph BackOffice["Back Office"]
         TradeDB[("Trade & Order DB<br/>PostgreSQL")]:::store
         RiskMgr["Risk & Compliance<br/>Reporting"]:::svc
-        MatchSvc["Settlement<br/>(T+2)"]:::svc
+        MatchSvc["Settlement<br/>(T+1)"]:::svc
     end
 
     HFT -->|FIX/OUCH orders| OGW
@@ -220,6 +222,8 @@ flowchart TD
     classDef match fill:#fff0cc,stroke:#cc9900,color:#000
     classDef ext fill:#eeeeee,stroke:#888888,color:#000
 ```
+
+*Caption: Notice every order passes through one Sequencer into a single-threaded engine, whose journal feeds standbys and back office while market data leaves by multicast.*
 
 **Walk-through:**
 1. A broker sends a FIX `NewOrderSingle` to the **Order Gateway**, which authenticates, validates risk limits, and forwards to the **Sequencer**.
@@ -300,6 +304,8 @@ flowchart LR
     Journal -->|read & persist| E0
 ```
 
+*Caption: One producer and several consumers share a pre-allocated ring, each advancing its own cursor, so no locks and no queues sit between the gateway, the matching engine, market data, and the journal.*
+
 Key properties:
 - **Single writer principle:** the Matching Engine is the only thread that mutates the order book. No locks needed.
 - **Ring buffer:** pre-allocated, cache-line padded slots prevent false sharing. Producers claim slots with a CAS on a sequence counter.
@@ -310,7 +316,7 @@ Additional latency techniques:
 - **Kernel bypass networking:** DPDK or Solarflare OpenOnload — skip kernel TCP stack, save 5–10 µs.
 - **CPU pinning:** matching engine thread pinned to an isolated core; OS scheduler never interrupts it.
 - **Busy-wait / spin-wait** instead of `epoll`/`select`.
-- **FPGA offload** (NASDAQ, Cboe): order parsing and simple matching in hardware for sub-microsecond paths.
+- **FPGA offload:** exchanges and trading firms move feed handling, order parsing, and risk checks into hardware for single-digit-microsecond paths (sub-microsecond at the fastest trading firms).
 
 ---
 
@@ -337,6 +343,8 @@ sequenceDiagram
     Note over ME,SB: On primary failure: standby has all events<br/>promotes to primary, resumes from seq=4423
 ```
 
+*Caption: Notice each event is journaled and replicated before the execution report goes out, so a standby can take over at the next sequence number.*
+
 **Event Sourcing is the bedrock:** the journal is the system. The in-memory order book is just a projection. On any crash, rebuild the book by replaying the journal from the beginning (or from the last checkpoint). This guarantees:
 - **Exactly-once trades:** a trade event written to the journal once is the single authoritative record.
 - **Auditability:** every state change is in the append-only log, immutable.
@@ -356,7 +364,7 @@ sequenceDiagram
 flowchart LR
     ME["Matching Engine"]
     MDF["Market Data<br/>Feed Handler"]
-    MC["Multicast UDP<br/>Group 224.0.1.1:5000<br/>(AAPL)"]
+    MC["Multicast UDP<br/>Group 239.1.1.1:5000<br/>(AAPL)"]
     P1["Participant 1<br/>(joined multicast group)"]
     P2["Participant 2"]
     P3["Participant 3"]
@@ -369,6 +377,8 @@ flowchart LR
     MC -->|network delivers copies| P3
     MC -->|network delivers copies| PN
 ```
+
+*Caption: The feed handler sends each update once and the network copies it to every subscriber, so the thousandth participant costs the exchange nothing extra.*
 
 - One UDP packet → network replicates to all subscribers (L2/L3 multicast).
 - Packet loss is handled by **sequence numbers + retransmission channel** (participants detect gaps, request retransmit from a snapshot server).
@@ -385,14 +395,14 @@ flowchart LR
 | Market data fan-out | Multicast UDP; hierarchical feed handlers in colo facilities |
 | Journal write latency | NVMe SSD with battery-backed write cache; fdatasync per event (not fsync) |
 | Standby lag during replication | Synchronous replication to one standby; async to second; primary acks after sync write |
-| Sequencer as SPOF | Active-active sequencer with Raft consensus on sequence allocation |
+| Sequencer as SPOF | Primary plus hot-standby sequencer: every sequenced message is replicated to the standby (or a small Raft group) before it is released, so the standby can take over at the exact sequence number. Never two active sequencers |
 | Memory for 10k instruments | 500 GB total; use NUMA-aware allocation; each ME pinned to its NUMA node |
 | Order validation latency | Pre-trade risk checks on the gateway (not the ME); ME is a pure matching machine |
 
 **Failure modes:**
 - ME crashes mid-trade: journal guarantees the trade event either exists (committed) or doesn't (no ack sent); gateway retries; idempotency key (sequence num) prevents double execution.
 - Journal disk failure: RAID-1 on NVMe + synchronous replication to standby; no data loss.
-- Network partition between primary and standby: Raft ensures only the partition with quorum promotes to primary (no split-brain).
+- Network partition between primary and standby: Raft ensures only the partition with quorum promotes to primary (no [split-brain](../../Level-04-Distributed-Systems/05-Leader-Election/README.md)).
 - Sequencer failure: Raft election of new sequencer in < 1 s; brief order rejection during election.
 
 ---
@@ -404,24 +414,24 @@ flowchart LR
 | ME threading model | Single-threaded (LMAX Disruptor) | Multi-threaded with fine-grained locking | Single-threaded eliminates all lock contention; deterministic; easier to audit |
 | Order book structure | `std::map` (red-black tree) | Skip list / array of price levels | `std::map` O(log N) insert/delete; skip list has better cache performance; array fastest if price range bounded |
 | Replication | Synchronous to 1 standby | Async (performance) / Synchronous to all (durability) | 1 sync + 1 async balances latency and durability |
-| Market data | Multicast UDP | Kafka / pub-sub | Multicast achieves fan-out in < 1 µs vs. Kafka's milliseconds; no broker bottleneck |
-| Protocol | FIX / OUCH / SBE | REST / gRPC | FIX is the industry standard; OUCH/SBE are exchange-proprietary for lowest latency |
+| Market data | Multicast UDP | Kafka / pub-sub | Multicast fans out inside the network switches, adding microseconds instead of a broker's milliseconds; no broker bottleneck |
+| Protocol | FIX / OUCH / SBE | REST / [gRPC](../../Level-03-Communication/03-gRPC-and-RPC/README.md) | FIX is the industry standard; OUCH/SBE are exchange-proprietary for lowest latency |
 
 ---
 
 ## 10. 🌐 How It's Actually Done
 
-**NASDAQ** uses a custom Linux-based matching engine written in C++, with FPGA-based order parsing at the network layer. They publish latency statistics showing median order acknowledgment times of ~74 µs.
+**NASDAQ** runs its markets on the INET matching platform, handles orders in tens of microseconds, and licenses its exchange technology to more than a hundred other marketplaces.
 
 **LMAX Exchange** published the Disruptor pattern (2011) and demonstrated a Java-based exchange achieving 6 million TPS at < 1 ms latency using lock-free ring buffers, mechanical sympathy, and single-writer principle. Their white paper is required reading.
 
-**London Stock Exchange (MillenniumIT)** migrated from a legacy system to a Linux/C++ matching engine in 2011, reducing latency from ~40 ms to < 125 µs. The MillenniumIT platform now powers 40+ exchanges worldwide.
+**London Stock Exchange (MillenniumIT)** migrated from its .NET-based TradElect system to a Linux/C++ matching engine in 2011, cutting latency from a few milliseconds to about 125 µs. The same platform is used by other exchanges around the world.
 
 **CME Globex** handles futures and derivatives, processing 3+ billion messages per day. They use a centralised matching engine with co-location facilities where HFT firms pay to place servers within meters of the exchange's matching hardware.
 
-**Cboe** and **BATS** run FPGA-based order matching for their fastest paths, bypassing software entirely for simple limit order matching. Software matching is reserved for complex order types.
+**Cboe** (which acquired **BATS** in 2017) runs FPGA-based order matching for their fastest paths, bypassing software entirely for simple limit order matching. Software matching is reserved for complex order types.
 
-**Event sourcing** is universal: every major exchange maintains an immutable audit log (often called the "trade report" or "order audit trail") required by regulators (SEC Rule 17a-4, ESMA MiFID II).
+**Event sourcing** is universal: every major exchange maintains an immutable audit log (often called the "trade report" or "order audit trail") required by regulators (SEC record-keeping rules and the Consolidated Audit Trail in the US, MiFID II in the EU).
 
 ---
 
@@ -436,3 +446,11 @@ A stock exchange is event sourcing taken to its extreme — where correctness is
 5. **Multicast UDP** for market data — the only way to fan out to thousands of subscribers at microsecond latency.
 
 In a senior interview, the single most important insight is: **the Matching Engine must be single-threaded and deterministic**. Any attempt to parallelise it introduces non-determinism that breaks price-time priority and auditability.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [23 · Distributed Counter & Analytics](../23-Distributed-Counter-Analytics/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [25 · Live Streaming (Twitch / YouTube Live)](../25-Live-Streaming/README.md)
+
+<!-- nav:end -->

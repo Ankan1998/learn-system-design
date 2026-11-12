@@ -25,9 +25,30 @@
   min-height: 2rem;
 }
 
+/* Without JavaScript nothing will ever render, so show the source instead
+   of hiding it forever. (Material swaps .no-js for .js once scripts run.) */
+.no-js .mermaid-diagram:not(.mermaid-rendered):not(.mermaid-failed) {
+  visibility: visible;
+  display: block;
+  white-space: pre;
+  font-family: var(--md-code-font-family, monospace);
+  font-size: 0.7rem;
+}
+
 .mermaid-diagram svg {
   max-width: 100%;
   height: auto;
+}
+
+/* Rendered diagrams open full-screen on click (see mermaid-init.js). */
+.mermaid-diagram.mermaid-rendered {
+  cursor: zoom-in;
+  border-radius: 0.2rem;
+}
+
+.mermaid-diagram.mermaid-rendered:focus-visible {
+  outline: 0.12rem solid var(--md-accent-fg-color);
+  outline-offset: 0.2rem;
 }
 
 .mermaid-diagram.mermaid-failed {
@@ -37,6 +58,43 @@
   padding: 0.8rem 1rem;
   border-radius: 0.15rem;
   font-size: 0.75rem;
+}
+
+.mermaid-diagram.mermaid-failed pre {
+  margin: 0.4rem 0 0;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.mermaid-zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 2vh 2vw 3rem;
+  overflow: auto;
+  cursor: zoom-out;
+  background-color: var(--md-default-bg-color);
+}
+
+.mermaid-zoom__hint {
+  position: fixed;
+  bottom: 0.8rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.25rem 0.8rem;
+  border-radius: 1rem;
+  font-size: 0.65rem;
+  color: var(--md-default-bg-color);
+  background-color: var(--md-default-fg-color--light);
+  pointer-events: none;
+}
+
+@media print {
+  .mermaid-zoom {
+    display: none;
+  }
 }
 
 /* Wide tables (trade-off matrices, cheat sheets) scroll on their own. */
@@ -83,9 +141,4 @@
   .md-grid {
     max-width: 68rem;
   }
-}
-
-/* Progress-tracker checkboxes read better a touch larger. */
-.md-typeset .task-list-indicator::before {
-  transform: scale(1.1);
 }

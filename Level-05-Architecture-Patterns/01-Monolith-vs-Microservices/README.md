@@ -2,7 +2,7 @@
 
 > A **monolith** is a single deployable unit containing all your application's functionality. **Microservices** decompose that into independently deployable services, each owning a focused business capability.
 
-**Level:** 5 · **Topic:** 1 · **Prerequisites:** [Level 01 Fundamentals](../../Level-01-Building-Blocks/README.md) · [Distributed Transactions](../../Level-04-Distributed-Systems/04-Distributed-Transactions/README.md)
+**Level:** 5 · **Topic:** 1 · **Prerequisites:** [Level 1 — Building Blocks](../../Level-01-Building-Blocks/README.md) · [Distributed Transactions](../../Level-04-Distributed-Systems/04-Distributed-Transactions/README.md)
 
 ---
 
@@ -200,9 +200,9 @@ flowchart LR
 
 **Amazon (2001–2004):** Started as a monolith ("the obidos" system). As they scaled to hundreds of engineers, teams were blocking each other constantly. Jeff Bezos issued the famous "API Mandate" memo in 2002: every team must expose data and functionality only through service interfaces, with no other allowed communication. This forced microservices adoption and eventually produced AWS itself.
 
-**Netflix (2008–2012):** Netflix's monolith had a catastrophic database corruption incident in 2008 that took the service down for 3 days. They used this as a catalyst to migrate to AWS and microservices over 7 years. Today they run 700+ microservices. They also open-sourced Hystrix (circuit breaker) and Eureka (service discovery) from this journey.
+**Netflix (2008–2016):** Netflix's monolith had a catastrophic database corruption incident in 2008 that took the service down for 3 days. They used this as a catalyst to migrate to AWS and microservices over 7 years. Today they run 700+ microservices. They also open-sourced Hystrix ([circuit breaker](../06-Resilience-Patterns/README.md)) and Eureka (service discovery) from this journey.
 
-**Uber (2014–2016):** Uber's original monolith (called "the monorepo") worked fine for one city. When they expanded globally with driver-side and rider-side apps plus internationalization, the monolith couldn't keep up. They decomposed into microservices but struggled with "distributed monolith" anti-patterns before adding proper API gateways and service meshes.
+**Uber (2014–2016):** Uber's original monolith (called "API") worked fine for one city. When they expanded globally with driver-side and rider-side apps plus internationalization, the monolith couldn't keep up. They decomposed into microservices but struggled with "distributed monolith" anti-patterns before adding proper API gateways and service meshes.
 
 **Shopify:** Chose to stay with a **modular monolith** (called a "modular Rails app"). By enforcing strict module boundaries and separate schemas — using a tool called `packwerk` to lint cross-module violations — they serve millions of merchants from a single deployable unit. This lets them move fast without the operational overhead of hundreds of services.
 
@@ -218,7 +218,7 @@ flowchart LR
 | No network latency between modules | Entire app scales together (wasteful) |
 | Easy transactions (single DB) | One language/framework for everything |
 | Great for early-stage products | Long build/deploy cycles at scale |
-| Simple observability | Single point of failure |
+| Simple [observability](../../Level-06-Scale-and-Reliability/01-Observability/README.md) | Single point of failure |
 
 ### Microservices
 
@@ -304,11 +304,17 @@ flowchart LR
 ## 📚 Further Reading
 
 - [Martin Fowler — Microservices](https://martinfowler.com/articles/microservices.html) — the canonical introduction
-- [Martin Fowler — Modular Monolith](https://martinfowler.com/bliki/MonolithFirst.html) — why "monolith first" is often right
+- [Martin Fowler — MonolithFirst](https://martinfowler.com/bliki/MonolithFirst.html) — why "monolith first" is often right
 - [Sam Newman — Building Microservices](https://samnewman.io/books/building_microservices/) — the book on the topic
 - [Shopify — Deconstructing the Monolith](https://engineering.shopify.com/blogs/engineering/deconstructing-monolith-designing-software-maximizes-developer-productivity) — real-world modular monolith
 - [Netflix Tech Blog — Microservices Journey](https://netflixtechblog.com) — how Netflix did it
 
 ---
 
-*← [Level 05 Overview](../README.md) · Next: [Event-Driven Architecture](../02-Event-Driven-Architecture/README.md) →*
+<!-- nav:start -->
+
+⬅️ **Previous:** [Level 5 — Architecture Patterns (overview)](../README.md) · ➡️ **Next:** [Event-Driven Architecture](../02-Event-Driven-Architecture/README.md)
+
+🧩 **See it applied in:** [26 · Unique ID Generator](../../Bonus-Real-World-Architectures/26-Unique-ID-Generator/README.md) · [07 · Instagram](../../Bonus-Real-World-Architectures/07-Instagram/README.md) · [09 · YouTube / Netflix](../../Bonus-Real-World-Architectures/09-YouTube-Netflix-Streaming/README.md) · [11 · Uber Ride-Sharing](../../Bonus-Real-World-Architectures/11-Uber-Ride-Sharing/README.md) · [12 · Food Delivery (DoorDash / Swiggy)](../../Bonus-Real-World-Architectures/12-Food-Delivery/README.md) · [13 · Airbnb Booking](../../Bonus-Real-World-Architectures/13-Airbnb-Booking/README.md) · [15 · Google Maps](../../Bonus-Real-World-Architectures/15-Google-Maps/README.md) · [31 · E-Commerce Platform (Amazon)](../../Bonus-Real-World-Architectures/31-E-Commerce-Platform/README.md) · …and 1 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

@@ -12,7 +12,7 @@
 
 ## 1. 🎯 Problem & Scope
 
-Every growing product hits the same wall: one PostgreSQL primary runs out of headroom. The classic escape routes each give something up. **Manual sharding** keeps SQL on each shard but kills cross-shard joins and transactions, and it's an application rewrite. **NoSQL** scales but drops transactions, secondary indexes, and the query language everyone knows. **Read replicas** only help reads.
+Every growing product hits the same wall: one PostgreSQL primary runs out of headroom. The classic escape routes each give something up. **Manual [sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md)** keeps SQL on each shard but kills cross-shard joins and transactions, and it's an application rewrite. **NoSQL** scales but drops transactions, secondary indexes, and the query language everyone knows. **[Read replicas](../../Level-02-Data-Layer/01-Database-Replication/README.md)** only help reads.
 
 Google built Spanner (2012) because its ads business needed all three at once — SQL, transactions, and planet-scale — and CockroachDB, TiDB, and YugabyteDB followed with open-source designs. The idea is to build SQL *on top of* a strongly consistent, automatically sharded, replicated key-value layer, so scale and fault tolerance are handled below the SQL surface and the application sees one big database.
 
@@ -54,13 +54,13 @@ Google built Spanner (2012) because its ads business needed all three at once �
 - Three regions with 60 ms RTT: a write whose range replicas span regions pays **one majority round trip ≈ 60 ms** — the price of surviving a region loss with RPO 0. Geo-partitioned rows with all replicas in one region stay at in-region latency.
 
 **Metadata**
-- Range addressing: a two-level index of ~200K range descriptors (a few hundred MB), cached on every node; the top level is itself a replicated range.
+- Range addressing: a two-level index of ~200K range descriptors (tens of MB), cached on every node; the top level is itself a replicated range.
 
 ---
 
 ## 4. 🔌 API Design
 
-The public API is **SQL over the PostgreSQL wire protocol** (CockroachDB, YugabyteDB) or the MySQL protocol (TiDB); Spanner speaks its own gRPC API plus SQL. What matters is what the database adds to plain SQL:
+The public API is **SQL over the PostgreSQL wire protocol** (CockroachDB, YugabyteDB) or the MySQL protocol (TiDB); Spanner speaks its own [gRPC](../../Level-03-Communication/03-gRPC-and-RPC/README.md) API plus SQL. What matters is what the database adds to plain SQL:
 
 ```sql
 -- Ordinary transactions; the client retries on serialization failures
@@ -189,6 +189,8 @@ flowchart TD
     style KV3 fill:#bbf7d0,color:#000
     style CLK fill:#fde68a,color:#000
 ```
+
+*Caption: Any node can act as the SQL gateway; its DistSender routes each key to that range's leaseholder, which may sit on a different node per range.*
 
 **Walk-through (a transfer touching two ranges):**
 1. The client connects to **any node**; its SQL layer becomes the **transaction coordinator** and assigns the transaction a start timestamp from the clock.
@@ -346,11 +348,11 @@ Schema is stored as versioned **descriptors**, and a change walks a state machin
 
 **YugabyteDB:** PostgreSQL's actual query layer running over DocDB, a Raft-replicated document store with HLC.
 
-**FaunaDB:** a different bet — **Calvin**'s deterministic transaction ordering — trading a pre-declared transaction shape for avoiding two-phase commit.
+**FaunaDB:** a different bet — **Calvin**'s deterministic transaction ordering — trading a pre-declared transaction shape for avoiding two-phase commit. Its hosted service shut down in 2025, a reminder that an elegant architecture does not guarantee a durable product.
 
 **FoundationDB (Apple):** not SQL, but the same transactional-KV foundation with a separate resolver tier and legendary [simulation testing](../../Level-06-Scale-and-Reliability/08-Testing-Distributed-Systems/README.md); layers implement document and record models on top.
 
-**Amazon Aurora and Vitess** are the counterpoints: Aurora scales storage and reads under a single writer; Vitess shards MySQL with middleware and powers YouTube and PlanetScale — both excellent, neither a distributed SQL database in this sense.
+**Amazon Aurora and Vitess** are the counterpoints: Aurora scales storage and reads under a single writer; Vitess shards MySQL with middleware; it was built at YouTube and today runs PlanetScale, Slack, and GitHub — both excellent, neither a distributed SQL database in this sense.
 
 ---
 
@@ -371,4 +373,12 @@ The 30-second whiteboard pitch: put SQL on top of a transactional, ordered key-v
 
 ---
 
-[← Back to all real-world architectures](../README.md) · Related: [Distributed Coordination Service](../39-Distributed-Coordination-Service/README.md) · [Specialized Databases — NewSQL](../../Level-07-Big-Data-and-Specialized/08-Specialized-Databases/README.md) · [Schema Migrations](../../Level-02-Data-Layer/11-Schema-Migrations/README.md)
+**Related:** [Distributed Coordination Service](../39-Distributed-Coordination-Service/README.md) · [Specialized Databases — NewSQL](../../Level-07-Big-Data-and-Specialized/08-Specialized-Databases/README.md) · [Schema Migrations](../../Level-02-Data-Layer/11-Schema-Migrations/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [45 · Real-Time Fraud Detection System (Stripe Radar)](../45-Fraud-Detection-System/README.md) · 🏠 [All designs](../README.md) · 🏁 **You finished the last design** — back to the [curriculum home](../../README.md)
+
+<!-- nav:end -->

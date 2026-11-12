@@ -2,7 +2,7 @@
 
 > A multi-region architecture deploys your application across multiple geographic data centers so users get low latency from anywhere on Earth and your system survives regional disasters.
 
-**Level:** 6 · **Topic:** 6 · **Prerequisites:** [High Availability and DR](../03-High-Availability-and-DR) · [CAP Theorem](../../Level-04-Distributed-Systems/01-CAP-Theorem) · [Security at Scale](../05-Security-at-Scale)
+**Level:** 6 · **Topic:** 6 · **Prerequisites:** [High Availability and DR](../03-High-Availability-and-DR/README.md) · [CAP Theorem](../../Level-04-Distributed-Systems/01-CAP-Theorem/README.md) · [Security at Scale](../05-Security-at-Scale/README.md)
 
 ---
 
@@ -10,9 +10,9 @@
 
 Imagine your entire backend runs in `us-east-1` (Virginia). That works great for users in New York. But:
 
-- A user in **Tokyo** is ~13,000 km away. The speed of light gives you a minimum round-trip of ~170ms — and that's before your app does any work. Real-world RTT to Virginia from Tokyo sits around **200–250ms**.
+- A user in **Tokyo** is ~13,000 km away. The speed of light in fiber gives you a minimum round-trip of ~130ms — and that's before your app does any work. Real-world RTT to Virginia from Tokyo sits around **150–180ms**.
 - A **flood in Virginia** (or an AWS AZ outage, or a misconfigured deployment) takes your entire product offline for every user on the planet.
-- Your EU customers' data is sitting on servers in the United States — a potential **GDPR violation** that regulators can fine you 4% of global annual revenue for.
+- Your EU customers' data is sitting on servers in the United States — a potential **[GDPR](../09-Data-Privacy-and-Encryption/README.md) violation** that regulators can fine you 4% of global annual revenue for.
 
 Single-region is fine when you're starting out. But once you have global users, SLAs above 99.9%, or compliance requirements, you need to think multi-region.
 
@@ -37,11 +37,11 @@ Light travels through fiber at roughly 200,000 km/s. New York to London is ~5,50
 A single-region architecture has a single point of failure at the regional level. Natural disasters, power outages, DNS misconfigurations, or cloud provider outages can wipe out your availability. Multiple regions mean a failure in one doesn't cascade globally.
 
 **3. Data residency and compliance**
-GDPR requires that EU personal data stays within the EU (or countries with adequate protection). CCPA, India's PDPB, China's PIPL all add similar constraints. Multi-region lets you pin data to the correct jurisdiction.
+GDPR restricts moving EU personal data to countries without "adequate" protection unless extra legal safeguards are in place; in practice many companies simply keep it in the EU. CCPA, India's DPDP Act, China's PIPL all add similar constraints. Multi-region lets you pin data to the correct jurisdiction.
 
 **The core tradeoff: consistency vs. latency**
 This is where it gets hard. If your database is in Virginia and a user in Tokyo writes data, you can either:
-- Wait for Virginia to confirm the write (strong consistency, ~200ms extra latency per write), or
+- Wait for Virginia to confirm the write (strong consistency, ~150ms+ extra latency per write), or
 - Accept the write locally in Tokyo and replicate to Virginia asynchronously (low latency, but risk of conflicts or stale reads)
 
 You cannot escape the CAP theorem here. Geo-distribution forces you to make explicit choices about consistency.
@@ -87,15 +87,17 @@ flowchart TD
         LB_AP --> APP_AP --> DB_AP
     end
 
-    DB_US -->|"Async replication<br/>~100ms"| DB_EU
-    DB_US -->|"Async replication<br/>~150ms"| DB_AP
-    DB_EU -.->|"Cross-region sync<br/>~120ms"| DB_AP
+    DB_US -->|"Async replication<br/>lag 40ms+ (one way)"| DB_EU
+    DB_US -->|"Async replication<br/>lag 110ms+ (one way)"| DB_AP
+    DB_EU -.->|"Cross-region sync<br/>lag 80ms+ (one way)"| DB_AP
 
     style USE fill:#d4edff,color:#000
     style EUW fill:#d4f5d4,color:#000
     style APS fill:#fff3cd,color:#000
     style DNS fill:#f8d7da,color:#000
 ```
+
+*Caption: DNS routes each user to the nearest region, but every write still lands on the US-East primary and replicates asynchronously outward to the EU and APAC read replicas.*
 
 ### Key Mechanisms
 
@@ -166,7 +168,7 @@ sequenceDiagram
 When two users in different regions write to the same record simultaneously, you get a conflict. Common resolution strategies:
 - **Last-Write-Wins (LWW)**: timestamp decides. Simple, but clock skew between servers can lose data.
 - **Vector Clocks**: track causality per-replica. More accurate, more complex.
-- **CRDTs (Conflict-free Replicated Data Types)**: data structures designed to merge automatically without conflicts (e.g., counters, sets). Used heavily in systems like Riak and Redis.
+- **[CRDTs](../../Level-04-Distributed-Systems/09-CRDTs-and-Conflict-Resolution/README.md) (Conflict-free Replicated Data Types)**: data structures designed to merge automatically without conflicts (e.g., counters, sets). Used heavily in systems like Riak and Redis.
 
 **Follow-the-Sun Operations**
 With regions across timezones, you can route on-call to whichever team is awake. US-East handles incidents during US business hours, EU-West during European hours, AP-Southeast during Asian hours. Reduces engineer burnout dramatically.
@@ -199,20 +201,20 @@ For GDPR compliance, you partition your data by user region. EU users' data is s
 Even if your write primary is in US-East, you can put read replicas in EU and APAC. Reads (which are typically 80–90% of traffic) get low latency; writes pay the cross-region round-trip. This is the most common first step toward geo-distribution.
 
 **Write Funneling**
-In active-passive setups, all writes from all regions are forwarded to the primary region. EU users' writes travel ~100ms to US-East, get committed, then replicate back asynchronously. Simple to implement; the primary becomes a bottleneck at scale.
+In active-passive setups, all writes from all regions are forwarded to the primary region. EU users' writes pay an ~80–90ms round trip to US-East, get committed, then replicate back asynchronously. Simple to implement; the primary becomes a bottleneck at scale.
 
 ---
 
 ## 🏢 Real-World Examples
 
 **Netflix**
-Netflix runs across **3 AWS regions** (us-east-1, eu-west-1, us-west-2 as backup). If one region fails, traffic fails over automatically — this is the "Chaos Engineering" work they pioneered. For video delivery, they built **Open Connect**, their own CDN with servers embedded directly in ISP networks, so your Netflix stream never leaves your ISP's network.
+Netflix runs across **3 AWS regions** (us-east-1, us-west-2, eu-west-1), all serving traffic. If one region fails, traffic fails over automatically — this is the "Chaos Engineering" work they pioneered. For video delivery, they built **Open Connect**, their own CDN with servers embedded directly in ISP networks, so your Netflix stream never leaves your ISP's network.
 
 **AWS Global Infrastructure**
 AWS operates **30+ regions** and 90+ availability zones worldwide. Services like DynamoDB Global Tables let you write to any region and get automatic multi-master replication with last-write-wins conflict resolution. Route 53 provides geo-DNS and health-check-based failover.
 
 **CockroachDB and Google Spanner**
-These databases are built ground-up for geo-distribution. Google Spanner uses **TrueTime** (GPS + atomic clocks in every datacenter) to achieve external consistency across regions — strong consistency without the usual latency penalties. CockroachDB brings similar capabilities to open-source. Both let you pin data to specific regions for compliance.
+These databases are built ground-up for geo-distribution. Google Spanner uses **TrueTime** (GPS + atomic clocks in every datacenter) to achieve external consistency across regions — strong consistency with only a short commit wait (writes still pay cross-region consensus latency). CockroachDB brings similar capabilities to open-source. Both let you pin data to specific regions for compliance.
 
 **Cloudflare**
 Cloudflare's network has **300+ Points of Presence (PoPs)** worldwide using anycast. Every PoP announces the same IP prefixes, so your request hits the nearest one automatically. This is how they absorb terabit-scale DDoS attacks — traffic is distributed across hundreds of locations rather than concentrated.
@@ -222,13 +224,13 @@ Cloudflare's network has **300+ Points of Presence (PoPs)** worldwide using anyc
 ## ⚖️ Trade-offs
 
 **Cost**
-Running in 3 regions costs roughly **2–3x a single region** — you're duplicating compute, storage, and networking. Data egress between regions adds up fast: AWS charges ~$0.02/GB for cross-region transfer. If you're moving terabytes of replication data, that's thousands of dollars monthly before you've written a line of business logic.
+Running in 3 regions costs roughly **2–3x a single region** — you're duplicating compute, storage, and networking. Data egress between regions adds up fast: AWS charges ~$0.02/GB for cross-region transfer. If you're moving hundreds of terabytes of replication data, that's thousands of dollars monthly before you've written a line of business logic.
 
 **Operational Complexity**
-Deployments must be coordinated across regions (blue-green or canary per-region). Schema migrations become dangerous — you can't change a column type in EU-West if US-East is still writing the old format. Monitoring and alerting must aggregate across regions. Debugging distributed transactions that span continents is genuinely hard.
+Deployments must be coordinated across regions (blue-green or canary per-region). [Schema migrations](../../Level-02-Data-Layer/11-Schema-Migrations/README.md) become dangerous — you can't change a column type in EU-West if US-East is still writing the old format. Monitoring and alerting must aggregate across regions. Debugging distributed transactions that span continents is genuinely hard.
 
 **Consistency vs. Latency**
-This is the [CAP theorem](../../Level-04-Distributed-Systems/01-CAP-Theorem) made concrete. You must decide what your system does when the network partition between US-East and EU-West takes 30 seconds to heal. Accept stale reads? Reject writes? Merge conflicts automatically? There is no free lunch.
+This is the [CAP theorem](../../Level-04-Distributed-Systems/01-CAP-Theorem/README.md) made concrete. You must decide what your system does when the network partition between US-East and EU-West takes 30 seconds to heal. Accept stale reads? Reject writes? Merge conflicts automatically? There is no free lunch.
 
 **GDPR Data Residency Constraints**
 Once you commit to storing EU data only in EU regions, you've created a hard dependency. Your EU region cannot go down and fail over to US-East — that would move EU personal data outside the EU. Your DR strategy for EU must involve another EU region (e.g., eu-west-1 to eu-central-1), which adds more cost and complexity.
@@ -240,7 +242,7 @@ Once you commit to storing EU data only in EU regions, you've created a hard dep
 **Use multi-region when:**
 - Your users are genuinely global and latency impacts engagement or revenue
 - Your SLA requires 99.99%+ uptime (single region can't reliably hit this)
-- You have regulatory data residency requirements (GDPR, PDPB, PIPL)
+- You have regulatory data residency requirements (GDPR, DPDP, PIPL)
 - You need disaster recovery with RTO < 15 minutes
 - You're a large enough business that 2–3x infra cost is acceptable
 
@@ -278,7 +280,7 @@ When multi-region comes up in an interview, these moves signal senior-level thin
 
 - **Lead with the problem, not the solution.** "Before we go multi-region, what's the actual driver — latency, DR, or compliance? Each has a different architecture."
 
-- **Mention real latency numbers.** "Cross-continental RTT is 100–180ms. That means async replication introduces that much potential data loss (RPO). Is that acceptable?" Interviewers notice when you know actual numbers.
+- **Mention real latency numbers.** "Cross-region RTT runs from ~75ms (US-East to Western Europe) to ~230ms (US-East to Singapore). Async replication lags by at least the one-way trip, and that lag is your potential data loss (RPO). Is that acceptable?" Interviewers notice when you know actual numbers.
 
 - **Always state which region handles writes.** "I'd make US-East the write primary with async replication to EU and APAC. EU and APAC serve read replicas. Writes from EU pay the 100ms cross-region round-trip." This shows you've thought through the consistency model.
 
@@ -293,7 +295,7 @@ When multi-region comes up in an interview, these moves signal senior-level thin
 ## 📝 TL;DR
 
 - Multi-region solves three problems: latency (speed of light), disaster recovery, and data residency (GDPR).
-- Cross-continental RTT is 100–180ms — this is your baseline for replication lag and tradeoff decisions.
+- Cross-region RTT runs from ~75ms (US-East ↔ Western Europe) to ~230ms (US-East ↔ Singapore) — this is your baseline for replication lag and tradeoff decisions.
 - Go active-active for latency; go active-passive for simplicity. Active-active requires conflict resolution.
 - Async replication keeps write latency low but means you can lose data (RPO > 0). Sync replication adds 100–180ms per write but gives you zero data loss.
 - Multi-region costs 2–3x and requires deliberate engineering. Don't do it before you need it. Do it before a single-region incident takes you offline globally.
@@ -318,6 +320,16 @@ When multi-region comes up in an interview, these moves signal senior-level thin
 
 - [AWS Well-Architected Framework — Reliability Pillar (Multi-Region)](https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/plan-for-disaster-recovery-dr.html) — AWS's own guidance on multi-region patterns, RTO/RPO targets, and implementation strategies.
 - [Spanner: Google's Globally Distributed Database (OSDI 2012)](https://research.google/pubs/spanner-googles-globally-distributed-database/) — The original paper describing TrueTime and how Google achieves external consistency across continents. Dense but foundational.
-- [Netflix: Active-Active for Multi-Regional Resiliency](https://netflixtechblog.com/active-active-for-multi-regional-resiliency-c47719f6685b) — Netflix's engineering blog post on how they designed and operate active-active across AWS regions, including the Chaos Engineering practices they use to validate it.
-- [CockroachDB: How We Built a Geo-Distributed SQL Database](https://www.cockroachlabs.com/blog/geo-distributed-sql/) — Practical walkthrough of the engineering challenges in building a geo-distributed transactional database.
+- [Netflix: Active-Active for Multi-Regional Resiliency](https://netflixtechblog.com/active-active-for-multi-regional-resiliency-c47719f6685b) — Netflix's engineering blog post on how they designed and operate active-active across AWS regions, including the [Chaos Engineering](../08-Testing-Distributed-Systems/README.md) practices they use to validate it.
+- [CockroachDB: Multi-Region Capabilities Overview](https://www.cockroachlabs.com/docs/stable/multiregion-overview) — Practical walkthrough of the engineering challenges in building a geo-distributed transactional database.
 - [Cloudflare: What is Anycast?](https://www.cloudflare.com/learning/cdn/glossary/anycast-network/) — Clear explanation of anycast routing and how it differs from geo-DNS, with real examples from Cloudflare's network.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Security at Scale](../05-Security-at-Scale/README.md) · 🏠 [Level 6 — Scale & Reliability](../README.md) · ➡️ **Next:** [Containers and Orchestration](../07-Containers-and-Orchestration/README.md)
+
+🧩 **See it applied in:** [23 · Distributed Counter & Analytics](../../Bonus-Real-World-Architectures/23-Distributed-Counter-Analytics/README.md) · [25 · Live Streaming (Twitch / YouTube Live)](../../Bonus-Real-World-Architectures/25-Live-Streaming/README.md) · [01 · URL Shortener](../../Bonus-Real-World-Architectures/01-URL-Shortener/README.md)
+
+<!-- nav:end -->

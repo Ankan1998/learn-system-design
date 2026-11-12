@@ -1,4 +1,4 @@
-# Design 30 — Video Conferencing
+# Design Video Conferencing (Zoom / Google Meet)
 
 > Real-time group video calling — the architecture behind Zoom and Google Meet
 
@@ -97,7 +97,7 @@ Unique meetings/day: 300M / 5 = 60 M
 
 Peak concurrency (assume 10% of daily meetings overlap at peak):
   60 M × 0.1 = 6 M concurrent meetings
-  6 M meetings × 5 participants × 25 Mbps SFU ingress = 750 Tbps peak ingress
+  6 M meetings × 5 participants × 2.5 Mbps SFU ingress = 75 Tbps peak ingress
 
 That is an enormous number — hence Zoom and Google operate
 their own global media server fleets and colocation.
@@ -192,6 +192,8 @@ erDiagram
     ROOM ||--o{ RECORDING : generates
 ```
 
+*Caption: ROOM is the hub; participants link users to rooms, and recordings hang off a room, while the media itself never appears in this relational model.*
+
 **Storage justifications:**
 
 | Store | What | Why |
@@ -202,7 +204,7 @@ erDiagram
 | Cassandra / DynamoDB | Chat messages (append-only, high write volume) | Wide-column scales horizontally for time-series writes |
 | InfluxDB / Prometheus | Per-stream QoS metrics (jitter, loss, bitrate) | Time-series purpose-built, not relational |
 
-**Media is never stored in a database.** It flows through SFU memory buffers and is written directly to object storage during recording.
+**Media is never stored in a database.** It flows through SFU memory buffers and is written directly to [object storage](../../Level-02-Data-Layer/09-Object-Storage/README.md) during recording.
 
 ---
 
@@ -292,11 +294,13 @@ flowchart TD
     style STUN fill:#f3e8ff,color:#000
 ```
 
+*Caption: Signaling over WebSocket and media over UDP to the SFU are separate planes; TURN is only a fallback path, and recording taps the SFU off the real-time path.*
+
 **Numbered walk-through:**
 
-1. **Room creation** — Client A calls `POST /v1/rooms` via HTTPS. The signaling service picks the closest media region (lowest RTT) and stores the room in PostgreSQL. Returns a `room_id` and a short-lived JWT.
+1. **Room creation** — Client A calls `POST /v1/rooms` via HTTPS. The signaling service picks the closest media region (lowest RTT) and stores the room in PostgreSQL. Returns a `room_id` and a short-lived [JWT](../../Level-03-Communication/08-Authentication-and-Authorization/README.md).
 2. **Region assignment** — The JWT encodes which SFU cluster to connect to. All participants in the same meeting are routed to the same regional SFU cluster.
-3. **WebSocket connection** — Every client opens a persistent WebSocket to the signaling load balancer. Signaling servers are stateless; room state and participant lists live in Redis Pub/Sub so any signaling server can handle any client.
+3. **WebSocket connection** — Every client opens a persistent WebSocket to the signaling [load balancer](../../Level-01-Building-Blocks/02-Load-Balancing/README.md). Signaling servers are [stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md); room state and participant lists live in Redis Pub/Sub so any signaling server can handle any client.
 4. **NAT discovery** — Before connecting to the SFU, each client does a STUN binding request to learn its public IP:port.
 5. **WebRTC negotiation (SDP)** — Clients send SDP offers through the WebSocket signaling channel. The signaling server relays them to the SFU, which responds with an SDP answer. ICE candidate exchange follows.
 6. **Media flows** — Once ICE completes, encrypted RTP/RTCP flows directly over UDP between each client and the SFU. The SFU's bandwidth estimator selects the right simulcast layer for each subscriber. If UDP is blocked, the TURN relay kicks in as fallback.
@@ -400,6 +404,8 @@ flowchart LR
     style XD fill:#dbeafe,color:#000
 ```
 
+*Caption: A mesh needs a connection between every pair of peers, an SFU needs one upload per peer and forwards without decoding, and an MCU decodes everything and sends each peer a single mixed stream.*
+
 | | Mesh (P2P) | SFU | MCU |
 |---|---|---|---|
 | Server compute | None | Low (forward packets, no decode) | Very High (decode + mix + encode) |
@@ -454,9 +460,11 @@ flowchart TD
     style SFUN fill:#fef9c3,color:#000
 ```
 
+*Caption: The client first learns its public address from STUN and tries a direct path, and falls back to relaying every packet through TURN only when a strict NAT or firewall blocks that.*
+
 - **STUN** (Session Traversal Utilities for NAT): A tiny stateless server. Your client sends a UDP packet, STUN echoes back the source IP:port as seen from the internet. Cost: nearly zero.
 - **TURN** (Traversal Using Relays around NAT): A relay server. When symmetric NAT or corporate firewalls block all direct UDP, TURN relays every packet. Cost: full media bandwidth on the TURN server. Typically 10–15% of calls need TURN.
-- **ICE** (Interactive Connectivity Establishment): The orchestration layer. Gathers all candidate address pairs, pairs them with the remote, runs a connectivity check for each, and selects the best working pair (lowest latency wins). Trickle ICE sends candidates as they are gathered rather than waiting for all of them, which speeds up connection setup.
+- **ICE** (Interactive Connectivity Establishment): The orchestration layer. Gathers all candidate address pairs, pairs them with the remote, runs a connectivity check for each, and selects the best working pair (highest-priority pair wins). Trickle ICE sends candidates as they are gathered rather than waiting for all of them, which speeds up connection setup.
 
 ### 7.4 Simulcast and Bandwidth Adaptation
 
@@ -493,7 +501,9 @@ flowchart LR
     style RX3 fill:#dbeafe,color:#000
 ```
 
-The sender publishes three RTP streams simultaneously (same SSRC space, different spatial layers). The SFU uses RTCP feedback — specifically **REMB** (Receiver Estimated Maximum Bitrate) or **Transport-Wide Congestion Control (TWCC)** — to know each subscriber's available bandwidth, then switches which layer it forwards. A layer switch is just forwarding different packets; no transcoding occurs. The SFU can also pause a layer entirely if a participant's window is minimized or their tile is not visible (SVC/simulcast layer suspension).
+*Caption: The sender encodes three quality layers once, and the SFU picks a different layer for each receiver based on its bandwidth estimate, with no re-encoding.*
+
+The sender publishes three RTP streams simultaneously (separate SSRCs/RIDs, one per spatial layer). The SFU uses RTCP feedback — specifically **REMB** (Receiver Estimated Maximum Bitrate) or **Transport-Wide Congestion Control (TWCC)** — to know each subscriber's available bandwidth, then switches which layer it forwards. A layer switch is just forwarding different packets; no transcoding occurs. The SFU can also pause a layer entirely if a participant's window is minimized or their tile is not visible (SVC/simulcast layer suspension).
 
 ### 7.5 Recording Pipeline
 
@@ -513,6 +523,8 @@ flowchart LR
     style S3RAW fill:#dcfce7,color:#000
     style S3FINAL fill:#dcfce7,color:#000
 ```
+
+*Caption: Raw tracks are uploaded continuously during the call, and the slow transcode to a single MP4 happens afterwards, fully decoupled from the live SFU.*
 
 The recording worker receives raw RTP audio (Opus) and video (VP8/H.264) from the SFU by joining the room as a special internal participant. It writes time-stamped chunks to local NVMe, then uploads them to S3 continuously using multipart upload. When the meeting ends, a transcoding job merges and re-encodes everything into a single H.264/AAC MP4 — which is the format most video players expect. Transcoding is the slow, CPU-intensive step; it typically completes in roughly real-time (1 hour meeting → ~1 hour to transcode at 1× speed, or ~10 minutes on a GPU-accelerated instance).
 
@@ -544,7 +556,7 @@ A single SFU process (mediasoup) can handle roughly 500–1,000 concurrent strea
 
 ### Signaling server scaling
 
-Signaling servers are stateless HTTP/WebSocket processes. They communicate via Redis Pub/Sub for room events. You can run hundreds of them behind an L7 load balancer. The WebSocket sticky-session requirement is handled at the load balancer level (consistent hashing on connection ID).
+Signaling servers are stateless HTTP/WebSocket processes. They communicate via Redis Pub/Sub for room events. You can run hundreds of them behind an L7 load balancer. The WebSocket sticky-session requirement is handled at the load balancer level ([consistent hashing](../../Level-02-Data-Layer/08-Consistent-Hashing/README.md) on connection ID).
 
 ### Failure modes and mitigations
 
@@ -552,14 +564,14 @@ Signaling servers are stateless HTTP/WebSocket processes. They communicate via R
 |---|---|---|
 | SFU process crash | Entire room drops | Process supervision (systemd/k8s), client reconnects within 2–3 s, session state in Redis survives |
 | Signaling server crash | WS connection drops | Client auto-reconnects; room state is in Redis, not in-process |
-| TURN server overload | 10–15% of calls degrade | TURN clusters behind DNS load balancing; geographic distribution |
+| TURN server overload | 10–15% of calls degrade | TURN clusters behind [DNS](../../Level-00-Foundations/05-DNS/README.md) load balancing; geographic distribution |
 | Region outage | All meetings in region drop | DNS failover to another region; active-active multi-region SFU deployment |
 | Network congestion | Video quality degrades | Simulcast layer down-switch, bitrate adaptation via REMB/TWCC, audio continues at lower bitrate |
 | Recording worker crash | Recording lost | Write chunks to S3 continuously; replay RTP from SFU buffer on restart (limited window) |
 
 ### Packet loss resilience
 
-RTP uses sequence numbers. Receivers send RTCP NACK (negative acknowledgement) for missing packets. The SFU or sender retransmits. For audio, FEC (Forward Error Correction) — specifically RED and ULPFEC — adds redundancy packets so a single lost packet can be reconstructed without a retransmit round trip. Video uses FIR (Full Intra Request) to request a keyframe when loss is severe enough that the decoder can no longer reconstruct frames.
+RTP uses sequence numbers. Receivers send RTCP NACK (negative acknowledgement) for missing packets. The SFU or sender retransmits. For audio, FEC (Forward Error Correction) — specifically Opus in-band FEC and RED (video uses ULPFEC/FlexFEC) — adds redundancy so a single lost packet can be reconstructed without a retransmit round trip. Video uses FIR (Full Intra Request) to request a keyframe when loss is severe enough that the decoder can no longer reconstruct frames.
 
 ---
 
@@ -571,7 +583,7 @@ You might still choose MCU for very specific cases: a participant on an extremel
 
 ### End-to-end encryption (E2EE)
 
-Standard SFU architecture cannot support E2EE because the SFU must read RTP headers to forward packets correctly — but headers contain routing metadata, not media payloads. WebRTC's **Insertable Streams** API (Chrome/Edge) allows JavaScript to encrypt the media payload in the browser before it hits the WebRTC engine. The SFU can still forward packets (it only sees encrypted payloads), but it cannot record, transcode, or do server-side processing. This is what Zoom's E2EE mode does — recording and some features are disabled.
+Standard SFU architecture is not E2EE because DTLS-SRTP terminates at the SFU, which can therefore see the media — yet the SFU only needs RTP headers (routing metadata, not media payloads) to forward packets. WebRTC's **Insertable Streams** API (Chrome/Edge) allows JavaScript to encrypt the media payload in the browser before it hits the WebRTC engine. The SFU can still forward packets (it only sees encrypted payloads), but it cannot record, transcode, or do server-side processing. Jitsi Meet does this in the browser, and Zoom's E2EE mode applies the same idea inside its native clients. In both, cloud recording and other server-side features are disabled.
 
 ### Codec choices
 
@@ -593,7 +605,7 @@ Running your own SFU (mediasoup, Janus) gives you full control over data localit
 
 ## 10. 🌐 How It's Actually Done
 
-**Zoom** runs its own proprietary media servers globally, optimized for their specific codec pipeline. They use Zoom's own UDP-based transport (ZTP) in some paths rather than raw WebRTC, allowing tighter control over congestion control. Their client apps encode video on-device with hardware H.264 acceleration.
+**Zoom** runs its own proprietary media servers globally, optimized for their specific codec pipeline. Its native clients use a proprietary UDP-based media transport rather than standard WebRTC, which gives tighter control over congestion control. They encode video on-device with scalable video coding (SVC), so one upstream can be thinned for each receiver without transcoding.
 
 **Google Meet** is built on WebRTC from the ground up (Google helped create the WebRTC standard). They run SFU infrastructure inside Google's global network, giving them extremely low latency because SFUs are placed inside the same PoPs as Google's CDN. Meet uses VP8/VP9 and has recently added AV1 support for screen sharing.
 
@@ -601,7 +613,7 @@ Running your own SFU (mediasoup, Janus) gives you full control over data localit
 
 **Janus Gateway** and **mediasoup** are the dominant open-source SFU implementations. Janus is written in C and is extremely performant; mediasoup is a C++ native module exposed via Node.js, making it easy to integrate into JavaScript server stacks. Both are production-ready and used at scale by startups and mid-sized companies.
 
-**Twilio Programmable Video** (now Twilio Video) was a major commercial SFU-as-a-service. Twilio announced deprecation of Programmable Video in 2023, which drove many customers to Daily.co, Agora, Livekit (open-source SFU + hosted offering), and Mux.
+**Twilio Video** is a major commercial SFU-as-a-service. Twilio announced in late 2023 that it would shut the product down, which sent many customers to evaluate Daily, Agora, and LiveKit (an open-source SFU with a hosted offering), and then reversed the decision in 2024. The episode is a useful reminder that a vendor's roadmap is a dependency too.
 
 **Livekit** is worth mentioning — it is a modern open-source SFU written in Go, with excellent Kubernetes-native deployment support, and is rapidly gaining adoption as the successor to the older generation of open-source SFUs.
 
@@ -630,3 +642,11 @@ Running your own SFU (mediasoup, Janus) gives you full control over data localit
 4. The signaling plane (WebSocket, SDP relay) and the media plane (RTP, SFU) are completely separate concerns. Design them independently.
 5. Latency budget thinking: know where each millisecond goes and which levers you can pull to bring end-to-end latency under 150 ms.
 6. Recording is a separate pipeline that taps the SFU — it does not affect the real-time path and should be designed for fault tolerance independently.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [29 · Nearby Friends / Proximity](../29-Nearby-Friends-Proximity/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [31 · E-Commerce Platform (Amazon)](../31-E-Commerce-Platform/README.md)
+
+<!-- nav:end -->

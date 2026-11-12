@@ -159,8 +159,8 @@ flowchart LR
 | **How content gets to edge** | Edge fetches from origin on first miss | You upload content proactively |
 | **Operational complexity** | Low — just configure origin URL | Higher — upload pipeline required |
 | **First-request latency** | High (origin fetch) | None — always pre-populated |
-| **Best for** | Large, frequently accessed assets | Frequently changing content; time-critical launches |
-| **Examples** | CloudFront (default), Cloudflare | Akamai NetStorage, CloudFront with S3 pre-push |
+| **Best for** | Large, frequently accessed assets | Rarely changing content; time-critical launches |
+| **Examples** | CloudFront, Cloudflare, Fastly (all pull by default) | Akamai NetStorage; Netflix Open Connect (fills its caches overnight, before anyone presses play) |
 
 ### Cache-Control Headers
 
@@ -172,7 +172,7 @@ The CDN respects HTTP cache headers from your origin. These headers control CDN 
 | `Cache-Control: s-maxage=3600` | `s-maxage=3600` | CDN caches for 1 hour (overrides max-age for CDN only) |
 | `Cache-Control: no-cache` | — | CDN revalidates with origin on every request |
 | `Cache-Control: no-store` | — | CDN must not cache at all |
-| `Cache-Control: public` | — | Explicitly cacheable (even if response has Set-Cookie) |
+| `Cache-Control: public` | — | Explicitly cacheable by shared caches (even if the request had an `Authorization` header) |
 | `Cache-Control: private` | — | CDN must not cache — only browser may |
 | `Vary: Accept-Encoding` | — | Cache separate copies per encoding (gzip vs br) |
 | `ETag: "abc123"` | — | Enables conditional GET revalidation |
@@ -204,7 +204,7 @@ Only the shield node talks to the origin. Edge nodes in the same region miss to 
 ### Dynamic Content at the Edge
 
 CDNs were originally for static files. Modern CDNs now handle dynamic content:
-- **Edge functions / serverless at edge:** Cloudflare Workers, Lambda@Edge — run code within milliseconds of every user
+- **Edge functions / [serverless](../../Level-05-Architecture-Patterns/08-Serverless-Architecture/README.md) at edge:** Cloudflare Workers, Lambda@Edge — run code within milliseconds of every user
 - **Edge-side includes (ESI):** Assemble HTML at the edge by combining static parts (cached) with dynamic fragments
 - **Smart caching of API responses:** Cache `/api/products` for 60 seconds — the DB never sees individual user requests
 - **A/B testing at edge:** Route a percentage of traffic to variant B without origin involvement
@@ -218,11 +218,11 @@ CDNs were originally for static files. Modern CDNs now handle dynamic content:
 Cloudflare operates **300+ PoPs** in 100+ countries. It handles more internet traffic than most hyperscalers. Key features:
 - **Anycast routing:** All Cloudflare PoPs share the same IP address space. BGP routing automatically sends traffic to the nearest PoP.
 - **DDoS mitigation:** Absorbs multi-terabit attacks at the edge before they reach your origin
-- **Cloudflare Workers:** V8-based edge functions run on every PoP — typical cold start is <1ms (compared to 100ms+ for traditional serverless)
+- **Cloudflare Workers:** V8-based edge functions run on every PoP — an isolate starts in about 5ms and is usually pre-warmed during the TLS handshake, so users see no cold start (compared to 100ms to 1s+ for container-based serverless)
 
 ### Amazon CloudFront
 
-CloudFront is AWS's CDN, tightly integrated with S3, EC2, and API Gateway:
+CloudFront is AWS's CDN, tightly integrated with S3, EC2, and [API Gateway](../../Level-05-Architecture-Patterns/05-API-Gateway/README.md):
 - 600+ edge locations worldwide
 - Supports Lambda@Edge and CloudFront Functions for edge compute
 - Used by Amazon Prime Video, Amazon.com static assets, and millions of AWS customers
@@ -231,7 +231,7 @@ CloudFront is AWS's CDN, tightly integrated with S3, EC2, and API Gateway:
 ### Akamai
 
 Akamai is the oldest CDN (founded 1998) and still serves a significant portion of global internet traffic:
-- **Thousands** of edge servers embedded inside ISPs worldwide — closer to users than anyone
+- **Hundreds of thousands** of edge servers in 4,000+ locations, many embedded inside ISP networks — closer to users than anyone
 - Handles streaming for major media companies (NFL, Disney+, BBCSport)
 - Specializes in video delivery, large file distribution, and enterprise security
 - Netflix historically used Akamai before building its own CDN (Open Connect)
@@ -294,7 +294,7 @@ Netflix outgrew public CDNs and built **Open Connect** — its own CDN with ~17,
 - **Distinguish static vs dynamic:** Show you know CDNs are evolving beyond static files — edge functions, API caching, A/B testing at edge.
 - **Bring up cache-busting:** It's the practical solution to "how do you deploy new code immediately?" Answer: content-hashed filenames in your build pipeline.
 - **Origin shielding shows depth:** Most candidates just say "CDN caches stuff." Mentioning origin shielding (the shield tier between edges and origin) signals production experience.
-- **Compare CDN to a reverse proxy:** "A CDN is fundamentally a globally distributed reverse proxy + cache. Cloudflare is just Nginx running on 300 servers worldwide."
+- **Compare CDN to a reverse proxy:** "A CDN is fundamentally a globally distributed reverse proxy + cache. Cloudflare is essentially a reverse proxy running in 300+ PoPs worldwide."
 
 ---
 
@@ -325,4 +325,13 @@ Netflix outgrew public CDNs and built **Open Connect** — its own CDN with ~17,
 - [HTTP Caching (MDN)](https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching)
 - [Netflix Open Connect](https://openconnect.netflix.com/en/)
 - [Fastly Surrogate Keys (Tag-based Purge)](https://www.fastly.com/blog/surrogate-keys-part-1/)
-- Previous: [Proxies](../05-Proxies/README.md) · Next: [Stateless vs Stateful](../07-Stateless-vs-Stateful/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Proxies](../05-Proxies/README.md) · 🏠 [Level 1 — Building Blocks](../README.md) · ➡️ **Next:** [Stateless vs Stateful](../07-Stateless-vs-Stateful/README.md)
+
+🧩 **See it applied in:** [01 · URL Shortener](../../Bonus-Real-World-Architectures/01-URL-Shortener/README.md) · [09 · YouTube / Netflix](../../Bonus-Real-World-Architectures/09-YouTube-Netflix-Streaming/README.md) · [14 · Google Drive / Dropbox](../../Bonus-Real-World-Architectures/14-Google-Drive-Dropbox/README.md) · [15 · Google Maps](../../Bonus-Real-World-Architectures/15-Google-Maps/README.md) · [22 · Google Search](../../Bonus-Real-World-Architectures/22-Google-Search/README.md) · [25 · Live Streaming (Twitch / YouTube Live)](../../Bonus-Real-World-Architectures/25-Live-Streaming/README.md) · [33 · Content Delivery Network (CDN)](../../Bonus-Real-World-Architectures/33-Content-Delivery-Network/README.md)
+
+<!-- nav:end -->

@@ -71,6 +71,8 @@ sequenceDiagram
     C2->>C2: process payment...
 ```
 
+*Caption: Notice that the producer returns immediately, a received message is hidden from other consumers until acknowledged, and repeated failures divert it to the dead-letter queue.*
+
 ### Visibility Timeout
 
 When a consumer receives a message, the queue **hides** it from other consumers for a configurable period (e.g., 30 seconds). This prevents double-processing. If the consumer doesn't acknowledge within the timeout (crash/slow), the message becomes visible again for another consumer to pick up.
@@ -93,7 +95,27 @@ When a consumer receives a message, the queue **hides** it from other consumers 
 
 **Reality:** Most queues give you at-least-once. Design your consumers to be **idempotent** (processing the same message twice has the same effect as once). Example: use `order_id` as the database primary key — inserting twice is a no-op.
 
-See also: [Level-04 Idempotency and Exactly-Once](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md)
+```mermaid
+sequenceDiagram
+    participant Q as Queue
+    participant C as Consumer
+
+    Note over Q,C: At-most-once: acknowledge first, then process
+    Q->>C: message
+    C->>Q: ack
+    Note over C: crashes while processing, the message is gone
+
+    Note over Q,C: At-least-once: process first, then acknowledge
+    Q->>C: message
+    Note over C: crashes before sending the ack
+    Q->>C: same message again (redelivery)
+    C->>Q: ack after processing
+    Note over C: handled twice, harmless only if the handler is idempotent
+```
+
+*Caption: The only difference between the two guarantees is when the consumer acknowledges: before doing the work (it may be lost) or after (it may be repeated).*
+
+See also: [Level 4 Idempotency and Exactly-Once](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md)
 
 ---
 
@@ -102,7 +124,7 @@ See also: [Level-04 Idempotency and Exactly-Once](../../Level-04-Distributed-Sys
 | Queue Type | Ordering Guarantee | Notes |
 |-----------|-------------------|-------|
 | **Standard** (AWS SQS default) | Best-effort (not strict) | Higher throughput, may reorder |
-| **FIFO** (AWS SQS FIFO, RabbitMQ with single consumer) | Strict FIFO | Lower throughput, 3,000 msg/s limit |
+| **FIFO** (AWS SQS FIFO, RabbitMQ with single consumer) | Strict FIFO | Lower throughput (SQS FIFO: 300 msg/s, 3,000 with batching, unless high-throughput mode) |
 | **Partitioned** (Kafka) | Per-partition order | Scale + order; same key → same partition |
 
 ---
@@ -124,6 +146,8 @@ graph LR
     style C2 fill:#fff3cd,color:#000
     style C3 fill:#fff3cd,color:#000
 ```
+
+*Caption: Competing consumers: each message is delivered to exactly one of the workers, so adding workers raises throughput without changing the producer.*
 
 Add more consumers during a spike, remove them when load drops. The queue doesn't care how many consumers are running.
 
@@ -162,7 +186,7 @@ Without a DLQ, a "poison message" (one that always causes a crash) loops forever
 | Reliability | ✅ Durable, retry built-in | ❌ Caller must implement retries |
 | Complexity | ❌ Extra infrastructure to run | ✅ Simple function call |
 | Ordering | ❌ Hard in distributed queues | ✅ Inherent in single call chain |
-| Observability | ❌ Need to trace across systems | ✅ Single call stack |
+| [Observability](../../Level-06-Scale-and-Reliability/01-Observability/README.md) | ❌ Need to trace across systems | ✅ Single call stack |
 
 ---
 
@@ -187,7 +211,7 @@ Without a DLQ, a "poison message" (one that always causes a crash) loops forever
 1. **Non-idempotent consumers** — at-least-once delivery means duplicates happen; always design for idempotency
 2. **Ignoring the DLQ** — messages silently fail forever without a DLQ and alerting
 3. **Visibility timeout too short** — if processing takes 45s and timeout is 30s, the message is re-delivered while still being processed → duplicate
-4. **Message too large** — SQS limit is 256 KB; store large payloads in S3 and put the S3 key in the message
+4. **Message too large** — SQS limit is 1 MiB (256 KB before August 2025); store large payloads in S3 and put the S3 key in the message
 5. **No backpressure awareness** — if producers outpace consumers indefinitely, the queue grows unboundedly; set queue depth alarms
 6. **Ordering assumptions** — standard queues don't guarantee order; don't assume FIFO without a FIFO queue
 7. **Not monitoring queue depth** — a growing queue is the first sign of consumer slowness; alert on it
@@ -230,6 +254,15 @@ Without a DLQ, a "poison message" (one that always causes a crash) loops forever
 
 - [AWS SQS Documentation](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/welcome.html)
 - [RabbitMQ Tutorials](https://www.rabbitmq.com/tutorials)
-- [Enterprise Integration Patterns — Messaging](https://www.enterpriseintegrationpatterns.com/MessagingChannels.html)
+- [Enterprise Integration Patterns — Messaging](https://www.enterpriseintegrationpatterns.com/patterns/messaging/MessagingChannelsIntro.html)
 - [Idempotency and Exactly-Once](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md)
-- Previous: [03-gRPC-and-RPC](../03-gRPC-and-RPC/README.md) · Next: [05-Pub-Sub](../05-Pub-Sub/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [gRPC and RPC](../03-gRPC-and-RPC/README.md) · 🏠 [Level 3 — Communication](../README.md) · ➡️ **Next:** [Pub/Sub (Publish/Subscribe)](../05-Pub-Sub/README.md)
+
+🧩 **See it applied in:** [04 · Notification Service](../../Bonus-Real-World-Architectures/04-Notification-Service/README.md) · [05 · Web Crawler](../../Bonus-Real-World-Architectures/05-Web-Crawler/README.md) · [06 · Twitter/X News Feed](../../Bonus-Real-World-Architectures/06-News-Feed-Twitter/README.md) · [08 · WhatsApp](../../Bonus-Real-World-Architectures/08-WhatsApp-Chat/README.md) · [12 · Food Delivery (DoorDash / Swiggy)](../../Bonus-Real-World-Architectures/12-Food-Delivery/README.md) · [19 · Distributed Message Queue](../../Bonus-Real-World-Architectures/19-Distributed-Message-Queue/README.md) · [21 · Distributed Job Scheduler](../../Bonus-Real-World-Architectures/21-Distributed-Job-Scheduler/README.md) · [24 · Stock Exchange](../../Bonus-Real-World-Architectures/24-Stock-Exchange/README.md) · …and 3 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

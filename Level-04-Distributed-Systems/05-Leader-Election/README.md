@@ -66,24 +66,22 @@ sequenceDiagram
     participant N7 as Node 7 (ID=7 — dead)
 
     Note over N7: Node 7 (leader) crashes
+    Note over N3: Heartbeat from 7 times out, start an election
 
-    N5->>N7: Election — are you alive?
+    N3->>N5: Election (from ID=3)
+    N3->>N7: Election (from ID=3)
+    N5-->>N3: OK, I outrank you and take over (the bully)
     Note over N7: No response (dead)
-    N5->>N7: (timeout)
 
-    N5->>N7: Election message (ID=5)
-    N5-->>N5: No response from 7
+    N5->>N7: Election (from ID=5)
+    Note over N5: Timeout, nobody higher answered
 
-    N3->>N5: Election (ID=3)
-    N5-->>N3: "I'm higher — I'll run" (Bully!)
-
-    N5->>N1: Election (ID=5)
-    N1-->>N5: OK
-
-    Note over N5: N5 wins — highest active ID
-    N5->>N1: "I am the new leader"
-    N5->>N3: "I am the new leader"
+    Note over N5: N5 wins, highest live ID
+    N5->>N3: Coordinator, I am the new leader
+    N5->>N1: Coordinator, I am the new leader
 ```
+
+*Caption: A node only ever challenges nodes with higher IDs. Any live higher node answers OK and takes over the election, so the highest live ID ends up announcing itself as coordinator to everyone below it.*
 
 **Bully Algorithm Properties:**
 - Simple to implement
@@ -99,7 +97,7 @@ Nodes are arranged in a logical ring. The election message circulates around the
 flowchart LR
     N1["Node 1"] -->|"Election(1)"| N2["Node 2"]
     N2 -->|"Election(2)"| N3["Node 3"]
-    N3 -->|"Election(5)"| N4["Node 4 (dead)"]
+    N3 -->|"Election(3)"| N4["Node 4 (dead)"]
     N3 -->|"skip dead node"| N5["Node 5"]
     N5 -->|"Election(5)"| N6["Node 6"]
     N6 -->|"Election(6)"| N7["Node 7"]
@@ -136,6 +134,8 @@ flowchart TD
     style D fill:#d1fae5,stroke:#059669,color:#000
     style C fill:#fef9c3,stroke:#ca8a04,color:#000
 ```
+
+*Caption: A candidate becomes leader only with a majority of votes, and a split vote is resolved by retrying after a randomized delay, so two leaders can never be elected in the same term.*
 
 This is exactly what Raft does (see [Consensus: Paxos and Raft](../03-Consensus-Paxos-Raft/README.md)). The randomized election timeout is key: nodes wait a random duration before calling an election, which prevents all nodes from calling elections simultaneously and causing a split vote.
 
@@ -203,11 +203,13 @@ flowchart TD
     style WALL fill:#fef9c3,stroke:#ca8a04,color:#000
 ```
 
+*Caption: Split-brain: the isolated old leader keeps accepting writes while the majority side has already elected a new one, which is why leaders need leases and fencing tokens.*
+
 The old leader on the isolated side must eventually realize it's no longer the leader and **stop acting**. How?
 
 ### Fencing Tokens
 
-A **fencing token** is a monotonically increasing number issued with each leadership grant.
+A **[fencing token](../08-Distributed-Locking/README.md)** is a monotonically increasing number issued with each leadership grant.
 
 ```mermaid
 sequenceDiagram
@@ -246,9 +248,9 @@ Some systems use **STONITH** as a more aggressive split-brain remedy. When a new
 
 | Service | Algorithm | Use Case |
 |---|---|---|
-| **ZooKeeper** | ZAB (Zookeeper Atomic Broadcast) | Kafka broker leader election, HBase master election |
-| **etcd** | Raft | Kubernetes node/pod leadership, general distributed locking |
-| **Consul** | Raft | Service mesh, distributed locks, service leader election |
+| **ZooKeeper** | ZAB (Zookeeper Atomic Broadcast) | Kafka controller election (pre-KRaft), HBase master election |
+| **etcd** | Raft | [Kubernetes](../../Level-06-Scale-and-Reliability/07-Containers-and-Orchestration/README.md) node/pod leadership, general distributed locking |
+| **Consul** | Raft | [Service mesh](../../Level-05-Architecture-Patterns/09-Service-Mesh/README.md), distributed locks, service leader election |
 | **PostgreSQL Patroni** | etcd/Consul/ZooKeeper-backed | PostgreSQL primary election and failover |
 | **Redis Sentinel** | Custom (majority-based) | Redis master failover |
 
@@ -260,20 +262,20 @@ Some systems use **STONITH** as a more aggressive split-brain remedy. When a new
 | **Election timeout** | Spurious elections (leader load spike = election) | Slow recovery after real failure |
 | **Lease duration** | Frequent renewals | Long split-brain window if leader crashes |
 
-**Rule of thumb:** Election timeout should be 10–50× the heartbeat interval. Raft uses 150–300ms election timeout with ~50ms heartbeats.
+**Rule of thumb:** Election timeout should be roughly 10× the heartbeat interval. etcd defaults to a 100ms heartbeat and a 1000ms election timeout; the Raft paper suggests 150–300ms election timeouts.
 
 ---
 
 ## 🏢 Real-World Examples
 
 ### Kafka — ZooKeeper-Based (Legacy) / KRaft (Modern)
-Kafka used ZooKeeper for controller election (which broker is the "controller" responsible for partition leader assignments). Modern Kafka (2.8+) uses KRaft — Raft built into Kafka itself — eliminating the ZooKeeper dependency. The KRaft controller leader is elected via Raft among a dedicated set of controller nodes.
+Kafka used ZooKeeper for controller election (which broker is the "controller" responsible for partition leader assignments). Modern Kafka uses KRaft (introduced in 2.8, production-ready in 3.3, the only mode since 4.0) — Raft built into Kafka itself — eliminating the ZooKeeper dependency. The KRaft controller leader is elected via Raft among a dedicated set of controller nodes.
 
 ### Kubernetes — etcd + kube-controller-manager
 Kubernetes runs multiple controller-manager replicas for HA. They use etcd to elect a single active controller-manager leader. The leader holds a lease in etcd; if the lease expires (heartbeat missing), another replica acquires it and becomes the new leader.
 
 ### Elasticsearch — Master Node Election
-Elasticsearch runs a cluster with dedicated master-eligible nodes. They elect a master via a custom voting process requiring a majority of master-eligible nodes. Minimum master nodes (`discovery.zen.minimum_master_nodes`) must be set to ⌊N/2⌋+1 to prevent split-brain — one of the most common Elasticsearch operational mistakes when not set correctly.
+Elasticsearch runs a cluster with dedicated master-eligible nodes. They elect a master via a custom voting process requiring a majority of master-eligible nodes. Before Elasticsearch 7.0, minimum master nodes (`discovery.zen.minimum_master_nodes`) had to be set to ⌊N/2⌋+1 to prevent split-brain — one of the most common Elasticsearch operational mistakes when not set correctly. Since 7.0, Elasticsearch manages the voting quorum automatically.
 
 ### Redis Sentinel
 Redis Sentinel monitors Redis instances and performs automatic failover. When the master is unreachable, Sentinels vote (majority required) to elect a new master and reconfigure slaves to replicate from it. Sentinels themselves must reach a quorum — a deployment with 3 Sentinels can tolerate 1 failure.
@@ -312,15 +314,15 @@ Redis Sentinel monitors Redis instances and performs automatic failover. When th
 
 1. **Split-brain without fencing.** If your system doesn't use fencing tokens or STONITH, a partitioned old leader can continue making writes that conflict with the new leader's writes.
 
-2. **Asymmetric network issues.** The leader can reach followers, but followers can't reach each other. The leader is "healthy" but followers time out and call elections. This is a real production scenario and requires careful timeout tuning.
+2. **Asymmetric network issues.** A follower that cannot hear the leader's heartbeats, but can still reach the other nodes, keeps timing out and starting elections with ever-higher terms, repeatedly deposing a perfectly healthy leader. Raft's PreVote and CheckQuorum extensions (both available in etcd) exist to stop exactly this.
 
 3. **Clock skew in lease-based election.** If the leader's clock runs fast, its lease expires earlier than expected. If the clock runs slow, it might act as leader past the safe window. Lease-based systems must account for clock uncertainty.
 
-4. **Too-small election quorum.** Elasticsearch's split-brain comes from setting `minimum_master_nodes` too low. Always set quorum to ⌊N/2⌋+1.
+4. **Too-small election quorum.** Elasticsearch's classic (pre-7.0) split-brain came from setting `minimum_master_nodes` too low. Always set quorum to ⌊N/2⌋+1.
 
 5. **Slow election after leader crash.** If election timeouts are too long, there's significant downtime after a crash. Tune timeouts based on your SLA requirements.
 
-6. **Leader doing too much work.** All writes go through the leader — it's a bottleneck. Use read replicas for reads; shard your data across multiple Raft groups for write scale.
+6. **Leader doing too much work.** All writes go through the leader — it's a bottleneck. Use [read replicas](../../Level-02-Data-Layer/01-Database-Replication/README.md) for reads; shard your data across multiple Raft groups for write scale.
 
 ---
 
@@ -330,7 +332,7 @@ Redis Sentinel monitors Redis instances and performs automatic failover. When th
 - **Lead with consensus:** "The right way to do leader election is through a consensus protocol like Raft. Simpler algorithms like Bully aren't safe under network partitions."
 - **Mention split-brain and fencing tokens** — this distinguishes candidates who've thought about failure modes.
 - **Name real services:** "In production, I'd use etcd or ZooKeeper rather than implementing election myself. Kubernetes does this with kube-controller-manager holding a lease in etcd."
-- **For database failover questions:** "Patroni uses etcd/Consul/ZooKeeper to elect a PostgreSQL primary. The key is that only one node gets the fencing token at a time, and the storage layer rejects writes from old tokens."
+- **For database failover questions:** "Patroni uses etcd/Consul/ZooKeeper to elect a PostgreSQL primary. The primary holds a leader key with a TTL and must keep renewing it. If it cannot, it demotes itself before the TTL runs out, and a watchdog device can force a reboot if the Patroni process itself hangs. That self-fencing is what prevents two primaries."
 - **Lease vs Raft consensus per-read:** "Leases are cheaper for leader-serving reads but require careful clock management. For strict linearizability, you need Raft's read-index approach."
 
 ---
@@ -367,4 +369,14 @@ Redis Sentinel monitors Redis instances and performs automatic failover. When th
 - **ZooKeeper (2010):** "ZooKeeper: Wait-free Coordination for Internet-scale Systems" — USENIX ATC — ZAB-based election
 - **Patroni documentation:** github.com/zalando/patroni — PostgreSQL HA using etcd/Consul/ZooKeeper for election
 - **Elasticsearch: Zen Discovery:** Elasticsearch docs on master node election and split-brain prevention
-- **"Fencing and STONITH" chapter in "Database Reliability Engineering"** — Campbell & Majors, O'Reilly
+- **"Database Reliability Engineering"** — Campbell & Majors, O'Reilly — operational coverage of failover, fencing (STONITH), and split-brain
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Distributed Transactions](../04-Distributed-Transactions/README.md) · 🏠 [Level 4 — Distributed Systems](../README.md) · ➡️ **Next:** [Clocks and Ordering](../06-Clocks-and-Ordering/README.md)
+
+🧩 **See it applied in:** [21 · Distributed Job Scheduler](../../Bonus-Real-World-Architectures/21-Distributed-Job-Scheduler/README.md) · [26 · Unique ID Generator](../../Bonus-Real-World-Architectures/26-Unique-ID-Generator/README.md) · [37 · Distributed File System (GFS / HDFS)](../../Bonus-Real-World-Architectures/37-Distributed-File-System/README.md) · [39 · Distributed Coordination Service (ZooKeeper / etcd)](../../Bonus-Real-World-Architectures/39-Distributed-Coordination-Service/README.md) · [18 · Distributed Cache](../../Bonus-Real-World-Architectures/18-Distributed-Cache/README.md) · [19 · Distributed Message Queue](../../Bonus-Real-World-Architectures/19-Distributed-Message-Queue/README.md) · [20 · Ad Click Aggregator](../../Bonus-Real-World-Architectures/20-Ad-Click-Aggregator/README.md) · [24 · Stock Exchange](../../Bonus-Real-World-Architectures/24-Stock-Exchange/README.md) · …and 1 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

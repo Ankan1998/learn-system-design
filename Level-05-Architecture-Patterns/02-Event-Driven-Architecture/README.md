@@ -179,8 +179,8 @@ stateDiagram-v2
 | Broker | Best For | Retention | Ordering | Throughput |
 |--------|----------|-----------|----------|------------|
 | **Apache Kafka** | High-throughput, replay, log-based | Days–forever | Per partition | Millions/sec |
-| **AWS SNS/SQS** | Serverless, simple fan-out | SQS: up to 14 days | No (SQS FIFO: per group) | High |
-| **Google Pub/Sub** | GCP ecosystems, global scale | 7 days (configurable) | No | High |
+| **AWS SNS/SQS** | [Serverless](../08-Serverless-Architecture/README.md), simple fan-out | SQS: up to 14 days | No (SQS FIFO: per group) | High |
+| **Google Pub/Sub** | GCP ecosystems, global scale | 7 days (configurable) | Optional (per ordering key) | High |
 | **RabbitMQ** | Traditional message queuing | Until consumed | Per queue | Moderate |
 | **AWS EventBridge** | Event routing, SaaS integration | No storage | No | Moderate |
 | **NATS** | Ultra-low latency | Optional (JetStream) | Per subject | Very high |
@@ -239,7 +239,7 @@ stateDiagram-v2
 
 ## ⚠️ Common Pitfalls
 
-**Event schema changes break consumers:** Adding a required field to an event breaks all consumers that haven't been updated. Use schema versioning, backward-compatible changes (add fields, never remove), and a schema registry (Confluent Schema Registry, AWS Glue Schema Registry).
+**Event schema changes break consumers:** Adding a required field to an event breaks all consumers that haven't been updated. Use schema versioning, backward-compatible changes (add fields, never remove), and a [schema registry](../../Level-03-Communication/09-Data-Serialization-and-Schema-Evolution/README.md) (Confluent Schema Registry, AWS Glue Schema Registry).
 
 **Treating events like commands:** `ProcessPayment` is a command, not an event. If your event names are imperative ("do this"), you're thinking about it wrong. Events are facts: `PaymentRequested`, `PaymentProcessed`.
 
@@ -292,8 +292,13 @@ stateDiagram-v2
 - [Confluent — Event Streaming Fundamentals](https://developer.confluent.io/learn-kafka/) — Kafka deep dive
 - [Gregor Hohpe — Enterprise Integration Patterns](https://www.enterpriseintegrationpatterns.com/) — the canonical patterns book
 - [Netflix Tech Blog — Kafka at Netflix](https://netflixtechblog.com/kafka-inside-keystone-pipeline-dd5aeabaf6bb) — real-world scale
-- Next: [CQRS & Event Sourcing](../03-CQRS-and-Event-Sourcing/README.md) — taking events further as the source of truth
 
 ---
 
-*← [Monolith vs Microservices](../01-Monolith-vs-Microservices/README.md) · [Level 05 Overview](../README.md) · Next: [CQRS & Event Sourcing](../03-CQRS-and-Event-Sourcing/README.md) →*
+<!-- nav:start -->
+
+⬅️ **Previous:** [Monolith vs Microservices](../01-Monolith-vs-Microservices/README.md) · 🏠 [Level 5 — Architecture Patterns](../README.md) · ➡️ **Next:** [CQRS and Event Sourcing](../03-CQRS-and-Event-Sourcing/README.md)
+
+🧩 **See it applied in:** [36 · Webhook Delivery Service](../../Bonus-Real-World-Architectures/36-Webhook-Delivery-Service/README.md) · [01 · URL Shortener](../../Bonus-Real-World-Architectures/01-URL-Shortener/README.md)
+
+<!-- nav:end -->

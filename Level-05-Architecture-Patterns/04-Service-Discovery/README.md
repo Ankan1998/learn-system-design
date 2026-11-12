@@ -2,7 +2,7 @@
 
 > **Service Discovery** is the mechanism by which services in a distributed system find and communicate with each other, even when service instances are constantly starting, stopping, and moving to new IP addresses.
 
-**Level:** 5 · **Topic:** 4 · **Prerequisites:** [Monolith vs Microservices](../01-Monolith-vs-Microservices/README.md) · [Level 02 — Load Balancing](../../Level-02-Data-Layer/README.md)
+**Level:** 5 · **Topic:** 4 · **Prerequisites:** [Monolith vs Microservices](../01-Monolith-vs-Microservices/README.md) · [Load Balancing](../../Level-01-Building-Blocks/02-Load-Balancing/README.md)
 
 ---
 
@@ -11,7 +11,7 @@
 In a microservices architecture, services run as multiple instances across many machines. Unlike a traditional setup where you point your app at `db.company.com:5432` and that IP never changes, in a containerized world:
 
 - The Payment Service might have 10 instances running on different machines
-- Every time Kubernetes restarts a pod, it gets a new IP address
+- Every time [Kubernetes](../../Level-06-Scale-and-Reliability/07-Containers-and-Orchestration/README.md) restarts a pod, it gets a new IP address
 - Instances scale up and down based on load — you don't know how many will exist
 - A hardcoded IP list in your config file is impossible to maintain
 
@@ -140,9 +140,9 @@ graph TD
     POD[Service Client Pod] -->|"DNS lookup:<br/>payment-svc.default.svc.cluster.local"| DNS[CoreDNS]
     DNS -->|"returns ClusterIP:<br/>10.96.0.42"| POD
     POD -->|"TCP to 10.96.0.42:8080"| KS["Kubernetes Service<br/>(virtual IP)"]
-    KS -->|"round-robin"| P1[Pod 10.0.1.10]
-    KS -->|"round-robin"| P2[Pod 10.0.1.11]
-    KS -->|"round-robin"| P3[Pod 10.0.1.12]
+    KS -->|"kube-proxy picks one pod<br/>per connection"| P1[Pod 10.0.1.10]
+    KS --> P2[Pod 10.0.1.11]
+    KS --> P3[Pod 10.0.1.12]
 
     style DNS fill:#d4edda,color:#000
     style KS fill:#fff3cd,color:#000
@@ -235,7 +235,7 @@ graph TD
 
 **Health check mismatch:** A health check that only pings "is the process alive?" is insufficient. An instance can be alive but unable to connect to its database. Deep health checks that verify downstream dependencies give a more accurate picture of instance health.
 
-**Registry as a single point of failure:** If your registry goes down, no new service lookups can occur. Run the registry as a cluster (Consul uses Raft consensus, Eureka runs in AP mode). Cache the registry client-side so existing connections survive registry downtime.
+**Registry as a single point of failure:** If your registry goes down, no new service lookups can occur. Run the registry as a cluster (Consul uses [Raft](../../Level-04-Distributed-Systems/03-Consensus-Paxos-Raft/README.md) consensus, Eureka runs in AP mode). Cache the registry client-side so existing connections survive registry downtime.
 
 **Slow deregistration after crash:** If a service crashes without gracefully deregistering, clients may route to it until the TTL expires (typically 30–90 seconds). During this window, requests fail. Combine with circuit breakers to fail fast.
 
@@ -286,4 +286,8 @@ graph TD
 
 ---
 
-*← [CQRS & Event Sourcing](../03-CQRS-and-Event-Sourcing/README.md) · [Level 05 Overview](../README.md) · Next: [API Gateway](../05-API-Gateway/README.md) →*
+<!-- nav:start -->
+
+⬅️ **Previous:** [CQRS and Event Sourcing](../03-CQRS-and-Event-Sourcing/README.md) · 🏠 [Level 5 — Architecture Patterns](../README.md) · ➡️ **Next:** [API Gateway](../05-API-Gateway/README.md)
+
+<!-- nav:end -->

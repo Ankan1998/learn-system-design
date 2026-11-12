@@ -4,7 +4,7 @@
 
 ---
 
-**Level:** 7 · **Topic:** 4 of 6 · **Prerequisites:** [Level 02 — Sharding & Partitioning](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md) · [Level 04 — Distributed Systems](../../Level-04-Distributed-Systems/README.md) · [03 — Data Warehouses & Lakes](../03-Data-Warehouses-and-Lakes/README.md)
+**Level:** 7 · **Topic:** 4 of 9 · **Prerequisites:** [Level 2 — Sharding & Partitioning](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md) · [Level 4 — Distributed Systems](../../Level-04-Distributed-Systems/README.md) · [03 — Data Warehouses & Lakes](../03-Data-Warehouses-and-Lakes/README.md)
 
 ---
 
@@ -13,7 +13,7 @@
 GitHub hosts 420 million repositories. When you search for `"merge sort javascript"`, you expect:
 - Results in **under 200 ms**
 - Relevant files ranked by importance, not random order
-- Results across **all 420 million repos** (petabytes of code)
+- Results across **tens of millions of indexed repos** (over 100 TB of code after forks and duplicates are excluded)
 - Partial matches and typo tolerance
 
 A traditional database `WHERE content LIKE '%merge sort%'` would scan every row in every table — impossible at this scale. You need a data structure specifically designed for text search.
@@ -63,7 +63,7 @@ flowchart TD
     end
 
     subgraph INDEX["Inverted Index"]
-        I1["brown → [Doc1:pos2, Doc3:pos2]"]
+        I1["brown → [Doc1:pos3, Doc3:pos2]"]
         I2["dog → [Doc3:pos3]"]
         I3["fox → [Doc1:pos4, Doc2:pos2]"]
         I4["high → [Doc2:pos4]"]
@@ -148,7 +148,7 @@ Where:
 | **Stemmer** | Reduce to root form | `"running"` → `"run"`, `"dogs"` → `"dog"` |
 | **Lemmatizer** | Linguistic root form | `"better"` → `"good"` (smarter than stemmer) |
 | **Synonym filter** | Expand terms | `"car"` → also match `"automobile"` |
-| **N-gram tokenizer** | Substrings for autocomplete | `"apple"` → `"ap","app","appl","apple"` |
+| **N-gram tokenizer** | Substrings for partial matching | `"apple"` → `"ap","pp","pl","le"` (bigrams) |
 | **Edge n-gram** | Prefix matching | `"apple"` → `"a","ap","app","appl","apple"` |
 
 ### Elasticsearch Architecture
@@ -177,7 +177,7 @@ flowchart TD
     style CLIENT fill:#e8f8f0,color:#000
 ```
 
-**Caption:** A query hits the coordinating node, which fans out to all primary shards in parallel. Each shard returns its local top-K results. The coordinator merges all partial results, re-ranks globally, and returns the final top-K. This is the "scatter-gather" pattern.
+**Caption:** A query hits the coordinating node, which fans out to one copy (primary or replica) of every shard in parallel. Each shard returns its local top-K results. The coordinator merges all partial results, re-ranks globally, and returns the final top-K. This is the "scatter-gather" pattern.
 
 ### Sharding a Search Index
 
@@ -195,7 +195,7 @@ flowchart TD
 | **Exact term** | Keyword, ID lookups | `status: "active"` |
 | **Range** | Dates, numbers | `price: [10 TO 50]` |
 | **Phrase** | Word order matters | `"New York"` (not "York New") |
-| **Fuzzy** | Typo tolerance | `"recieve"` matches `"receive"` (edit distance 2) |
+| **Fuzzy** | Typo tolerance | `"recieve"` matches `"receive"` (edit distance 1 — one transposition) |
 | **Wildcard** | Pattern matching | `"quick*"` matches `"quicksort"` |
 | **Aggregation** | Facets, analytics | Count by category, date histogram |
 
@@ -207,7 +207,7 @@ flowchart TD
 Uber uses Elasticsearch to power their internal trip search — finding any of 15 billion+ historical trips by rider, driver, city, status, date range. The index contains **100+ TB** of data across 100+ shards. Key insight: they use time-based indices (one index per month) and alias them — querying recent data hits only recent shards, so most searches scan <10% of the total index.
 
 ### GitHub Code Search
-GitHub rebuilt their code search in 2023 using a custom engine (Zoekt, a trigram-based code search engine). They index **45 million repositories**, ~100 TB of code. Unlike prose, code search needs exact substring matches (`strncmp` should match exactly), not stemming. They chose trigram indexing (breaking code into 3-char sequences) over traditional term-based indexing to handle code's unique characteristics (symbols, operators, case-sensitivity).
+GitHub rebuilt their code search in 2023 using a custom engine (Blackbird, a Rust-based n-gram code search engine). They index **45 million repositories**, ~115 TB of code (forks and near-duplicates of the 420 million hosted repos are left out). Unlike prose, code search needs exact substring matches (`strncmp` should match exactly), not stemming. They chose trigram indexing (breaking code into 3-char sequences) over traditional term-based indexing to handle code's unique characteristics (symbols, operators, case-sensitivity).
 
 ### Algolia
 Algolia is a hosted search service processing **1.75 trillion search queries per year**. Their key differentiator: sub-10 ms latency for autocomplete, achieved by storing the entire index in RAM (memory-mapped, never touching disk for hot queries), and pre-building prefix trees on every attribute. They serve 10,000+ companies including Twitch and Medium.
@@ -239,7 +239,7 @@ Algolia is a hosted search service processing **1.75 trillion search queries per
 - You need strong consistency and ACID transactions (use PostgreSQL)
 - Your queries are simple key-value lookups (use Redis or a database)
 - You're doing analytics over structured data (use a data warehouse)
-- You need vector/semantic search (use pgvector or a vector database — see [Topic 05](../05-Recommendation-and-ML-Systems/README.md))
+- You need vector/semantic search (use pgvector or a [vector database](../09-AI-and-LLM-Infrastructure/README.md) — see [Topic 05](../05-Recommendation-and-ML-Systems/README.md))
 
 ---
 
@@ -291,7 +291,16 @@ Algolia is a hosted search service processing **1.75 trillion search queries per
 
 - [Elasticsearch: The Definitive Guide](https://www.elastic.co/guide/en/elasticsearch/guide/current/index.html) — Free online; covers inverted index, analysis, mapping
 - [Apache Lucene](https://lucene.apache.org/) — The engine under Elasticsearch and OpenSearch
-- [BM25 Paper](https://dl.acm.org/doi/10.1561/1500000019) — "Probabilistic Relevance Models" by Robertson & Zaragoza
+- [BM25 Paper](https://dl.acm.org/doi/10.1561/1500000019) — "The Probabilistic Relevance Framework: BM25 and Beyond" by Robertson & Zaragoza
 - [GitHub's Code Search Explained](https://github.blog/2023-02-06-the-technology-behind-githubs-new-code-search/) — How they rebuilt at 45M repo scale
 - Related: [Bonus 22 — Google Search](../../Bonus-Real-World-Architectures/22-Google-Search/README.md)
-- Next: [05 — Recommendation & ML Systems](../05-Recommendation-and-ML-Systems/README.md) — where vector search meets inverted index
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Data Warehouses & Lakes](../03-Data-Warehouses-and-Lakes/README.md) · 🏠 [Level 7 — Big Data & Specialized Systems](../README.md) · ➡️ **Next:** [Recommendation & ML Systems](../05-Recommendation-and-ML-Systems/README.md)
+
+🧩 **See it applied in:** [32 · Gmail-Style Email Service](../../Bonus-Real-World-Architectures/32-Email-Service/README.md)
+
+<!-- nav:end -->

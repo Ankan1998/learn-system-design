@@ -135,7 +135,7 @@ flowchart LR
         D --> A
     end
     K1["Key 'user:42'<br/>hash=45°<br/>→ Node B"] -.-> B
-    K2["Key 'user:99'<br/>hash=200°<br/>→ Node C"] -.-> C
+    K2["Key 'user:99'<br/>hash=170°<br/>→ Node C"] -.-> C
 
     style A fill:#fde68a,color:#000
     style B fill:#fde68a,color:#000
@@ -147,7 +147,7 @@ flowchart LR
 
 *Caption: Keys map to the next node clockwise. Adding a node only migrates keys between it and its predecessor.*
 
-See also: [Caching — Consistent Hashing](../../Level-01-Building-Blocks/03-Caching/README.md) for the caching context of this algorithm.
+See also: [Consistent Hashing](../08-Consistent-Hashing/README.md) for the full treatment (virtual nodes, replication, bounded loads), and [Caching](../../Level-01-Building-Blocks/03-Caching/README.md) for the caching context of this algorithm.
 
 ---
 
@@ -178,8 +178,8 @@ directory_service.lookup("user_id:42") → Shard 7
 
 ## 🏢 Real-World Examples
 
-- **Instagram (PostgreSQL sharding):** sharded by `user_id` using a custom logical sharding layer on top of Postgres. 12 shards originally, then migrated to Citus (distributed Postgres extension).
-- **Cassandra (consistent hashing):** each row's partition key is hashed onto a ring. Every cluster node owns a token range. Adding a node triggers a `nodetool repair` on just the affected range.
+- **Instagram (PostgreSQL sharding):** sharded by `user_id` using a custom logical sharding layer on top of Postgres. several thousand logical shards (Postgres schemas) mapped onto a much smaller number of physical servers.
+- **Cassandra (consistent hashing):** each row's partition key is hashed onto a ring. Every cluster node owns a token range. Adding a node bootstraps it by streaming just the affected token ranges (then `nodetool cleanup` on the old owners).
 - **MongoDB (range + hash):** supports both range and hashed shard keys via the `mongos` router. The config server stores the chunk map (a form of directory service).
 - **Discord (Cassandra):** stores billions of messages sharded by `(channel_id, bucket)` where `bucket = timestamp / 10_days`. The bucket prevents any single channel from creating unbounded partition growth.
 - **Vitess (YouTube/GitHub):** a MySQL sharding middleware that handles routing, resharding, and query rewriting for horizontally scaled MySQL clusters.
@@ -216,7 +216,7 @@ directory_service.lookup("user_id:42") → Shard 7
 
 ## ⚠️ Common Pitfalls
 
-1. **Choosing the wrong shard key.** User activity is rarely uniform — some users (celebrities, viral content) generate orders of magnitude more reads/writes. A `user_id` shard for a social network means Justin Bieber's shard is 1000x hotter than average (the "celebrity problem"). Solutions: prefix the key with a random suffix or use a separate hot-user routing layer.
+1. **Choosing the wrong shard key.** User activity is rarely uniform — some users (celebrities, viral content) generate orders of magnitude more reads/writes. A `user_id` shard for a social network means Justin Bieber's shard is 1000x hotter than average (the "celebrity problem"). Solutions: append a random suffix to the key or use a separate hot-user routing layer.
 
 2. **Hot partition = single-shard bottleneck.** Even with hash sharding, if one key is queried millions of times per second, its shard becomes a bottleneck. This is different from uneven distribution — it's a single *key* that's hot. Cache these keys at the application layer.
 
@@ -265,4 +265,13 @@ directory_service.lookup("user_id:42") → Shard 7
 - [Vitess Overview](https://vitess.io/docs/overview/) — see how YouTube shards MySQL.
 - [Cassandra Data Partitioning](https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html)
 - [Discord — How Discord Stores Billions of Messages](https://discord.com/blog/how-discord-stores-billions-of-messages)
-- Previous: [01 — Database Replication](../01-Database-Replication/README.md) · Next: [03 — Indexing](../03-Indexing/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Database Replication](../01-Database-Replication/README.md) · 🏠 [Level 2 — The Data Layer](../README.md) · ➡️ **Next:** [Indexing](../03-Indexing/README.md)
+
+🧩 **See it applied in:** [01 · URL Shortener](../../Bonus-Real-World-Architectures/01-URL-Shortener/README.md) · [06 · Twitter/X News Feed](../../Bonus-Real-World-Architectures/06-News-Feed-Twitter/README.md) · [10 · Typeahead / Autocomplete](../../Bonus-Real-World-Architectures/10-Typeahead-Autocomplete/README.md) · [18 · Distributed Cache](../../Bonus-Real-World-Architectures/18-Distributed-Cache/README.md) · [22 · Google Search](../../Bonus-Real-World-Architectures/22-Google-Search/README.md) · [23 · Distributed Counter & Analytics](../../Bonus-Real-World-Architectures/23-Distributed-Counter-Analytics/README.md) · [26 · Unique ID Generator](../../Bonus-Real-World-Architectures/26-Unique-ID-Generator/README.md) · [35 · Gaming Leaderboard](../../Bonus-Real-World-Architectures/35-Gaming-Leaderboard/README.md) · …and 12 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

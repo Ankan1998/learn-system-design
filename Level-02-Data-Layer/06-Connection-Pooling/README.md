@@ -16,7 +16,7 @@ Opening a Postgres connection costs:
 - **Postgres authentication** (password hash, pg_hba.conf check): ~2–5ms
 - **Process fork on Postgres side:** Postgres spawns one OS process per connection (~5–10 MB RAM each)
 
-Total overhead: **~5–10ms per connection open**, plus the Postgres server consuming ~10 MB RAM per connection. At 10 000 requests/second you'd need 10 000 simultaneous connections — that's 100 GB of RAM on the DB server just for connection overhead. Postgres's default `max_connections = 100` means your app will be refused connections almost immediately.
+Total overhead: **~5–10ms per connection open**, plus the Postgres server consuming ~10 MB RAM per connection. At 10 000 requests/second you'd be opening and closing 10 000 connections every second, so the database spends more effort on handshakes and process startup than on queries. Each request also holds its connection for the setup time plus the query time: at ~20 ms per request that is ~200 connections open at once (2 GB of RAM), and any slowdown multiplies it. Postgres's default `max_connections = 100` means your app will be refused connections almost immediately.
 
 Connection pooling solves this by reusing connections across many requests.
 
@@ -199,15 +199,15 @@ PgBouncer is a lightweight Postgres-specific connection pooler that sits between
 | **pgpool-II** | External proxy | Connection + load balancing | Also handles read/write splitting |
 | **SQLAlchemy Pool** | Python | Connection pool | Built into SQLAlchemy; configurable |
 | **node-postgres (pg)** | Node.js | Connection pool | `pg.Pool` class; async-friendly |
-| **prisma** | Node.js/TypeScript | Connection pool | Built-in pool; Prisma Accelerate for serverless |
+| **prisma** | Node.js/TypeScript | Connection pool | Built-in pool; Prisma Accelerate for [serverless](../../Level-05-Architecture-Patterns/08-Serverless-Architecture/README.md) |
 
 ---
 
 ## 🏢 Real-World Examples
 
-- **Heroku Postgres:** every Heroku Postgres plan comes with PgBouncer via the "connection string" add-on. Without it, the basic plan allows only 25 connections — not enough for a busy app.
+- **Heroku Postgres:** offers server-side PgBouncer ("Connection Pooling") on its production plans. The entry-level plans cap you at roughly 20 connections — not enough for a busy app without a pooler.
 - **Supabase:** uses PgBouncer in transaction mode between app connections and Postgres. Allows thousands of simultaneous Supabase clients while holding only ~20 Postgres connections.
-- **Airbnb (HikariCP + Postgres):** Airbnb's Java services use HikariCP. They published findings showing pool size of ~10 per service instance was optimal — consistent with the `core_count * 2 + 1` formula.
+- **HikariCP's "About Pool Sizing" guide:** documents an Oracle performance demo in which shrinking a pool from 2,048 connections to 96 cut response times by roughly 50× under the same load — the evidence behind the `core_count * 2 + 1` starting formula.
 - **Shopify (ProxySQL for MySQL):** Shopify runs ProxySQL in front of MySQL, which handles connection pooling plus read/write splitting (routing reads to replicas automatically).
 - **PlanetScale / Neon:** serverless database platforms handle connection pooling internally so that each serverless function invocation doesn't need its own persistent connection.
 
@@ -289,4 +289,13 @@ PgBouncer is a lightweight Postgres-specific connection pooler that sits between
 - [PgBouncer Documentation](https://www.pgbouncer.org/usage.html)
 - [AWS RDS Proxy](https://aws.amazon.com/rds/proxy/) — managed connection pooler for serverless.
 - [Supabase — Connection Pooling](https://supabase.com/docs/guides/database/connection-pooling)
-- Previous: [05 — ACID and Transactions](../05-ACID-and-Transactions/README.md) · Next: [07 — Data Modeling](../07-Data-Modeling/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [ACID and Transactions](../05-ACID-and-Transactions/README.md) · 🏠 [Level 2 — The Data Layer](../README.md) · ➡️ **Next:** [Data Modeling](../07-Data-Modeling/README.md)
+
+🧩 **See it applied in:** [11 · Uber Ride-Sharing](../../Bonus-Real-World-Architectures/11-Uber-Ride-Sharing/README.md) · [12 · Food Delivery (DoorDash / Swiggy)](../../Bonus-Real-World-Architectures/12-Food-Delivery/README.md) · [16 · Ticketmaster](../../Bonus-Real-World-Architectures/16-Ticketmaster/README.md) · [31 · E-Commerce Platform (Amazon)](../../Bonus-Real-World-Architectures/31-E-Commerce-Platform/README.md)
+
+<!-- nav:end -->

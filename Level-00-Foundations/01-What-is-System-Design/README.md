@@ -101,7 +101,7 @@ Whether you are in a job interview or designing a real production system, the sa
 
 1. **Requirements** — Clarify what the system must do (functional) and how well (non-functional). Ask questions. State assumptions.
 2. **Estimation** — Rough-order-of-magnitude math: how much storage, bandwidth, and compute will you need?
-3. **High-Level Design** — Draw the big boxes: clients, load balancers, servers, databases, caches, message queues.
+3. **High-Level Design** — Draw the big boxes: clients, load balancers, servers, databases, caches, [message queues](../../Level-03-Communication/04-Message-Queues/README.md).
 4. **Deep Dive** — Zoom into the hardest or most critical components and explain your design choices in detail.
 5. **Bottlenecks and Trade-offs** — Identify where the system could fail or slow down, and explain what you would sacrifice (cost, complexity, consistency) to fix it.
 
@@ -158,7 +158,7 @@ graph TD
 | Video streaming | YouTube, Netflix | Bandwidth, CDN, adaptive bitrate |
 | Ride-sharing | Uber, Lyft | Geo-indexing, real-time matching, surge pricing |
 | Search engine | Google, Elasticsearch | Inverted index, ranking, query latency |
-| Rate limiter | API gateways everywhere | Distributed counters, fairness, accuracy |
+| [Rate limiter](../../Level-03-Communication/07-Rate-Limiting/README.md) | API gateways everywhere | Distributed counters, fairness, accuracy |
 | Distributed cache | Redis, Memcached | Eviction policies, consistency, cache stampede |
 | Notification service | Push notifications (iOS/Android) | Fan-out, delivery guarantees, throttling |
 | File storage | Google Drive, Dropbox | Chunking, deduplication, sync conflicts |
@@ -175,19 +175,40 @@ Netflix's core functional requirement is simple: "Users can watch a video." But 
 - **Latency:** Video playback must start in under 3 seconds. Netflix pre-positions video files in CDN (Content Delivery Network) nodes physically close to users — over 17,000 servers in 158 countries as of 2023.
 - **Adaptive bitrate:** If your internet connection drops from 50 Mbps to 2 Mbps mid-stream, Netflix smoothly downgrades video quality rather than buffering. This is a non-functional requirement disguised as a feature.
 
-The entire architecture of Netflix — its microservices, its CDN, its chaos engineering (intentionally killing servers to test resilience) — exists to satisfy non-functional requirements.
+The entire architecture of Netflix — its microservices, its CDN, its [chaos engineering](../../Level-06-Scale-and-Reliability/08-Testing-Distributed-Systems/README.md) (intentionally killing servers to test resilience) — exists to satisfy non-functional requirements.
+
+```mermaid
+flowchart LR
+    FR["Functional requirement<br/>Users can watch a video"]
+    FR --> N1["Availability<br/>99.99% uptime"]
+    FR --> N2["Latency<br/>playback starts in under 3 s"]
+    FR --> N3["Resilience to bad networks<br/>no buffering"]
+    N1 --> A1["Runs in several<br/>AWS regions at once"]
+    N2 --> A2["Video files pre-positioned on<br/>CDN servers close to users"]
+    N3 --> A3["Adaptive bitrate: every title<br/>encoded at many quality levels"]
+
+    style FR fill:#dbeafe,color:#000
+    style N1 fill:#fef9c3,color:#000
+    style N2 fill:#fef9c3,color:#000
+    style N3 fill:#fef9c3,color:#000
+    style A1 fill:#dcfce7,color:#000
+    style A2 fill:#dcfce7,color:#000
+    style A3 fill:#dcfce7,color:#000
+```
+
+*Caption: The functional requirement fits on a sticky note. Each non-functional requirement beneath it forces a major piece of the architecture.*
 
 ### Uber — The 5-Step Framework in Practice
 
 When Uber's engineers designed the driver-matching system, they went through exactly the 5-step process:
 
-1. **Requirements:** Riders need a nearby driver matched in under 10 seconds. The system must handle 14 million trips per day globally (their 2019 figure).
+1. **Requirements:** Riders need a nearby driver matched in under 10 seconds. The system must handle 14 million trips per day globally (their 2018 figure).
 2. **Estimation:** At peak, ~10,000 ride requests per second worldwide. Each request needs to query driver locations within a 1-mile radius.
 3. **High-level design:** A geo-indexing service (using S2 cells, a geospatial library from Google) partitions the map into cells. Drivers broadcast their GPS location every 4 seconds.
 4. **Deep dive:** The matching algorithm weighs distance, driver rating, and estimated arrival time. Supply-demand data feeds into surge pricing calculations in real time.
 5. **Bottlenecks:** GPS updates from millions of drivers create a write-heavy workload. Uber solved this by using in-memory stores (Redis) for live driver locations and only persisting completed trips to the database.
 
-### WhatsApp — Scaling to 1 Million Users Per Engineer
+### WhatsApp — Scaling to 14 Million Users Per Engineer
 
 By 2014, WhatsApp served 450 million monthly active users with a team of only 32 engineers. That is roughly 14 million users per engineer — a ratio unmatched in the industry.
 
@@ -215,7 +236,7 @@ The lesson: clear non-functional requirements force architectural clarity. When 
 | **Con** | Requirements change, making some early decisions obsolete | Technical debt compounds fast |
 | **Verdict** | Use for anything expected to handle real user load | Use only for solo experiments or day-1 MVPs |
 
-The sweet spot: spend just enough time on design to avoid catastrophic architecture mistakes, then iterate. Amazon's rule of thumb is a "two-pizza team" can complete a design doc in a week. If it takes longer, the scope is too large.
+The sweet spot: spend just enough time on design to avoid catastrophic architecture mistakes, then iterate. A useful rule of thumb: if a small team (Amazon's famous "two-pizza team" of six to ten people) cannot write and review the design doc in about a week, the scope is probably too large and should be split.
 
 ---
 
@@ -258,7 +279,7 @@ It is tempting to focus only on features because they are tangible and testable.
 
 ### 4. Designing for 1000x More Scale Than You Need
 
-Over-engineering is just as dangerous as under-engineering. If your product has 10,000 users, you do not need a Kubernetes cluster with 50 microservices. Keep it simple until the complexity is justified by real data.
+Over-engineering is just as dangerous as under-engineering. If your product has 10,000 users, you do not need a [Kubernetes](../../Level-06-Scale-and-Reliability/07-Containers-and-Orchestration/README.md) cluster with 50 microservices. Keep it simple until the complexity is justified by real data.
 
 ### 5. Forgetting the "Failure" Question
 
@@ -317,3 +338,11 @@ System design interviews are intentionally open-ended. There is rarely one corre
 - **High Scalability blog** (highscalability.com) — Real architecture breakdowns of how companies like Stack Overflow, Discord, and Pinterest actually built their systems at scale. Start with the "Real Life Architectures" section.
 - **The System Design Primer** on GitHub (donnemartin/system-design-primer) — Free, open-source collection of system design resources and interview prep materials with diagrams and example answers.
 - **ByteByteGo Newsletter** by Alex Xu — Weekly visual explainers of system design concepts, published at blog.bytebytego.com.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Level 0 — Foundations (overview)](../README.md) · ➡️ **Next:** [The Client-Server Model](../02-Client-Server-Model/README.md)
+
+<!-- nav:end -->

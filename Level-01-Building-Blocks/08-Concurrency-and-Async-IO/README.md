@@ -317,5 +317,14 @@ Project Loom lets existing blocking Java code (`InputStream.read()`, JDBC) run o
 - [What Color is Your Function? — Bob Nystrom](https://journal.stuffwithstuff.com/2015/02/01/what-color-is-your-function/) — the definitive critique of async/await's spread.
 - [Architecture of Open Source Applications: Nginx](https://aosabook.org/en/v2/nginx.html) — how the worker/event-loop design is laid out.
 - [Why Discord is switching from Go to Rust](https://discord.com/blog/why-discord-is-switching-from-go-to-rust) — GC pauses versus green threads.
-- Previous: [07 — Stateless vs Stateful](../07-Stateless-vs-Stateful/README.md) · Next Level: [Level 02 — Data Layer](../../Level-02-Data-Layer/README.md) · Back to [Level 01 Overview](../README.md)
 - See also: [Connection Pooling](../../Level-02-Data-Layer/06-Connection-Pooling/README.md) · [WebSockets & Real-Time](../../Level-03-Communication/06-WebSockets-and-Realtime/README.md) · [Load Balancing](../02-Load-Balancing/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Stateless vs Stateful](../07-Stateless-vs-Stateful/README.md) · 🏠 [Level 1 — Building Blocks](../README.md) · ➡️ **Next:** [Level 2 — The Data Layer](../../Level-02-Data-Layer/README.md)
+
+🧩 **See it applied in:** [08 · WhatsApp](../../Bonus-Real-World-Architectures/08-WhatsApp-Chat/README.md)
+
+<!-- nav:end -->

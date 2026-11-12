@@ -31,7 +31,7 @@ The naive answer — `SELECT ... ORDER BY score DESC` — works beautifully at 1
 - A player's total score is never lost (survives cache restarts)
 
 ### Non-Functional
-- **p99 read latency < 50 ms** (leaderboard screen opens constantly)
+- **[p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) read latency < 50 ms** (leaderboard screen opens constantly)
 - **p99 write latency < 100 ms** (score visible before the post-match screen finishes animating)
 - Scale: 25 M MAU, 5 M DAU; handle 10× traffic spikes (tournament final day)
 - Availability > 99.9% for reads; a stale-by-seconds leaderboard is acceptable, a wrong score is not
@@ -55,7 +55,7 @@ The naive answer — `SELECT ... ORDER BY score DESC` — works beautifully at 1
 - 25 M MAU × 150 B ≈ **~4 GB per month's sorted set** — fits comfortably on one 16 GB node, even keeping the previous month live too (~8 GB)
 
 **Storage (source of truth, Postgres)**
-- One `match_result` row ≈ 100 B × 50 M/day ≈ **5 GB/day → ~150 GB/month** → partition by month, archive old partitions to object storage
+- One `match_result` row ≈ 100 B × 50 M/day ≈ **5 GB/day → ~150 GB/month** → partition by month, archive old partitions to [object storage](../../Level-02-Data-Layer/09-Object-Storage/README.md)
 
 The punchline of the math: **this workload fits on one Redis primary + one replica.** The design effort goes into durability and the monthly lifecycle, not raw throughput.
 
@@ -84,11 +84,11 @@ Each endpoint maps to one or two Redis commands:
 ZINCRBY  lb:2026-07 25 p_8f3a              # add points            O(log N)
 ZREVRANGE lb:2026-07 0 9 WITHSCORES        # top-10                O(log N + 10)
 ZREVRANK lb:2026-07 p_8f3a                 # my rank (0-based)     O(log N)
-ZREVRANGE lb:2026-07 78428 78436 WITHSCORES # 4 above + me + 4 below
+ZREVRANGE lb:2026-07 78427 78435 WITHSCORES # 4 above + me + 4 below (0-based 78431 = displayed rank 78432)
 ZSCORE   lb:2026-07 p_8f3a                 # my score              O(1)
 ```
 
-**Tie-breaking:** two players with equal scores are ordered lexicographically by member — arbitrary. If "first to reach the score ranks higher" matters, pack a composite score: `score × 2^20 + (2^20 − seconds_into_month)`. Same commands, deterministic ties.
+**Tie-breaking:** two players with equal scores are ordered lexicographically by member — arbitrary. If "first to reach the score ranks higher" matters, pack a composite score: `score × 2^22 + (2^22 − seconds_into_month)`. Same commands, deterministic ties.
 
 ---
 
@@ -230,7 +230,7 @@ Redis restart with no persistence = every score gone and 25 M players filing sup
 2. **Redis AOF (`appendfsync everysec`)** — on crash-restart, Redis replays its own log and loses at most ~1 s of increments. Turns most incidents into non-events; the rebuild job becomes the fallback, not the first responder.
 3. **Replica + failover** — a warm replica takes over in seconds ([exactly the machinery from the Distributed Cache design](../18-Distributed-Cache/README.md)); reads continue during a primary failure.
 
-The subtle bug: **dual writes drift.** DB insert succeeds, `ZINCRBY` times out but actually applied, retry applies it again → double count. Fix: make the Redis update idempotent — a tiny Lua script that records `matchId` in a companion set (`SADD lb:2026-07:applied`) and only increments if it wasn't already present. Reconcile nightly by comparing `ZSCORE` against the SQL aggregate.
+The subtle bug: **dual writes drift.** DB insert succeeds, `ZINCRBY` times out but actually applied, retry applies it again → double count. Fix: make the Redis update [idempotent](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md) — a tiny Lua script that records `matchId` in a companion set (`SADD lb:2026-07:applied`) and only increments if it wasn't already present. Reconcile nightly by comparing `ZSCORE` against the SQL aggregate.
 
 ### 7.2 Scaling beyond one node — sharding a sorted set
 
@@ -302,7 +302,7 @@ Never "reset" a leaderboard by deleting members — a `DEL` on a 4 GB key blocks
 | Top-10 read storm | Everyone's home screen hits the same query | 1–2 s micro-cache in Leaderboard Service ([caching basics](../../Level-01-Building-Blocks/03-Caching/README.md)); one Redis read serves millions |
 | Redis primary crash | Writes fail, ranks frozen | Replica failover (seconds) + AOF replay; worst case rebuild from Postgres in minutes |
 | Dual-write drift | Redis score ≠ SQL sum | Idempotent Lua update keyed by `matchId`; nightly reconcile job |
-| Tournament final-day spike (10×) | Write bursts to ~6 000/s | Still < 10% of one node; API Gateway rate-limits per player as backstop |
+| Tournament final-day spike (10×) | Write bursts to ~6 000/s | Still < 10% of one node; [API Gateway](../../Level-05-Architecture-Patterns/05-API-Gateway/README.md) rate-limits per player as backstop |
 | ZSET outgrows one node (500 M+) | Memory pressure, slow rebuilds | Hash-shard + scatter-gather; replicated top-K set; approximate rank for the tail (deep dives 7.2–7.3) |
 | Month rollover | Mixed writes at midnight | Key derived from match timestamp — both keys live side by side; no flip step to get wrong |
 | Postgres write pressure | 50 M inserts/day bloat | Monthly partitions; append-only writes; archive old partitions to object storage |
@@ -316,7 +316,7 @@ Never "reset" a leaderboard by deleting members — a `DEL` on a 4 GB key blocks
 | **Redis Sorted Set** (chosen) | Skip list + hash; `ZINCRBY`/`ZREVRANK`, all O(log N) | RAM-only → needs the durability story of 7.1 | ✅ Purpose-built; every query in µs |
 | SQL `ORDER BY score DESC` | `SELECT ... LIMIT 10`; rank = `COUNT(*) WHERE score > mine` | Rank query scans/aggregates millions of rows *per request*; index helps top-10 but not rank-around-me; writes fight reads for locks. Dies ~10⁵–10⁶ players | ❌ Fine for a launch weekend, not for 25 M |
 | In-memory heap per app server | Each API server keeps a top-K heap | Only answers top-K — no arbitrary rank; every server has a *different* board (no shared state); vanishes on deploy | ❌ Not even consistent, let alone complete |
-| DynamoDB + GSI on score | GSI partition per board, sort key = score; top-10 = one `Query` descending | Top-10 works; **rank-around-me doesn't** — no O(log N) rank in a B-tree-style API without scanning; single-partition boards throttle at ~1 000 WCU | ⚠️ Viable if serverless is mandatory: DynamoDB as truth + Redis/ElastiCache for ranks — which is just our design with different labels |
+| DynamoDB + GSI on score | GSI partition per board, sort key = score; top-10 = one `Query` descending | Top-10 works; **rank-around-me doesn't** — no O(log N) rank in a B-tree-style API without scanning; single-partition boards throttle at ~1 000 WCU | ⚠️ Viable if [serverless](../../Level-05-Architecture-Patterns/08-Serverless-Architecture/README.md) is mandatory: DynamoDB as truth + Redis/ElastiCache for ranks — which is just our design with different labels |
 
 Other forks in the road: **DB-first vs Redis-first writes** (we chose DB-first — never lose a score; cost: rank lags a failed Redis call by seconds) and **exact vs approximate rank** (exact while one node suffices; approximate is the planned exit, not a rewrite).
 
@@ -324,7 +324,7 @@ Other forks in the road: **DB-first vs Redis-first writes** (we chose DB-first �
 
 ## 10. 🌐 How It's *Actually* Done
 
-**Redis itself** documents leaderboards as *the* canonical sorted-set use case — the pattern in this chapter (`ZINCRBY` + `ZREVRANGE` + `ZREVRANK`, key-per-period) comes straight from Redis's own docs and Redis Labs' gaming-leaderboard reference builds.
+**Redis itself** documents leaderboards as *the* canonical sorted-set use case — the pattern in this chapter (`ZINCRBY` + `ZREVRANGE` + `ZREVRANK`, key-per-period) comes straight from Redis's own documentation and its gaming-leaderboard reference architectures.
 
 **Mobile game studios (Supercell-style):** at Clash-of-Clans scale, global exact rank is deliberately avoided — players compete in **leagues and buckets** (Legend League ranks the top slice exactly; everyone else sees tiers). That's deep dive 7.3 as product design: exact at the top, coarse in the tail.
 
@@ -348,4 +348,10 @@ Other forks in the road: **DB-first vs Redis-first writes** (we chose DB-first �
 
 The 30-second recap: **a leaderboard is a solved problem if you pick the data structure built for it.** One Redis sorted set gives you O(log N) updates, top-10, and rank-around-me for 25 M players on a single node — so the real engineering is everything *around* it: DB-first durability with idempotent replay, month-in-the-key tournament resets, and knowing that when you finally outgrow one node, approximate rank is the graceful exit.
 
-[← Back to all real-world architectures](../README.md)
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [34 · Distributed Logging & Monitoring](../34-Distributed-Logging-Monitoring/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [36 · Webhook Delivery Service](../36-Webhook-Delivery-Service/README.md)
+
+<!-- nav:end -->

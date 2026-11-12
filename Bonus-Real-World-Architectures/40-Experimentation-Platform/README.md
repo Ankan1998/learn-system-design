@@ -37,7 +37,7 @@ We're designing the platform that Booking.com, Netflix, Microsoft, and Airbnb ea
 ### Non-Functional
 - Assignment adds **< 1 ms** to a request — evaluated locally in the SDK, no network call.
 - **100K+ assignments/s** across the fleet; config changes propagate to every SDK in **< 60 s**; kill switches in **< 10 s**.
-- **5 billion exposure events/day** ingested with at-most-once *effect* on results (deduplicated).
+- **5 billion exposure events/day** ingested with exactly-once *effect* on results (deduplicated).
 - Results refreshed **hourly**, with day-1 results available the next morning.
 - Assignment must be **fail-safe**: any error → the user gets the control experience.
 - Statistical correctness: no silent p-hacking, sample-ratio-mismatch detection, multiple-comparison awareness.
@@ -152,6 +152,8 @@ erDiagram
     METRIC ||--o{ RESULT : "measured by"
 ```
 
+*Caption: Notice that layers own the randomization salt, exposures are keyed by a deterministic dedup key, and results are keyed by experiment, variant, metric, and date.*
+
 **Storage choices:**
 - **Experiment config** in PostgreSQL (small, relational, needs transactions and history), published as an immutable versioned JSON blob to the CDN.
 - **Exposures** flow through Kafka into a columnar warehouse (BigQuery / Snowflake / Iceberg tables) partitioned by day and experiment — write-heavy, append-only, scanned in bulk.
@@ -195,10 +197,12 @@ flowchart LR
     style KILL fill:#fecaca,color:#000
 ```
 
+*Caption: Assignment happens entirely inside the SDK from cached config; only exposure events flow back, and the guardrail loop feeds the kill switch into the config publisher.*
+
 **Walk-through:**
 1. A PM creates `checkout_button_v2` in layer `checkout`, 50/50 control vs treatment, 10% allocation, primary metric `purchase_conversion`, guardrail `crash_rate`.
 2. The publisher renders config **v1235** and pushes it to the CDN; SDKs pick it up within 30 s (or instantly via the stream).
-3. A request arrives. The SDK computes `hash("checkout" + user_42) % 10000 = 7311`; bucket 7311 falls in the experiment's 10% range and in the treatment half → returns `treatment`, reason `allocated`. Zero network calls.
+3. A request arrives. The SDK computes `hash("checkout" + user_42) % 10000 = 731`; bucket 731 falls in the experiment's 10% range (0–999) and in its treatment half (500–999) → returns `treatment`, reason `allocated`. Zero network calls.
 4. The checkout page renders the new button and calls `logExposure` — *now*, not at assignment — so users who bounced before checkout don't dilute the result.
 5. Exposures batch into Kafka; a stream job dedupes per user-experiment-day and runs a continuous **sample-ratio-mismatch** check.
 6. Hourly, the stats engine joins exposures to purchase events in the warehouse, applies CUPED variance reduction, runs a sequential test, and writes results.
@@ -222,6 +226,25 @@ bucket = murmur3(layer_salt + ":" + unit_id) % 10000
 - **Independence:** experiments in *different* layers use *different* salts, so a user's bucket in layer A is uncorrelated with their bucket in layer B. A user can be in one experiment per layer, and in many layers at once — this is the **overlapping experiments** design from Google's 2010 paper, and it's what lets thousands of experiments share the same users without interference.
 - **Mutual exclusion:** experiments that *would* interfere (two checkout redesigns) go in the **same layer**, where they split the bucket range and can't overlap.
 
+```mermaid
+flowchart TD
+    U["user_42"] --> HA["Layer: checkout<br/>hash(salt_A + user_42) % 10000 = 731"]
+    U --> HB["Layer: search<br/>hash(salt_B + user_42) % 10000 = 8420"]
+    HA --> A1["Buckets 0–999<br/>Experiment: one-page checkout<br/>0–499 control, 500–999 treatment"]
+    HA -.-> A2["Buckets 1000–1999<br/>Experiment: express pay"]
+    HA -.-> A3["Buckets 2000–9999<br/>not allocated: default experience"]
+    HB -.-> B1["Buckets 0–4999<br/>Experiment: new ranking"]
+    HB --> B2["Buckets 5000–9999<br/>not allocated: default experience"]
+
+    style U fill:#dbeafe,color:#000
+    style HA fill:#fef9c3,color:#000
+    style HB fill:#fef9c3,color:#000
+    style A1 fill:#dcfce7,color:#000
+    style B2 fill:#e5e7eb,color:#000
+```
+
+*Caption: One user, two independent draws. A different salt per layer puts user_42 in the treatment arm of the checkout experiment and outside the search experiment, and two experiments in the same layer can never both claim the same user.*
+
 **The unit-ID problem:** hashing needs a stable identity. Logged-out users have a device or cookie ID; when they log in, they get a user ID — and may flip variants. Platforms either bucket on the ID that exists at first exposure and stitch identities in analysis, or restrict experiments on logged-out surfaces to device-level units and accept some noise.
 
 ### 7.2 Exposure logging done right
@@ -230,7 +253,7 @@ Logging at *assignment* time — every user the SDK evaluated — counts users w
 
 Because SDKs retry and pages re-render, the raw stream has duplicates. A stream job keeps the **first** event per `(unit, experiment, variant, day)` key; late duplicates are dropped. Since the key is deterministic, at-least-once delivery from Kafka collapses to exactly-once *effect* on results.
 
-**Sample-ratio mismatch (SRM):** a 50/50 experiment whose exposures come out 52/48 is not "close enough" — with a million users that's a p-value around 10⁻¹⁷, meaning the assignment or logging is biased (a redirect that fails more for treatment, a bot filter that's variant-dependent, a crash before the exposure log). Microsoft's experimentation team found SRM in roughly 6% of experiments. The platform runs a chi-square test continuously and **flags the experiment as invalid** before anyone reads its results.
+**Sample-ratio mismatch (SRM):** a 50/50 experiment whose exposures come out 52/48 is not "close enough" — with a million users that's a p-value far below 10⁻¹⁰⁰, meaning the assignment or logging is biased (a redirect that fails more for treatment, a bot filter that's variant-dependent, a crash before the exposure log). Microsoft's experimentation team found SRM in roughly 6% of experiments. The platform runs a chi-square test continuously and **flags the experiment as invalid** before anyone reads its results.
 
 ### 7.3 The statistics engine
 
@@ -254,7 +277,7 @@ Assignment is on the request path of *every* page, so it can never depend on a n
 
 ### 7.5 Guardrails, kill switches, and feature flags
 
-Every experiment declares **guardrail metrics** — crash rate, p99 latency, error rate, revenue — with automatic stop conditions evaluated on a fast path (minutes, from streaming aggregates) rather than the hourly stats job. A tripped guardrail sets allocation to 0% and publishes config immediately.
+Every experiment declares **guardrail metrics** — crash rate, [p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) latency, error rate, revenue — with automatic stop conditions evaluated on a fast path (minutes, from streaming aggregates) rather than the hourly stats job. A tripped guardrail sets allocation to 0% and publishes config immediately.
 
 Feature flags and experiments are the same delivery mechanism with different intent: a flag is a switch, an experiment is a switch plus randomization plus measurement. Mature platforms unify them so that a successful experiment is "promoted" by turning its treatment into a 100% flag, with no second deploy.
 
@@ -286,7 +309,7 @@ Individual experiments measure short-term lift; they can't see novelty effects w
 |----------|--------|-------------|-----|
 | Where to evaluate | Local in SDK | Central assignment service | Zero latency, works when the service is down; a central service is easier to audit but on the critical path |
 | When to log | At exposure | At assignment | Avoids dilution; requires SDK discipline about *where* to log |
-| Randomization | Hash-based, stateless | Stored assignment table | No storage, no replication, trivially consistent across devices |
+| Randomization | Hash-based, [stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md) | Stored assignment table | No storage, no replication, trivially consistent across devices |
 | Experiment isolation | Overlapping layers | One experiment per user at a time | Thousands of concurrent experiments become possible |
 | Statistics | Frequentist with sequential tests + CUPED | Bayesian | Either works if peeking is handled; frequentist with always-valid p-values is easier to explain |
 | Results freshness | Hourly batch | Real-time streaming stats | Statistics need full days anyway; streaming is reserved for guardrails |
@@ -330,4 +353,12 @@ The 30-second whiteboard pitch: randomization is just hashing — a salt per lay
 
 ---
 
-[← Back to all real-world architectures](../README.md) · Related: [Ad Click Aggregator](../20-Ad-Click-Aggregator/README.md) · [Distributed Counter / Analytics](../23-Distributed-Counter-Analytics/README.md) · [Message Queues](../../Level-03-Communication/04-Message-Queues/README.md)
+**Related:** [Ad Click Aggregator](../20-Ad-Click-Aggregator/README.md) · [Distributed Counter / Analytics](../23-Distributed-Counter-Analytics/README.md) · [Message Queues](../../Level-03-Communication/04-Message-Queues/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [39 · Distributed Coordination Service (ZooKeeper / etcd)](../39-Distributed-Coordination-Service/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [41 · Online Code Judge (LeetCode / HackerRank)](../41-Online-Code-Judge/README.md)
+
+<!-- nav:end -->

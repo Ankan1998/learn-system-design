@@ -3,7 +3,7 @@
 > A real-time messaging platform where 2 billion users exchange 100 billion messages per day with end-to-end encryption, delivery receipts, and sub-second latency.
 
 **Difficulty:** ⭐⭐⭐ · **Builds on:**
-[Level 4 — Message Queues](../../Level-03-Communication/04-Message-Queues/README.md) ·
+[Level 3 — Message Queues](../../Level-03-Communication/04-Message-Queues/README.md) ·
 [Bonus 7 — Instagram](../07-Instagram/README.md) ·
 [Bonus 9 — YouTube/Netflix Streaming](../09-YouTube-Netflix-Streaming/README.md)
 
@@ -37,12 +37,12 @@ WhatsApp started as a simple status-update app and became the world's most-used 
 7. End-to-end encryption (Signal Protocol).
 
 ### Non-Functional
-- **Latency:** < 100 ms message delivery (P99) when both parties are online.
+- **Latency:** < 100 ms message delivery ([P99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md)) when both parties are online.
 - **Availability:** 99.99% uptime (< 52 min downtime/year).
 - **Durability:** Messages must not be lost once acknowledged to sender.
 - **Consistency:** Messages must arrive in order within a conversation.
 - **Scale:** 2B registered users, ~500M daily active users.
-- **Throughput:** 100B messages/day (~1.16M messages/second peak).
+- **Throughput:** 100B messages/day (~1.16M messages/second average).
 
 ---
 
@@ -52,8 +52,8 @@ WhatsApp started as a simple status-update app and became the world's most-used 
 
 ```
 100B messages/day ÷ 86,400 sec/day ≈ 1,157,000 msg/sec (avg)
-Peak is ~65B messages/day during high-traffic windows:
-  65B ÷ 57,600 "peak seconds" ≈ 1,130,000 msg/sec peak write
+Peak (e.g. New Year's Eve) assume ~2–3× average:
+  1.16M × 2–3 ≈ 2.3–3.5M msg/sec peak write
 Read fan-out (each message read by ~1.5 recipients on avg):
   1.16M * 1.5 ≈ 1.74M delivery events/sec
 ```
@@ -63,8 +63,9 @@ Read fan-out (each message read by ~1.5 recipients on avg):
 ```
 Avg message size (text + metadata): ~2 KB
 Messages per day:         100B × 2 KB = 200 TB/day
-WhatsApp stores messages only until delivered → keep ~7 days offline buffer
-Offline buffer peak:      200 TB/day × 7 days = 1.4 PB rolling window
+WhatsApp stores messages only until delivered (undelivered ones are dropped after 30 days).
+Most are delivered within seconds; assume ~5% wait ~7 days for an offline recipient:
+Offline buffer:           200 TB/day × 5% × 7 days ≈ 70 TB rolling window (×3 replicas ≈ 210 TB)
 Media (images, video) stored on separate CDN blob store; assume 30% of messages
 carry media, avg 500 KB → 100B × 0.30 × 500 KB ≈ 15 PB/day (CDN)
 ```
@@ -72,7 +73,7 @@ carry media, avg 500 KB → 100B × 0.30 × 500 KB ≈ 15 PB/day (CDN)
 ### Connection servers
 
 ```
-WhatsApp (BEAM/Erlang) handles 2M concurrent WebSocket connections per server node.
+WhatsApp (BEAM/Erlang) handles 2M concurrent TCP connections per server node.
 500M DAU, each online ~2 hrs/day:
   500M × 2/24 ≈ 42M concurrent connections
 Servers needed: 42M ÷ 2M = ~21 server nodes (with redundancy: ~60-80 nodes)
@@ -91,7 +92,7 @@ state change propagated immediately → must throttle / batch (see Deep Dive §7
 
 ## 4. 🔌 API Design
 
-All connections are long-lived WebSocket sessions after initial HTTP upgrade. REST is used only for registration, media upload URLs, and account management.
+All connections are long-lived [WebSocket](../../Level-03-Communication/06-WebSockets-and-Realtime/README.md) sessions after initial HTTP upgrade. REST is used only for registration, media upload URLs, and account management.
 
 ### WebSocket frames (binary protobuf, simplified as JSON here)
 
@@ -159,7 +160,7 @@ GET  /v1/contacts/presence         → bulk presence fetch (throttled)
 
 ### Core tables
 
-```
+```mermaid
 erDiagram
     USER {
         uuid   user_id PK
@@ -216,6 +217,8 @@ erDiagram
     USER ||--o{ OFFLINE_QUEUE : "has pending"
 ```
 
+*Caption: Messages reference a chat rather than a recipient, so one-to-one and group chats share the same tables, and the offline queue holds only what has not been delivered yet.*
+
 ### Storage layer choices
 
 | Data | Store | Why |
@@ -225,7 +228,7 @@ erDiagram
 | Offline queue | Cassandra or Redis sorted set | Fast enqueue/dequeue, TTL for abandoned messages |
 | Presence state | Redis pub-sub + in-memory | Volatile, high churn — persistence not needed |
 | User/contact metadata | MySQL (sharded by user_id) | Relational, low write rate |
-| Media blobs | S3 + CDN | Object storage, globally distributed |
+| Media blobs | S3 + CDN | [Object storage](../../Level-02-Data-Layer/09-Object-Storage/README.md), globally distributed |
 
 > **Note on message deletion:** WhatsApp's original design deleted messages from servers once delivered, storing only a rolling 30-day backup for undelivered messages. Persistent chat history is stored on the device, encrypted, optionally backed up to iCloud/Google Drive.
 
@@ -241,7 +244,7 @@ flowchart TD
     end
 
     subgraph Edge["Edge / Load Balancing"]
-        LB[L4 Load Balancer<br/>sticky by user_id]
+        LB[L4 Load Balancer<br/>TCP pass-through]
     end
 
     subgraph ConnLayer["Connection Layer (Erlang/BEAM)"]
@@ -315,6 +318,8 @@ flowchart TD
     class GS,PS,NS,RS svc
 ```
 
+*Caption: Notice that the Redis session registry is what lets the Message Router find which connection server holds the recipient, with the offline queue and push notifications as the fallback.*
+
 ### Numbered walk-through (1:1 message, Alice → Bob)
 
 1. **Alice sends** a message over her persistent WebSocket connection to Connection Server 1 (CS1).
@@ -331,9 +336,9 @@ flowchart TD
 
 ### 7.1 WebSocket Connection Management
 
-Each Connection Server is a long-lived process written in Erlang/OTP (BEAM VM). Erlang's lightweight process model means each WebSocket connection is a separate Erlang process with negligible overhead (~2 KB heap each). This is why WhatsApp could sustain **2 million concurrent connections on a single server** — a feat that would kill a thread-per-connection Java server with ~1 GB stack per thread.
+Each Connection Server is a long-lived process written in Erlang/OTP (BEAM VM). Erlang's lightweight process model means each WebSocket connection is a separate Erlang process with negligible overhead (~2 KB heap each). This is why WhatsApp could sustain **2 million concurrent connections on a single server** — a feat that would kill a thread-per-connection Java server with ~1 MB stack per thread.
 
-The L4 load balancer uses **consistent hashing on user_id** to sticky-route reconnects to the same server where possible, reducing session churn. When a server restarts, clients reconnect and re-register their session.
+The L4 [load balancer](../../Level-01-Building-Blocks/02-Load-Balancing/README.md) never decrypts the stream, so it cannot see who the user is. It simply spreads new TCP connections across servers and keeps each connection pinned to the server that accepted it. Which server holds which user is recorded in the session registry, not derived from a hash. When a server restarts, clients reconnect and re-register their session.
 
 **Heartbeats:** Clients send a ping every 30 seconds. The server closes the socket after two missed pings (~60 s). This quickly detects dead connections and cleans up Redis session entries.
 
@@ -362,10 +367,12 @@ sequenceDiagram
     end
 ```
 
+*Caption: Notice the single registry lookup decides the path — an online recipient gets a direct push to their connection, an offline one gets a queued message plus a push notification.*
+
 The session registry entry is: `session:{user_id}` → `{server_id, conn_id, ttl}`. TTL is refreshed on every heartbeat. On disconnect, the Connection Server deletes the key immediately (or lets TTL expire as a safety net).
 
 The internal pub-sub can be implemented as:
-- **Direct gRPC call** CS1 → CS2 (low latency, tight coupling)
+- **Direct [gRPC](../../Level-03-Communication/03-gRPC-and-RPC/README.md) call** CS1 → CS2 (low latency, tight coupling)
 - **Kafka per-server topic** (better fan-out for group messages, at-least-once delivery)
 - **Redis pub-sub per server** (simple, but not durable)
 
@@ -376,7 +383,7 @@ WhatsApp uses direct Erlang message passing between nodes (they run a distribute
 Presence is deceptively expensive. Naively:
 
 ```
-User comes online → notify 250 contacts → 42M users × 250 = 10.5B events/second
+User comes online → notify 250 contacts → 42M users × 250 = 10.5B fan-out events
 ```
 
 Strategies to survive this:
@@ -467,7 +474,7 @@ WhatsApp chose delete-after-delivery for privacy (aligned with E2E encryption ph
 
 ### WebSocket vs. MQTT vs. long-poll
 
-- **WebSocket:** Full-duplex, works over standard HTTPS ports, widely supported. WhatsApp's choice.
+- **WebSocket:** Full-duplex, works over standard HTTPS ports, widely supported. Used by WhatsApp Web; the mobile apps use a persistent raw TCP connection with a custom binary protocol.
 - **MQTT:** Purpose-built for IoT push, extremely low overhead. Facebook Messenger uses MQTT. Great for battery life on mobile.
 - **Long-poll:** Legacy, high overhead, not viable at WhatsApp's scale.
 
@@ -478,7 +485,7 @@ WhatsApp chose delete-after-delivery for privacy (aligned with E2E encryption ph
 
 ### Erlang/BEAM vs. Go vs. Java for connection servers
 
-Erlang wins for connection-heavy workloads because each connection is a lightweight process with pre-emptive scheduling and built-in supervision trees for fault isolation. Go goroutines are comparable for raw throughput but lack OTP's battle-tested fault tolerance primitives. Java thread-per-connection doesn't scale to 2M connections.
+Erlang wins for connection-heavy workloads because each connection is a lightweight process with pre-emptive scheduling and built-in supervision trees for fault isolation. Go [goroutines](../../Level-01-Building-Blocks/08-Concurrency-and-Async-IO/README.md) are comparable for raw throughput but lack OTP's battle-tested fault tolerance primitives. Java thread-per-connection doesn't scale to 2M connections.
 
 ---
 
@@ -486,13 +493,13 @@ Erlang wins for connection-heavy workloads because each connection is a lightwei
 
 WhatsApp's real engineering is a masterclass in "boring technology, extreme scale."
 
-**Erlang/OTP:** The entire backend is Erlang. Founders Jan Koum and Brian Acton bet on Erlang in 2009 when it was an obscure telecom language. It paid off — by 2014, WhatsApp ran **~32 engineers supporting 900 million users**, one of the best engineer-to-user ratios in history. They hit **2 million connected clients per server node** in 2012.
+**Erlang/OTP:** The entire backend is Erlang. Founders Jan Koum and Brian Acton bet on Erlang in 2009 when it was an obscure telecom language. It paid off — by 2014, WhatsApp ran **~32 engineers supporting 450 million users**, one of the best engineer-to-user ratios in history. They hit **2 million connected clients per server node** in 2012.
 
 **FreeBSD over Linux:** WhatsApp ran FreeBSD in production, citing better network stack performance for massive connection counts. They tuned kernel parameters (file descriptor limits, socket buffer sizes) extensively.
 
-**XMPP roots:** The original protocol was XMPP (Jabber), a well-understood XML messaging protocol. Over time they replaced it with a custom binary protocol built on protobuf for efficiency.
+**XMPP roots:** The original protocol was XMPP (Jabber), a well-understood XML messaging protocol. Over time they replaced it with FunXMPP, a compact binary encoding of the same stanzas in which frequent strings shrink to one-byte tokens, and later moved to Noise-encrypted connections carrying protobuf-encoded messages.
 
-**Signal Protocol for E2E encryption:** WhatsApp partnered with Open Whisper Systems (Signal) in 2016 to implement the Signal Protocol for all messages. Every message is encrypted on the sender's device with the recipient's public key. WhatsApp servers never see plaintext — they're a routing and storage layer for ciphertext.
+**Signal Protocol for E2E encryption:** WhatsApp partnered with Open Whisper Systems (Signal) in 2014 and completed the Signal Protocol rollout for all messages in 2016. Every message is encrypted on the sender's device with session keys derived (X3DH + Double Ratchet) from the recipient's public keys. WhatsApp servers never see plaintext — they're a routing and storage layer for ciphertext.
 
 **Ejabberd → custom BEAM:** They started with ejabberd (open-source Erlang XMPP server), ripped out most of it, and rewrote critical paths in Erlang. The result is a highly customized BEAM application that bears little resemblance to stock ejabberd.
 
@@ -501,10 +508,10 @@ WhatsApp's real engineering is a masterclass in "boring technology, extreme scal
 **The Facebook acquisition (2014, $19B):** Infrastructure didn't change overnight. WhatsApp kept running their Erlang stack independently for years.
 
 **Reported numbers:**
-- 2014: 450M users, 32 engineers, 70B messages/day
-- 2020: 2B users, 100B messages/day
-- 2021: 100B messages/day on peak days (New Year's Eve)
-- Peak: 65B messages within a single day during COVID lockdowns
+- 2014: 450M users, ~32 engineers, a record 64B messages handled in one day
+- 2016: 1B users
+- 2017: 75B messages on New Year's Eve
+- 2020: 2B users, ~100B messages/day
 
 ---
 
@@ -527,6 +534,14 @@ The take-away for a system design interview: WhatsApp is a **routing and queuing
 ---
 
 *See also:*
-- [Level 4 — Message Queues: Kafka & RabbitMQ fundamentals](../../Level-03-Communication/04-Message-Queues/README.md)
+- [Level 3 — Message Queues: Kafka & RabbitMQ fundamentals](../../Level-03-Communication/04-Message-Queues/README.md)
 - [Bonus 7 — Instagram: feed fan-out patterns](../07-Instagram/README.md)
 - [Bonus 9 — YouTube/Netflix: media streaming at scale](../09-YouTube-Netflix-Streaming/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [07 · Instagram](../07-Instagram/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [09 · YouTube / Netflix](../09-YouTube-Netflix-Streaming/README.md)
+
+<!-- nav:end -->

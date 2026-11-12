@@ -6,6 +6,7 @@ on:
     paths-ignore:
       - "**/*.png"
       - "LICENSE"
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -15,16 +16,16 @@ permissions:
 
 # Let a running deploy finish rather than cancelling it mid-publish.
 concurrency:
-  group: pages
+  group: pages-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
   cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -33,17 +34,26 @@ jobs:
       - name: Install docs toolchain
         run: pip install -r requirements-docs.txt
 
+      # Fail fast on broken links, invalid Mermaid, stale counts, or metadata drift.
+      - name: Verify curriculum content
+        run: python scripts/verify.py
+
+      - name: Check navigation footers are up to date
+        run: python scripts/update_nav.py --check
+
       - name: Stage curriculum into docs/
         run: python scripts/build_docs.py
 
       - name: Build site
         run: mkdocs build --strict
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
+        if: github.event_name != 'pull_request'
         with:
           path: site
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -51,4 +61,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

@@ -10,7 +10,7 @@
 
 A user in Berlin clicks "Delete my account" and, under GDPR's right to erasure, you have 30 days to make their personal data disappear. Here is where it currently lives:
 
-- The primary PostgreSQL database — and its three read replicas.
+- The primary PostgreSQL database — and its three [read replicas](../../Level-02-Data-Layer/01-Database-Replication/README.md).
 - A Kafka topic of user events with 30-day retention, plus a compacted topic that keeps the latest record forever.
 - The Elasticsearch index that powers search.
 - The analytics warehouse, where their events were joined into a hundred derived tables.
@@ -72,7 +72,9 @@ This is **envelope encryption**, and it gives you three things a single key can'
 
 - **Rotation without re-encrypting data:** rotate the KEK, re-wrap the DEKs (small), leave the terabytes untouched.
 - **Blast-radius limits:** one leaked DEK exposes one object or one tenant, not everything.
-- **Crypto-shredding:** destroy a user's or tenant's DEK and every copy of their data — replicas, backups, logs, immutable event logs — becomes unreadable ciphertext at once, without touching any of it.
+- **Crypto-shredding:** destroy the key and every copy of the data it protected — replicas, backups, logs, immutable event logs — becomes unreadable ciphertext at once, without touching any of it.
+
+> **The catch that trips people up:** a wrapped DEK stored next to the data is *also* in every backup of that data, so deleting it from the live table shreds nothing — restore the backup and the KMS will happily unwrap it again. Shredding works only if the thing you destroy is the *last* way to unwrap. Two designs achieve that: a **per-tenant KEK inside the KMS** (destroy it and every wrapped DEK, wherever it was copied, is dead), or **per-user keys kept in a separate key store** that is never backed up alongside the data and whose own backups expire within days.
 
 ### Step 4 — Minimize, pseudonymize, tokenize
 
@@ -89,7 +91,7 @@ The cheapest data to protect is data you never collected.
 
 1. **Deletion is an event.** A `UserDeletionRequested` message fans out to every service that owns a copy of user data; each service acknowledges completion; an orchestrator tracks the job and produces an **audit record** proving what was deleted and when.
 2. **Kafka:** for compacted topics, publish a **tombstone** (key with null value) so compaction removes the record; for regular topics, rely on retention being short enough or on crypto-shredding.
-3. **Immutable stores** (event sourcing, append-only ledgers, WORM backups): you can't delete, so you **crypto-shred** — encrypt each user's payloads under a per-user DEK from day one, and delete the key. This is the standard answer and it's the one interviewers want to hear.
+3. **Immutable stores** (event sourcing, append-only ledgers, WORM backups): you can't delete, so you **crypto-shred** — encrypt each user's payloads under a per-user key from day one, keep those keys in a store separate from the data and its backups, and destroy the key. This is the standard answer and it's the one interviewers want to hear.
 4. **Backups:** either per-user keys (shredding covers them) or a **deletion ledger** consulted at restore time to re-delete anything restored.
 5. **Derived data:** search indexes, caches, warehouse tables, feature stores. Each needs a consumer of the deletion event. ML models trained on the data are genuinely hard — document the retraining policy.
 6. **Data Subject Access Requests** (export everything you hold on me) use the same fan-out in reverse.
@@ -129,20 +131,20 @@ Every store holding PII gets a **TTL**: raw events 30 days, logs 14 days, backup
 
 ### Envelope Encryption with Per-Tenant Keys
 
-*The master key never leaves the KMS. Each tenant's data key is small, wrapped, and stored beside the data. Deleting one wrapped DEK shreds one tenant everywhere.*
+*Each tenant has its own master key, and none of them ever leave the KMS. A tenant's data key is small, wrapped, and stored beside the data. Destroying one tenant's master key shreds that tenant everywhere, backups included.*
 
 ```mermaid
 flowchart TD
-    KMS["KMS / HSM<br/>Key Encryption Key (KEK)<br/>never exported, every use audited"]
+    KMS["KMS / HSM<br/>one Key Encryption Key per tenant<br/>(KEK-A, KEK-B)<br/>never exported, every use audited"]
 
     subgraph TA["Tenant A"]
-        DEKA["DEK-A (wrapped by KEK)<br/>stored next to the data"]
+        DEKA["DEK-A (wrapped by KEK-A)<br/>stored next to the data"]
         DATAA["Rows, files, events<br/>encrypted with DEK-A"]
         DEKA --> DATAA
     end
 
     subgraph TB["Tenant B"]
-        DEKB["DEK-B (wrapped by KEK)"]
+        DEKB["DEK-B (wrapped by KEK-B)<br/>stored next to the data"]
         DATAB["Rows, files, events<br/>encrypted with DEK-B"]
         DEKB --> DATAB
     end
@@ -150,11 +152,11 @@ flowchart TD
     KMS -->|"wrap / unwrap"| DEKA
     KMS -->|"wrap / unwrap"| DEKB
 
-    ROT["Rotate KEK:<br/>re-wrap the DEKs only<br/>terabytes of data untouched"]
-    SHRED["Crypto-shred Tenant B:<br/>delete DEK-B<br/>backups, replicas, logs now unreadable"]
+    ROT["Rotate a KEK:<br/>re-wrap that tenant's DEKs only<br/>terabytes of data untouched"]
+    SHRED["Crypto-shred Tenant B:<br/>destroy KEK-B in the KMS<br/>every copy of wrapped DEK-B is now useless,<br/>so backups, replicas, logs are unreadable"]
 
     KMS -.-> ROT
-    DEKB -.-> SHRED
+    KMS -.-> SHRED
 
     style KMS fill:#fde68a,color:#000
     style TA fill:#dbeafe,color:#000
@@ -272,7 +274,7 @@ Confluent's guidance for GDPR erasure in Kafka is the crypto-shredding pattern: 
 | Decision | Choose this… | …and you give up |
 |----------|--------------|-----------------|
 | Field-level encryption on PII | Real protection from DB compromise | Indexing, searching, sorting on those fields; some query flexibility |
-| Per-user / per-tenant DEKs | Crypto-shredding, small blast radius | A key store that holds billions of wrapped keys (fine — they're tiny) and KMS latency on cold reads |
+| Per-user / per-tenant keys | Crypto-shredding, small blast radius | A key store that holds billions of wrapped keys (fine — they're tiny), kept apart from the data's backups, plus KMS latency on cold reads |
 | Tokenization vault | Tiny compliance scope | An extra hop and a critical dependency on the vault |
 | Strict residency pinning | Compliance, enterprise deals | Global features that need cross-region joins; more regions to operate |
 | Aggressive minimization and TTLs | Less to breach, less to delete | Analytics depth, long-term debugging data |
@@ -304,7 +306,7 @@ Confluent's guidance for GDPR erasure in Kafka is the crypto-shredding pattern: 
 5. **Unsalted hashes as "anonymization."** `SHA256(email)` is reversible for essentially every email address on earth. Use an HMAC with a secret key, or tokenize.
 6. **TLS to the load balancer, plaintext behind it.** Encrypt every hop; use mTLS inside the mesh.
 7. **No key rotation, no audit trail.** If you can't say who decrypted what and when, you can't investigate a breach — or pass an audit.
-8. **Deletion that isn't idempotent or auditable.** Retries must be safe; the completion record is what a regulator asks for.
+8. **Deletion that isn't [idempotent](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md) or auditable.** Retries must be safe; the completion record is what a regulator asks for.
 9. **Treating IPs and device IDs as non-personal.** Under GDPR they're personal data. Classify accordingly.
 10. **Residency by policy document, not by architecture.** If the code *can* write EU data to a US bucket, one day it will.
 
@@ -312,7 +314,7 @@ Confluent's guidance for GDPR erasure in Kafka is the crypto-shredding pattern: 
 
 ## 🎤 Interview Tips
 
-- **The classic prompt:** "How do you implement GDPR deletion in an event-sourced or append-only system?" → **Crypto-shredding**: per-user DEKs from day one, delete the key, and the immutable log becomes unreadable for that user. Then describe the deletion-event fan-out and the audit record.
+- **The classic prompt:** "How do you implement GDPR deletion in an event-sourced or append-only system?" → **Crypto-shredding**: per-user keys from day one, held in a key store separate from the data and its backups; destroy the key and the immutable log becomes unreadable for that user. Then describe the deletion-event fan-out and the audit record.
 - **"How do you encrypt at rest properly?"** → Envelope encryption: KMS-held KEK, per-object/tenant DEKs stored wrapped beside the data, rotation by re-wrapping, audited unwraps. Distinguish it from disk encryption.
 - **"EU customers need their data in the EU."** → Home region in the control plane, region-pinned storage/replicas/backups/queues, PII-free global edge, explicit exceptions only.
 - **Common follow-up:** "How do you search an encrypted email field?" → Deterministic encryption or a blind index (HMAC of the normalized value) for equality; accept that range and fuzzy search are gone, or search on a non-sensitive derived field.
@@ -348,10 +350,19 @@ Confluent's guidance for GDPR erasure in Kafka is the crypto-shredding pattern: 
 - [Google Cloud — Encryption at rest (whitepaper)](https://cloud.google.com/docs/security/encryption/default-encryption) — the DEK/KEK envelope design described end to end.
 - [AWS KMS — Envelope encryption](https://docs.aws.amazon.com/kms/latest/developerguide/concepts.html#enveloping) — the concepts page every cloud implementation follows.
 - [Handling GDPR with Apache Kafka — Confluent](https://www.confluent.io/blog/handling-gdpr-log-forget/) — crypto-shredding for append-only logs.
-- [Meta — Privacy Aware Infrastructure](https://engineering.fb.com/2023/09/07/security/privacy-aware-infrastructure-purpose-limitation-meta/) — classification, lineage, and policy zones at scale.
+- [Meta — Privacy Aware Infrastructure](https://engineering.fb.com/2024/08/27/security/privacy-aware-infrastructure-purpose-limitation-meta/) — classification, lineage, and policy zones at scale.
 - [OWASP Cryptographic Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html) — what to use and what never to use.
 - [NIST SP 800-57 — Key Management Recommendations](https://csrc.nist.gov/publications/detail/sp/800-57-part-1/rev-5/final) — key lifecycles and rotation.
 - [GDPR Article 17 — Right to erasure](https://gdpr-info.eu/art-17-gdpr/) — the actual text, shorter than you'd think.
 - [Apple — Differential Privacy overview](https://www.apple.com/privacy/docs/Differential_Privacy_Overview.pdf) — local DP in a consumer product.
-- Previous: [08 — Testing Distributed Systems](../08-Testing-Distributed-Systems/README.md) · Next Level: [Level 07 — Big Data & Specialized Systems](../../Level-07-Big-Data-and-Specialized/README.md) · Back to [Level 06 Overview](../README.md)
 - See also: [Security at Scale](../05-Security-at-Scale/README.md) · [Multi-Region & Geo-Distribution](../06-Multi-Region-and-Geo-Distribution/README.md) · [CQRS & Event Sourcing](../../Level-05-Architecture-Patterns/03-CQRS-and-Event-Sourcing/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Testing Distributed Systems — Load, Chaos & Canary](../08-Testing-Distributed-Systems/README.md) · 🏠 [Level 6 — Scale & Reliability](../README.md) · ➡️ **Next:** [Level 7 — Big Data & Specialized Systems](../../Level-07-Big-Data-and-Specialized/README.md)
+
+🧩 **See it applied in:** [44 · Identity & Access Management Service (Auth0 / Okta)](../../Bonus-Real-World-Architectures/44-Identity-and-Access-Service/README.md)
+
+<!-- nav:end -->

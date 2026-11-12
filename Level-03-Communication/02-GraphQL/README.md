@@ -62,7 +62,7 @@ REST is like ordering from a **fixed menu** — you get the full combo whether y
 
 ## 🧠 Core Idea
 
-GraphQL has three pillars:
+GraphQL has four pillars:
 
 | Pillar | What it does |
 |--------|-------------|
@@ -100,6 +100,8 @@ sequenceDiagram
     PR-->>G: [{title:...}, ...]
     G-->>C: { "data": { "user": { "name":"Alice", "posts":[...], "followerCount": 1042 } } }
 ```
+
+*Caption: Notice that one client request fans out to separate resolvers, each fetching only its own fields, and the server assembles a single response shaped like the query.*
 
 ### Schema Definition Language (SDL)
 
@@ -181,7 +183,7 @@ One request. Exactly the fields you asked for.
 |-----------|------------|---------|---------|
 | **Query** | POST | Fetch data | `query { user(id: 1) { name } }` |
 | **Mutation** | POST | Modify data | `mutation { createPost(...) { id } }` |
-| **Subscription** | WebSocket | Real-time events | `subscription { postCreated { title } }` |
+| **Subscription** | [WebSocket](../06-WebSockets-and-Realtime/README.md) | Real-time events | `subscription { postCreated { title } }` |
 
 ### Resolvers
 
@@ -274,6 +276,8 @@ graph LR
     style F fill:#d4edda,color:#000
 ```
 
+*Caption: Without DataLoader every post triggers its own database query, while with DataLoader all post lookups collapse into one batched query.*
+
 ---
 
 ## 🏢 Real-World Examples
@@ -300,7 +304,7 @@ graph LR
 | Tooling | ✅ GraphiQL, schema introspection | ✅ Curl, Postman, browsers |
 | Type safety | ✅ Strong schema contract | ❌ JSON is schemaless by default |
 | File uploads | ❌ Awkward (multipart spec) | ✅ Straightforward |
-| Rate limiting | ❌ Hard to limit by "cost" | ✅ Limit by endpoint |
+| [Rate limiting](../07-Rate-Limiting/README.md) | ❌ Hard to limit by "cost" | ✅ Limit by endpoint |
 | Public APIs | ❌ Exposes schema, complex auth | ✅ Easier to secure and document |
 
 ---
@@ -372,4 +376,11 @@ graph LR
 - [GitHub GraphQL API Explorer](https://docs.github.com/en/graphql/overview/explorer)
 - [DataLoader (Facebook)](https://github.com/graphql/dataloader)
 - [How to GraphQL](https://www.howtographql.com/)
-- Previous: [01-API-Design-REST](../01-API-Design-REST/README.md) · Next: [03-gRPC-and-RPC](../03-gRPC-and-RPC/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [API Design & REST](../01-API-Design-REST/README.md) · 🏠 [Level 3 — Communication](../README.md) · ➡️ **Next:** [gRPC and RPC](../03-gRPC-and-RPC/README.md)
+
+<!-- nav:end -->

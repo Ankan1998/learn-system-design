@@ -2,7 +2,7 @@
 
 > High Availability (HA) and Disaster Recovery (DR) are complementary strategies that keep your system running — HA prevents downtime through redundancy, while DR gets you back online when something catastrophic goes wrong anyway.
 
-**Level:** 6 · **Topic:** 3 · **Prerequisites:** [Observability](../01-Observability), [Database Replication](../../Level-02-Data-Layer/01-Database-Replication), [Load Balancing](../../Level-01-Building-Blocks/02-Load-Balancing)
+**Level:** 6 · **Topic:** 3 · **Prerequisites:** [Observability](../01-Observability/README.md), [Database Replication](../../Level-02-Data-Layer/01-Database-Replication/README.md), [Load Balancing](../../Level-01-Building-Blocks/02-Load-Balancing/README.md)
 
 ---
 
@@ -90,6 +90,8 @@ graph TD
     style User fill:#e8d5f5,color:#000,stroke:#a87dcc
 ```
 
+*Caption: Active-active: both regions serve users at the same time and replicate to each other, so losing one region costs capacity but causes no failover step.*
+
 Active-Active gives you the best availability and also improves performance (users get routed to the nearest region). The tradeoff is complexity — you need to handle data consistency across regions, and conflicts can arise when both regions accept writes.
 
 ### Active-Passive Setup
@@ -121,6 +123,8 @@ graph TD
     style User fill:#e8d5f5,color:#000,stroke:#a87dcc
 ```
 
+*Caption: Active-passive: all traffic goes to the primary while the standby only receives replicated data, and a health monitor redirects traffic when the primary fails.*
+
 Active-Passive is simpler and cheaper — you're not paying to run two full production environments simultaneously. But failover isn't instant; there's a period where the passive region is catching up or traffic is being rerouted.
 
 ---
@@ -133,8 +137,8 @@ Active-Passive is simpler and cheaper — you're not paying to run two full prod
 |---|---|---|---|---|
 | **Active-Active** | All nodes serve traffic simultaneously | Seconds (automatic load rebalancing) | High (full duplicate running costs) | High-traffic apps, latency-sensitive global products |
 | **Active-Passive (Warm Standby)** | Primary active; standby receives replication | 1–5 minutes | Medium (standby runs at reduced capacity) | Most production web services |
-| **Active-Passive (Cold Standby)** | Primary active; standby is off or minimal | 15–60 minutes | Low (standby barely running) | Internal tools, dev/staging mirrors |
-| **Pilot Light** | Core data replication only; standby scaled up during DR | 30–60 minutes | Very Low | DR-only scenarios, cost-sensitive systems |
+| **Pilot Light** | Data tier replicated and running; app servers switched off until needed | 10–30 minutes | Low (database always on, compute off) | DR for cost-sensitive production systems |
+| **Active-Passive (Cold Standby / Backup & Restore)** | Nothing running in the standby site; rebuild from backups and infrastructure-as-code | Hours | Lowest (backup storage only) | Internal tools, non-critical systems |
 
 ### N+1 Redundancy
 
@@ -157,7 +161,7 @@ Redundancy keeps you running; backups keep you recoverable. The two serve differ
 
 **The 3-2-1 Rule** is the gold standard for backup strategy:
 - **3** copies of your data (1 primary + 2 backups)
-- **2** different storage media types (e.g., SSD and cloud object storage)
+- **2** different storage media types (e.g., SSD and cloud [object storage](../../Level-02-Data-Layer/09-Object-Storage/README.md))
 - **1** copy offsite (physically separate location — S3, Glacier, another datacenter)
 
 ### RTO vs RPO
@@ -172,9 +176,21 @@ These two metrics define your DR targets and should be agreed upon with stakehol
 **RPO (Recovery Point Objective)**: How much data can you afford to lose? This defines how far back in time your system can safely roll back.
 
 - Example: "Our analytics database can lose up to 4 hours of data — it can be replayed from event logs. But our payments database has an RPO of 0 — we cannot lose a single transaction."
-- An RPO of 4 hours means daily backups are fine for analytics; an RPO of 0 means you need synchronous replication for payments.
+- An RPO of 4 hours means backups every 4 hours are fine for analytics; an RPO of 0 means you need synchronous replication for payments.
 
 Lower RTO and RPO = more expensive and complex. Define them per system, not organization-wide, because not everything needs five-nines treatment.
+
+```mermaid
+flowchart LR
+    B["Last backup or<br/>replicated write"] -->|"RPO: data written in<br/>this window is lost"| D["💥 Failure"]
+    D -->|"RTO: the service is<br/>down in this window"| R["Service restored"]
+
+    style B fill:#dbeafe,color:#000
+    style D fill:#fecaca,color:#000
+    style R fill:#dcfce7,color:#000
+```
+
+*Caption: RPO looks backwards from the failure (how much recent data is gone) and RTO looks forwards (how long until users are served again).*
 
 ---
 
@@ -182,7 +198,7 @@ Lower RTO and RPO = more expensive and complex. Define them per system, not orga
 
 **AWS Multi-AZ RDS**: Amazon RDS can automatically replicate your database to a standby instance in a different AZ. If the primary fails, RDS automatically fails over to the standby — typically in 60–120 seconds — with no manual intervention. The endpoint stays the same; your application just reconnects. This is a well-worn example of Active-Passive HA for databases with a near-zero RPO (synchronous replication).
 
-**Netflix and Chaos Engineering**: Netflix runs across multiple AWS regions and invented **Chaos Monkey** — a tool that randomly terminates production instances during business hours. The philosophy: if you're not continuously testing your failure handling, you don't actually know if it works. Their broader **Chaos Engineering** practice (now the industry standard) proactively injects failures — network latency, instance terminations, regional outages — to verify that the system stays up. "Hope" is not an HA strategy; verified resilience is.
+**Netflix and [Chaos Engineering](../08-Testing-Distributed-Systems/README.md)**: Netflix runs across multiple AWS regions and invented **Chaos Monkey** — a tool that randomly terminates production instances during business hours. The philosophy: if you're not continuously testing your failure handling, you don't actually know if it works. Their broader **Chaos Engineering** practice (now the industry standard) proactively injects failures — network latency, instance terminations, regional outages — to verify that the system stays up. "Hope" is not an HA strategy; verified resilience is.
 
 **Google's Global Load Balancing**: Google operates a single anycast IP address for many of its services. User requests are routed to the nearest healthy datacenter automatically. If an entire region goes down, traffic is seamlessly rerouted to the next closest region. This is Active-Active at global scale, built into their network infrastructure. Your users in Sydney hit a Sydney datacenter; if that datacenter has issues, they transparently hit Singapore — all without a DNS change or manual failover.
 
@@ -223,7 +239,7 @@ Lower RTO and RPO = more expensive and complex. Define them per system, not orga
 
 **Shared fate (correlated failures)**: Your "redundant" setup isn't redundant if the redundant components share the same failure mode. Two servers in the same rack sharing a power strip isn't N+1 redundancy. Two database replicas in the same AZ don't protect you from an AZ outage. Two EC2 instances on the same physical host (which AWS can do if you're not careful) can both go down together. Think carefully about *what you're actually protecting against*.
 
-**The split brain problem**: In any distributed system where two nodes can independently decide they're the primary, you risk split brain — both accept writes, they diverge, and you have two different versions of truth. This happens during network partitions. Mitigations include requiring a quorum (majority vote) before accepting writes, using a consensus algorithm like Raft or Paxos, or accepting that one side goes read-only during a partition. Don't ignore this — it leads to data corruption.
+**The split brain problem**: In any distributed system where two nodes can independently decide they're the primary, you risk split brain — both accept writes, they diverge, and you have two different versions of truth. This happens during network partitions. Mitigations include requiring a quorum (majority vote) before accepting writes, using a consensus algorithm like [Raft](../../Level-04-Distributed-Systems/03-Consensus-Paxos-Raft/README.md) or Paxos, or accepting that one side goes read-only during a partition. Don't ignore this — it leads to data corruption.
 
 **DNS TTL and caching**: During failover, you often update DNS to point to the new primary. But DNS has TTL (time-to-live) — clients cache the old IP for the TTL duration. If your TTL is 300 seconds (5 minutes), some clients will keep hitting the dead server for up to 5 minutes after failover. Keep TTLs low (30–60 seconds) for critical services, but know that very low TTLs increase DNS lookup overhead.
 
@@ -285,3 +301,13 @@ Lower RTO and RPO = more expensive and complex. Define them per system, not orga
 - [Netflix Tech Blog: Chaos Engineering](https://netflixtechblog.com/tagged/chaos-engineering) — real-world accounts of how Netflix tests and improves system resilience
 - [Designing Data-Intensive Applications](https://dataintensive.net/) by Martin Kleppmann — Chapter 5 (Replication) and Chapter 8 (Distributed Systems Troubles) are essential reading for understanding the hard problems in HA
 - [AWS Disaster Recovery Whitepaper](https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-workloads-on-aws.html) — practical patterns for RTO/RPO targets with AWS services, including cost comparisons across DR strategies
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Capacity Planning and Estimation](../02-Capacity-Planning-and-Estimation/README.md) · 🏠 [Level 6 — Scale & Reliability](../README.md) · ➡️ **Next:** [Deployment Strategies](../04-Deployment-Strategies/README.md)
+
+🧩 **See it applied in:** [25 · Live Streaming (Twitch / YouTube Live)](../../Bonus-Real-World-Architectures/25-Live-Streaming/README.md) · [37 · Distributed File System (GFS / HDFS)](../../Bonus-Real-World-Architectures/37-Distributed-File-System/README.md)
+
+<!-- nav:end -->

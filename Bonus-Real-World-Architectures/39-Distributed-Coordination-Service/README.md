@@ -12,7 +12,7 @@
 
 ## 1. 🎯 Problem & Scope
 
-Kafka needs to know which broker is the controller. HBase needs to know which region server owns which region. Kubernetes needs a single source of truth for every object in the cluster. A job scheduler needs exactly one instance to be "the scheduler." Every one of these is the same problem: **many machines must agree on a small amount of critical state, and keep agreeing as machines fail.**
+Kafka needs to know which broker is the controller. HBase needs to know which region server owns which region. [Kubernetes](../../Level-06-Scale-and-Reliability/07-Containers-and-Orchestration/README.md) needs a single source of truth for every object in the cluster. A job scheduler needs exactly one instance to be "the scheduler." Every one of these is the same problem: **many machines must agree on a small amount of critical state, and keep agreeing as machines fail.**
 
 Solving consensus inside each application is error-prone, so the industry factored it out into a **coordination service**: a replicated key-value store with strict ordering, the ability to detect dead clients, and notifications when things change. ZooKeeper (Yahoo, 2008), Chubby (Google, 2006), etcd (CoreOS, 2013), and Consul all fill this role.
 
@@ -83,7 +83,7 @@ Session:  connect(servers, sessionTimeout) → sessionId, negotiated timeout
           client sends heartbeat every sessionTimeout/3
 ```
 
-etcd exposes the same ideas with a flat key space and gRPC:
+etcd exposes the same ideas with a flat key space and [gRPC](../../Level-03-Communication/03-gRPC-and-RPC/README.md):
 
 ```
 Put(key, value, lease?)             Range(key, rangeEnd, revision?)     DeleteRange(...)
@@ -134,6 +134,8 @@ erDiagram
     ZNODE ||--o{ WATCH : "watched by"
     TXN_LOG ||--o{ ZNODE : "produces state"
 ```
+
+*Caption: Notice that znode state is derived from the zxid-ordered transaction log, and that sessions own both ephemeral znodes and watches, so session expiry cleans up both.*
 
 **Storage on each server:**
 - The whole tree lives in an **in-memory hash map** keyed by path, with parent/child links.
@@ -188,6 +190,8 @@ flowchart TD
     style OBS fill:#e5e7eb,color:#000
 ```
 
+*Caption: Reads are answered locally by any server, but every write is forwarded to the leader and commits only after a majority acknowledges it; the observer never votes.*
+
 **Walk-through (write):**
 1. Client B, connected to Follower 2, calls `setData("/config/rate-limit", "500", version=7)`.
 2. Follower 2 forwards the request to the **Leader** — only the leader orders writes.
@@ -239,6 +243,8 @@ sequenceDiagram
     F-->>C: fire DATA watch on /config/x if registered
 ```
 
+*Caption: The write is acknowledged to the client only after a majority has fsynced the proposal and the leader has sent COMMIT, which fixes its place in the total order.*
+
 ### 7.2 Sessions, ephemeral nodes, and failure detection
 
 The service needs to know when a client is *gone*, because "who holds the lock" and "which workers are alive" are ephemeral facts. A **session** is created on connect with a negotiated timeout. The client heartbeats at a fraction of the timeout; the leader tracks the last heartbeat for every session (session tracking is itself replicated so it survives leader failover).
@@ -268,7 +274,7 @@ Writes are bounded by the leader's disk and the majority round-trip, and adding 
 
 - Every server answers reads from memory, so read throughput scales linearly with servers.
 - For clients that can't tolerate a stale read, `sync()` before `getData` (ZooKeeper) or a **linearizable read** via ReadIndex (etcd asks the leader to confirm it's still leader and waits for its own state to catch up) costs one round-trip.
-- **Observers** (ZooKeeper) or **learners** (etcd) receive the commit stream but don't vote. They add read capacity — even in remote data centers — without adding to the quorum, so they can't slow down or destabilize writes.
+- **Observers** (ZooKeeper) receive the commit stream but don't vote. They add read capacity — even in remote data centers — without adding to the quorum, so they can't slow down or destabilize writes. etcd's non-voting **learners** look similar but exist for a different reason: a new member catches up as a learner before it is promoted to voter, and learners do not serve client reads.
 
 ### 7.5 Durability, recovery, and the disk on the critical path
 
@@ -286,7 +292,7 @@ The entire tree lives in memory on every server, every write costs a majority `f
 
 | Bottleneck / failure | Symptom | Mitigation |
 |----------------------|---------|------------|
-| Leader disk latency | Write p99 spikes, followers time out, spurious elections | Dedicated SSD for the txn log; monitor fsync latency |
+| Leader disk latency | Write [p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) spikes, followers time out, spurious elections | Dedicated SSD for the txn log; monitor fsync latency |
 | Too many voters | Every write waits on more ACKs | Keep 3–5 voters; add observers for reads |
 | Session-timeout storm | A network blip expires thousands of sessions at once; a flood of ephemeral deletions and watch events; clients reconnect and rebuild state simultaneously | Longer timeouts for infra clients; jittered reconnect backoff; watch fan-out limits |
 | Herd effect | One change wakes thousands of watchers | Watch the predecessor, not the root (7.3) |
@@ -310,7 +316,7 @@ The entire tree lives in memory on every server, every write costs a majority `f
 | Replication protocol | Leader-based atomic broadcast (Zab / Raft) | Multi-Paxos, leaderless | Simpler to reason about; total order falls out naturally |
 | Data model | Hierarchical znodes (ZK) | Flat keys with prefix ranges (etcd) | Both work; hierarchy makes membership and queues obvious; flat keys are simpler to shard the API |
 | Watch semantics | One-shot (ZK) | Streaming from a revision (etcd) | One-shot is simpler to implement; streaming avoids missed events between re-registration |
-| Liveness mechanism | Sessions with server-side heartbeats | Leases with TTLs (etcd) | Same idea; leases decouple liveness from the connection |
+| Liveness mechanism | Sessions kept alive by client heartbeats | Leases with TTLs (etcd) | Same idea; leases decouple liveness from the connection |
 | Reads | Local, possibly stale; `sync()` for fresh | Linearizable by default | Local reads give the 100K/s throughput that makes the service usable |
 | Ensemble size | 3–5 voters | 7+ | Every voter adds write latency; observers give read scale for free |
 
@@ -349,4 +355,12 @@ The 30-second whiteboard pitch: a coordination service is a replicated state mac
 
 ---
 
-[← Back to all real-world architectures](../README.md) · Related: [Distributed Job Scheduler](../21-Distributed-Job-Scheduler/README.md) · [Distributed Message Queue (Kafka)](../19-Distributed-Message-Queue/README.md) · [Distributed Locking](../../Level-04-Distributed-Systems/08-Distributed-Locking/README.md)
+**Related:** [Distributed Job Scheduler](../21-Distributed-Job-Scheduler/README.md) · [Distributed Message Queue (Kafka)](../19-Distributed-Message-Queue/README.md) · [Distributed Locking](../../Level-04-Distributed-Systems/08-Distributed-Locking/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [38 · LLM Chat Service (ChatGPT)](../38-LLM-Chat-Service/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [40 · A/B Testing (Experimentation) Platform](../40-Experimentation-Platform/README.md)
+
+<!-- nav:end -->

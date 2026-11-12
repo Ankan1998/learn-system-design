@@ -74,20 +74,20 @@ sequenceDiagram
     C->>S: Request (attempt 3)
     S-->>C: 200 OK ✓
 
-    Note over C: Wait = min(2^attempt × base, max_delay) + jitter
+    Note over C: Wait after attempt n = min(base × 2^(n-1), max_delay) + jitter
 ```
 
 *Caption: Exponential backoff doubles the wait time after each failure. Jitter (randomness) prevents the "thundering herd" — all clients retrying at exactly the same moment, which would re-overwhelm a recovering service.*
 
-**Backoff formula:** `delay = min(base_delay * 2^attempt, max_delay) + random(0, jitter_max)`
+**Backoff formula:** `delay_after_attempt_n = min(base_delay * 2^(n-1), max_delay) + random(0, jitter_max)`
 
-Example: base=100ms, max=30s, jitter=±100ms:
-- Attempt 1: 100ms + jitter
-- Attempt 2: 200ms + jitter
-- Attempt 3: 400ms + jitter
-- Attempt 4: 800ms + jitter
+Example: base=100ms, max=30s, jitter up to 100ms. The wait before the next try:
+- After attempt 1 fails: 100ms + jitter
+- After attempt 2 fails: 200ms + jitter
+- After attempt 3 fails: 400ms + jitter
+- After attempt 4 fails: 800ms + jitter
 - ...
-- Attempt 8: 30,000ms (capped) + jitter
+- After attempt 10 fails: 30,000ms (capped; uncapped would be 51,200ms) + jitter
 
 **Only retry idempotent operations.** GET, PUT, DELETE are typically safe to retry. POST (which creates a resource) requires idempotency keys. See [Idempotency](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md).
 
@@ -159,8 +159,8 @@ Named after the watertight compartments on a ship.
 graph TD
     subgraph "Without Bulkhead"
         TP1["Shared Thread Pool<br/>(200 threads)"]
-        TP1 -->|100 threads stuck| SvcA["Slow Service A"]
-        TP1 -->|100 threads stuck| SvcB["Service B (healthy)"]
+        TP1 -->|"all 200 threads stuck waiting"| SvcA["Slow Service A"]
+        TP1 -->|"no threads left"| SvcB["Service B (healthy)"]
         Note1["⚠️ Service A slowness<br/>consumes ALL threads<br/>Service B calls starve"]
     end
 
@@ -250,7 +250,7 @@ graph LR
 
 | Library | Language | Features |
 |---------|----------|----------|
-| **Resilience4j** | Java | CB, retry, bulkhead, rate limiter, time limiter |
+| **Resilience4j** | Java | CB, retry, bulkhead, [rate limiter](../../Level-03-Communication/07-Rate-Limiting/README.md), time limiter |
 | **Netflix Hystrix** | Java (legacy, maintenance mode) | CB, thread isolation — widely referenced conceptually |
 | **Polly** | .NET | CB, retry, timeout, fallback, bulkhead |
 | **Sentinel** (Alibaba) | Java | Flow control, circuit breaking, system load |
@@ -307,7 +307,7 @@ graph LR
 
 **Timeout that's too long:** A 30-second timeout doesn't protect you. A user has already given up. A thread is held for 30 seconds. Set timeouts based on actual latency profiles — typically 1–5x your P99.
 
-**Not testing resilience:** Circuit breakers and fallbacks that were never tested don't work in production. Use chaos engineering (Netflix Chaos Monkey) to validate that your resilience patterns actually trigger correctly.
+**Not testing resilience:** Circuit breakers and fallbacks that were never tested don't work in production. Use [chaos engineering](../../Level-06-Scale-and-Reliability/08-Testing-Distributed-Systems/README.md) (Netflix Chaos Monkey) to validate that your resilience patterns actually trigger correctly.
 
 **Missing idempotency on retries:** Retrying a payment without idempotency keys charges the customer twice. Every retry-able operation must be idempotent.
 
@@ -360,4 +360,10 @@ graph LR
 
 ---
 
-*← [API Gateway](../05-API-Gateway/README.md) · [Level 05 Overview](../README.md) · Next: [Saga & Orchestration](../07-Saga-and-Orchestration/README.md) →*
+<!-- nav:start -->
+
+⬅️ **Previous:** [API Gateway](../05-API-Gateway/README.md) · 🏠 [Level 5 — Architecture Patterns](../README.md) · ➡️ **Next:** [Saga and Orchestration](../07-Saga-and-Orchestration/README.md)
+
+🧩 **See it applied in:** [04 · Notification Service](../../Bonus-Real-World-Architectures/04-Notification-Service/README.md) · [36 · Webhook Delivery Service](../../Bonus-Real-World-Architectures/36-Webhook-Delivery-Service/README.md) · [01 · URL Shortener](../../Bonus-Real-World-Architectures/01-URL-Shortener/README.md) · [03 · Rate Limiter](../../Bonus-Real-World-Architectures/03-Rate-Limiter/README.md) · [07 · Instagram](../../Bonus-Real-World-Architectures/07-Instagram/README.md) · [10 · Typeahead / Autocomplete](../../Bonus-Real-World-Architectures/10-Typeahead-Autocomplete/README.md) · [12 · Food Delivery (DoorDash / Swiggy)](../../Bonus-Real-World-Architectures/12-Food-Delivery/README.md) · [17 · Payment System](../../Bonus-Real-World-Architectures/17-Payment-System/README.md) · …and 1 more in the [designs index](../../Bonus-Real-World-Architectures/README.md)
+
+<!-- nav:end -->

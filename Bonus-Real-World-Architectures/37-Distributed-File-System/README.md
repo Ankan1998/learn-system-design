@@ -213,6 +213,8 @@ sequenceDiagram
     P-->>C: success (or: which replica failed — client retries)
 ```
 
+*Caption: Data flows along a chain of replicas to use each machine's full bandwidth, and only afterwards does the primary assign an order that every replica applies identically.*
+
 The lease is a cheap, safe form of [leader election](../../Level-04-Distributed-Systems/05-Leader-Election/README.md) per chunk: if the master loses contact with the primary, it simply **waits out the 60 s lease** before granting a new one — two primaries can never coexist, no consensus round needed on the data path.
 
 ### 7.2 Why 64 MB Chunks? (And the Small-File Problem)
@@ -290,7 +292,7 @@ GFS's most interview-worthy idea: it *names* its weakness precisely instead of p
 
 `record_append` is **atomic, at-least-once**: the system guarantees your record lands as one contiguous blob at *some* offset — but a failed attempt (one replica missed it) forces a retry at a *new* offset, leaving a duplicate on the replicas that succeeded and padding on the ones that didn't.
 
-Why don't applications break? Because they're written for this contract: records carry **checksums** (readers skip padding and torn fragments) and **unique IDs** (readers de-duplicate), and most consumers are idempotent [batch jobs](../../Level-07-Big-Data-and-Specialized/01-Batch-Processing/README.md) that re-run on failure anyway. GFS moved complexity out of the filesystem and into (Google-controlled) client libraries. HDFS chose an even simpler contract: single-writer files, append-only, no concurrent record append at all.
+Why don't applications break? Because they're written for this contract: records carry **checksums** (readers skip padding and torn fragments) and **unique IDs** (readers de-duplicate), and most consumers are [idempotent](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md) [batch jobs](../../Level-07-Big-Data-and-Specialized/01-Batch-Processing/README.md) that re-run on failure anyway. GFS moved complexity out of the filesystem and into (Google-controlled) client libraries. HDFS chose an even simpler contract: single-writer files, append-only, no concurrent record append at all.
 
 ### 7.7 Erasure Coding vs. 3× Replication
 
@@ -310,7 +312,7 @@ The catch is the repair (and degraded-read) cost: losing one EC block means read
 | What breaks first | Symptom | Mitigation |
 |---|---|---|
 | Master RAM | Metadata for new chunks won't fit; file creates fail | Bigger box buys time → shard metadata (Federation / Colossus Curators) |
-| Master QPS | Metadata ops queue up under small-file or `ls`-heavy workloads | Client caching, batched lookups, namespace sharding |
+| Master QPS | Metadata ops queue up under small-file or `ls`-heavy workloads | Client caching, batched lookups, namespace [sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md) |
 | Hot small file | 3 chunkservers saturate when 1,000 workers grab one binary | Raise replication factor for hot files; stagger starts; P2P fetch |
 | Inter-rack core bandwidth | Write pipelines crawl at peak hours | 2+1 rack placement (one inter-rack hop); modern Clos fabrics |
 | Recovery storm | Rack failure triggers cluster-wide cloning that starves reads | Per-server recovery throttles + strict priority (1-replica chunks first) |
@@ -358,7 +360,7 @@ The catch is the repair (and degraded-read) cost: losing one EC block means read
 
 **Google Colossus** quietly replaced GFS around 2010: Curators store metadata in BigTable (sharded, horizontally scalable), D-servers hold data, and client-driven Reed–Solomon encoding replaced most 3× replication. The single-master ceiling and the 64 MB minimum both disappeared — which is what lets Colossus back small-file products like Gmail.
 
-**Meta's Tectonic (FAST '21)** consolidated Haystack (photos), f4 (warm blobs), and HDFS-style warehouses into single exabyte-scale multitenant clusters: metadata is disaggregated into stateless Name/File/Block layers over a sharded key-value store (ZippyDB), with RS-encoding for large data.
+**Meta's Tectonic (FAST '21)** consolidated Haystack (photos), f4 (warm blobs), and HDFS-style warehouses into single exabyte-scale multitenant clusters: metadata is disaggregated into [stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md) Name/File/Block layers over a sharded key-value store (ZippyDB), with RS-encoding for large data.
 
 **Azure Storage (SOSP 2011)** uses the same shape in its **stream layer**: append-only "extents" (≈ chunks) are replicated 3× while open, then **sealed** and lazily erasure-coded — the tiering strategy from §7.7 in production at exabyte scale.
 
@@ -378,3 +380,11 @@ The catch is the repair (and degraded-read) cost: losing one EC block means read
 | Recovery | Heartbeats → prioritized, throttled, cluster-wide re-replication in minutes |
 
 The 30-second whiteboard recap: **separate the control plane from the data plane**. One master holds all metadata in RAM (durable via a replicated log) and hands out chunk locations and leases; thousands of chunkservers move the actual bytes; clients talk to the master rarely and the disks constantly. Accept a single master for simplicity, accept relaxed consistency for throughput, and make failure recovery an automatic background process — then, when you finally outgrow the one brain, shard the metadata (Colossus, Federation, Tectonic) while keeping the same shape. Twenty years on, nearly every large-scale storage system is still recognizably this diagram.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [36 · Webhook Delivery Service](../36-Webhook-Delivery-Service/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [38 · LLM Chat Service (ChatGPT)](../38-LLM-Chat-Service/README.md)
+
+<!-- nav:end -->

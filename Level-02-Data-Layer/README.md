@@ -26,7 +26,7 @@ After completing this level you will be able to:
 
 ## 📋 Prerequisites
 
-You should be comfortable with the concepts in [Level 01 — Building Blocks](../Level-01-Building-Blocks/README.md), especially:
+You should be comfortable with the concepts in [Level 1 — Building Blocks](../Level-01-Building-Blocks/README.md), especially:
 
 - [Scalability](../Level-01-Building-Blocks/01-Scalability/README.md) — vertical vs horizontal scaling.
 - [Caching](../Level-01-Building-Blocks/03-Caching/README.md) — because caching often lives in front of the data layer.
@@ -38,9 +38,9 @@ You should be comfortable with the concepts in [Level 01 — Building Blocks](..
 
 ```mermaid
 flowchart LR
-    A([Level 01<br/>Building Blocks]) --> B
+    A([Level 1<br/>Building Blocks]) --> B
 
-    subgraph B[" Level 02 — Data Layer "]
+    subgraph B[" Level 2 — Data Layer "]
         direction TB
         T1[01 Database<br/>Replication]
         T2[02 Sharding &<br/>Partitioning]
@@ -66,7 +66,7 @@ flowchart LR
         T10 --> T11
     end
 
-    B --> C([Level 04<br/>Distributed Systems])
+    B --> C([Level 3<br/>Communication])
 
     style A fill:#e8f4f8,color:#000
     style C fill:#e8f4f8,color:#000
@@ -101,16 +101,24 @@ flowchart LR
 | 10 | [Change Data Capture](./10-Change-Data-Capture/README.md) | Dual-write problem, log-based CDC, Debezium, outbox pattern, cache/search-index sync | 40 min |
 | 11 | [Schema Migrations](./11-Schema-Migrations/README.md) | Expand/migrate/contract, safe vs unsafe DDL, batched backfills, lock_timeout, gh-ost | 45 min |
 
-**Total estimated time: ~7 hours**
+**Total estimated time: ~7.5 hours**
 
 ---
 
 ## 🔗 Where This Level Leads
 
-Once you're comfortable here, the natural next step is [Level 04 — Distributed Systems](../Level-04-Distributed-Systems/README.md), where CAP Theorem and consistency models build directly on what you've learned about replication and ACID.
+Once you're comfortable here, the next step is [Level 3 — Communication](../Level-03-Communication/README.md), where the services that own this data start talking to clients and to each other. After that, [Level 4 — Distributed Systems](../Level-04-Distributed-Systems/README.md) builds directly on what you've learned about replication and ACID: CAP theorem, consistency models, and consensus.
 
 You'll also find this level referenced heavily in [Bonus — Real-World Architectures](../Bonus-Real-World-Architectures/README.md) case studies.
 
 ---
 
 *Recommended reading: **Designing Data-Intensive Applications** (DDIA) by Martin Kleppmann, Chapters 3–7 map almost 1-to-1 with the topics in this level.*
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous level:** [Level 1 — Building Blocks](../Level-01-Building-Blocks/README.md) · 🏠 [Curriculum home](../README.md) · ➡️ **Start this level:** [Database Replication](01-Database-Replication/README.md)
+
+<!-- nav:end -->

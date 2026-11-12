@@ -109,6 +109,8 @@ sequenceDiagram
     P3-->>C: Rolled back ✅
 ```
 
+*Caption: A single NO vote aborts the transaction for everyone, including the participants that were ready to commit.*
+
 ### The Blocking Problem — 2PC's Fatal Flaw
 
 What if the **coordinator crashes** after sending COMMIT to P1 but before sending to P2 and P3?
@@ -198,6 +200,8 @@ sequenceDiagram
     Note over O: System is back to consistent state
 ```
 
+*Caption: There is no global rollback in a saga: the steps that already succeeded are undone one by one, in reverse order, by their compensating actions.*
+
 ### Choreography vs Orchestration
 
 There are two ways to coordinate a Saga:
@@ -226,11 +230,13 @@ flowchart LR
     style orch fill:#dbeafe,stroke:#3b82f6,color:#000
 ```
 
+*Caption: In choreography each service reacts to the previous service's event and nobody sees the whole flow, while in orchestration one coordinator calls every step and every compensation.*
+
 | | **Choreography** | **Orchestration** |
 |---|---|---|
 | **Control** | Decentralized — services react to events | Centralized — orchestrator drives steps |
 | **Coupling** | Services know each other's events | Services only know the orchestrator |
-| **Observability** | Hard — flow spread across logs | Easy — flow visible in orchestrator |
+| **[Observability](../../Level-06-Scale-and-Reliability/01-Observability/README.md)** | Hard — flow spread across logs | Easy — flow visible in orchestrator |
 | **Failure handling** | Complex — each service handles compensations | Easier — orchestrator manages state |
 | **Cycle risk** | Easy to create event cycles | Less likely |
 | **Best for** | Simple flows, high autonomy | Complex flows, business process visibility |
@@ -275,14 +281,14 @@ A compensating transaction must:
 ### Google Spanner — 2PC Over Paxos
 Spanner is one of the few systems that makes 2PC practical at scale by making the coordinator itself a Paxos group. If the coordinator fails, Paxos elects a new leader and the transaction can resume. This gives 2PC atomicity without the single-point-of-failure blocking problem. The cost is higher latency.
 
-### Uber — Saga with Choreography
-Uber's trip booking uses a choreography-based Saga. When a trip is booked, a chain of events fires: payment authorization, driver matching, route calculation. Each service subscribes to relevant events and publishes its own. Compensation events (e.g., "payment authorization failed") trigger rollbacks in prior steps.
+### Ride-Hailing — Saga with Choreography (and Why Teams Outgrow It)
+A trip booking is a natural saga: authorize the payment, match a driver, compute the route. In a choreographed design each service subscribes to the previous step's event and publishes its own, and a failure event (e.g., "payment authorization failed") triggers compensations in the earlier steps. It works until nobody can say where a stuck trip is. That pain is why Uber built Cadence (whose creators later founded Temporal) to run long-lived workflows under an orchestrator instead — see [Saga and Orchestration](../../Level-05-Architecture-Patterns/07-Saga-and-Orchestration/README.md).
 
 ### Amazon — Saga with Orchestration
 Amazon's order fulfillment uses orchestration-based Sagas. An order orchestrator tracks state through steps: reserve inventory, charge payment, ship, confirm. If any step fails, the orchestrator runs compensation logic. This keeps the flow visible and auditable.
 
 ### Apache Kafka + Kafka Streams — Exactly-Once Semantics
-Kafka's "exactly-once semantics" (EOS) uses a form of 2PC internally between the producer, the transaction coordinator (a Kafka broker), and the consumer. This provides atomic multi-partition writes — useful for building reliable Saga steps.
+Kafka's "exactly-once semantics" (EOS) uses a form of 2PC internally between the producer, the transaction coordinator (a Kafka broker), and the partition leaders being written to. This provides atomic multi-partition writes — useful for building reliable Saga steps.
 
 ---
 
@@ -300,6 +306,8 @@ flowchart TD
     style C fill:#d1fae5,stroke:#059669,color:#000
     style D fill:#fef9c3,stroke:#ca8a04,color:#000
 ```
+
+*Caption: Neither approach is free: 2PC pays for strong consistency with latency and blocking, while Saga pays for availability with visible intermediate states and compensation logic.*
 
 ### When 2PC Holds Locks — Example
 
@@ -372,7 +380,7 @@ With 2PC across Payment and Inventory:
 - **Saga:** Sequence of local transactions + compensating transactions for rollback. No isolation, but no cross-service locks and no blocking
 - Saga implementations: **Choreography** (event-driven, decentralized) vs **Orchestration** (central controller)
 - Key Saga requirements: idempotent steps, idempotent compensations, pivot transactions last
-- 2PC works great within a single database or with Spanner; Saga is the answer for microservices
+- 2PC works well when one system owns every participant (the shards of Spanner or CockroachDB); Saga is the usual answer across independently owned microservices
 
 ---
 
@@ -395,3 +403,13 @@ With 2PC across Payment and Inventory:
 - **Microservices Patterns (Chris Richardson):** Chapter 4 covers Saga in depth with choreography and orchestration examples
 - **Saga pattern deep dive:** [Level-05-Architecture-Patterns/07-Saga-and-Orchestration](../../Level-05-Architecture-Patterns/07-Saga-and-Orchestration/README.md)
 - **Kafka EOS:** "Exactly Once Semantics are Possible: Here's How Kafka Does It" — Confluent engineering blog
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Consensus: Paxos and Raft](../03-Consensus-Paxos-Raft/README.md) · 🏠 [Level 4 — Distributed Systems](../README.md) · ➡️ **Next:** [Leader Election](../05-Leader-Election/README.md)
+
+🧩 **See it applied in:** [21 · Distributed Job Scheduler](../../Bonus-Real-World-Architectures/21-Distributed-Job-Scheduler/README.md) · [31 · E-Commerce Platform (Amazon)](../../Bonus-Real-World-Architectures/31-E-Commerce-Platform/README.md) · [46 · Distributed SQL Database (Spanner / CockroachDB)](../../Bonus-Real-World-Architectures/46-Distributed-SQL-Database/README.md) · [20 · Ad Click Aggregator](../../Bonus-Real-World-Architectures/20-Ad-Click-Aggregator/README.md) · [42 · Social Graph Store (Facebook TAO)](../../Bonus-Real-World-Architectures/42-Social-Graph-Store/README.md)
+
+<!-- nav:end -->

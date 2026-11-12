@@ -166,12 +166,14 @@ erDiagram
     STREAM ||--o{ VIEWER_SESSION : "has"
 ```
 
+*Caption: Everything hangs off STREAM; segments are keyed by stream, rendition and sequence number, while chat and viewer sessions are separate high-volume children.*
+
 **Storage choices:**
 - **Stream metadata** — PostgreSQL (structured, low write rate).
 - **HLS segments** — S3 / GCS / CDN origin store (immutable objects, aggressively cached at edge).
 - **Chat messages** — Apache Cassandra (wide-column, write-heavy, time-ordered per stream) + Kafka for fan-out.
 - **Viewer sessions / presence** — Redis (TTL-based, ephemeral, INCR for viewer counts).
-- **VOD archive** — Object storage (S3) with a CDN layer; transcoded to MP4/HLS for VOD playback.
+- **VOD archive** — [Object storage](../../Level-02-Data-Layer/09-Object-Storage/README.md) (S3) with a CDN layer; transcoded to MP4/HLS for VOD playback.
 
 ---
 
@@ -245,6 +247,8 @@ flowchart TD
     classDef ext fill:#eeeeee,stroke:#888888,color:#000
 ```
 
+*Caption: Video and chat are two independent pipelines; video flows ingest → transcode → object store → CDN, while chat flows through WebSocket gateways and Kafka.*
+
 **Walk-through:**
 1. **Ingest** — OBS connects via RTMP/SRT to the nearest ingest edge PoP; the signal is relayed to the transcoder farm.
 2. **Transcode** — FFmpeg on GPU nodes produces 5 renditions in parallel; takes 1–2 s per segment.
@@ -263,7 +267,7 @@ flowchart TD
 flowchart LR
     subgraph LatencySpectrum["Latency Spectrum"]
         HLS["Standard HLS<br/>Segment: 6-10 s<br/>Buffer: 3 segments<br/>Latency: 15-30 s<br/>Scale: UNLIMITED<br/>(CDN cached)"]:::tier1
-        LLHLS["LL-HLS / DASH-LL<br/>Partial segments: 0.2 s<br/>Push via HTTP/2<br/>Latency: 2-5 s<br/>Scale: VERY HIGH<br/>(CDN with partial support)"]:::tier2
+        LLHLS["LL-HLS / DASH-LL<br/>Partial segments: 0.2 s<br/>Blocking playlist reload<br/>Latency: 2-5 s<br/>Scale: VERY HIGH<br/>(CDN with partial support)"]:::tier2
         WebRTC["WebRTC<br/>No segments, UDP<br/>Latency: < 1 s<br/>Scale: LIMITED<br/>(SFU fan-out, expensive)"]:::tier3
     end
 
@@ -275,13 +279,15 @@ flowchart LR
     classDef tier3 fill:#ffd4d4,stroke:#cc4444,color:#000
 ```
 
+*Caption: Moving left to right trades scale for latency; each step shrinks or removes segments, cutting delay but losing more of the CDN caching that makes huge audiences cheap.*
+
 **Standard HLS** is the workhorse for massive scale: segments are normal HTTP files cached at CDN edges. Adding 1 million viewers is just adding CDN cache nodes — the origin serves the same 5 segment files regardless.
 
-**LL-HLS** (Apple, 2019) introduces "partial segments" (0.2 s chunks) delivered via HTTP/2 push or `_HLS_msn` blocking playlist requests. Latency drops to 2–5 s. CDN support is improving but not universal.
+**LL-HLS** (Apple, 2019) introduces "partial segments" (0.2 s chunks) delivered via preload hints and `_HLS_msn` blocking playlist requests (the 2019 draft's [HTTP/2](../../Level-00-Foundations/06-HTTP-and-HTTPS/README.md) push requirement was dropped in 2020). Latency drops to 2–5 s. CDN support is improving but not universal.
 
-**WebRTC** achieves sub-second latency but requires a **Selective Forwarding Unit (SFU)** — a server that receives one upstream and forwards to N viewers as individual UDP streams. SFUs do NOT cache; each viewer is a separate connection. Scaling to millions requires a cascade of SFUs, each adding latency. Practical ceiling: ~100,000 viewers per stream before cost becomes prohibitive. Twitch uses WebRTC for "co-streams" and creator previews; their main stream is LL-HLS.
+**WebRTC** achieves sub-second latency but requires a **Selective Forwarding Unit (SFU)** — a server that receives one upstream and forwards to N viewers as individual UDP streams. SFUs do NOT cache; each viewer is a separate connection. Scaling to millions requires a cascade of SFUs, each adding latency. Practical ceiling: ~100,000 viewers per stream before cost becomes prohibitive. Twitch uses WebRTC where interaction is the product (bringing guests into a stream), while its main viewer path is low-latency HLS.
 
-**Twitch's choice:** LL-HLS at ~3 s for standard streams; WebRTC-based "ultra-low latency" mode (< 1 s) for small audiences via a tiered SFU mesh.
+**Twitch's choice:** a low-latency HLS variant at roughly 2–5 s for viewers, delivered through its own CDN; WebRTC is reserved for the handful of participants who need real-time interaction.
 
 ---
 
@@ -306,9 +312,11 @@ sequenceDiagram
     Note over Packager: No segment gap visible to viewers
 ```
 
+*Caption: When the RTMP connection drops, the broadcaster reconnects and the transcoder fills the timestamp gap, so the packager never emits a hole viewers would notice.*
+
 **SRT (Secure Reliable Transport)** is increasingly preferred over RTMP for ingest:
 - Built-in ARQ (automatic repeat request) over UDP: handles packet loss without disconnecting.
-- Encrypted by default.
+- Built-in optional AES encryption (enabled with a passphrase).
 - Lower latency than RTMP over lossy connections.
 - Supported by OBS, vMix, and all modern encoders.
 
@@ -350,6 +358,8 @@ flowchart TD
     GWN -->|deliver| VN
 ```
 
+*Caption: One sent message enters Kafka once, then fan-out workers push it to every gateway holding viewers of that stream, which multiplies it across all their sockets.*
+
 The fan-out worker knows which Chat Gateway holds each connection (via Redis pub/sub or a consistent-hash routing table). For a stream with 5M viewers:
 
 - 5M WebSocket connections spread across 100 gateway servers (50k connections each).
@@ -357,7 +367,7 @@ The fan-out worker knows which Chat Gateway holds each connection (via Redis pub
 - This is an **O(viewers)** fan-out per message — at 1,667 msg/s that's 1,667 × 5M = 8.3B pushes/s.
 
 **Mitigation for extreme chat rates:**
-- **Rate limiting:** max 1 message/s per user; moderator-speed 20 msg/s.
+- **[Rate limiting](../../Level-03-Communication/07-Rate-Limiting/README.md):** max 1 message/s per user; moderator-speed 20 msg/s.
 - **Sub-sampling display:** for large chats, show only a random 20 % of messages in the viewer's client (client-side filtering). Users see "fast chat" mode.
 - **Slow mode:** force a per-user cooldown (e.g., 30 s between messages) for streams with > 10,000 concurrent chatters.
 - **Emote-only mode:** restrict to short emote strings — reduces payload size 10×.
@@ -384,6 +394,8 @@ sequenceDiagram
     Note over Edge: When 1M viewers hit: cache hit rate > 99 % immediately
 ```
 
+*Caption: The origin is asked for the first segments before any viewer arrives, so the opening rush is served from edge caches that are already warm.*
+
 Additional tactics:
 - **Manifest TTL = 1 s** (live window updates every 2 s; clients poll every 1–2 s).
 - **Segment TTL = forever** (segments are immutable once written; aggressive CDN caching).
@@ -400,14 +412,14 @@ Additional tactics:
 | CDN egress cost (30 Tbps) | Segment caching at edge; tiered CDN; viewer-side buffering (larger buffer = fewer requests) |
 | Chat fan-out at 5M viewers | Gateway cluster; Kafka partitioned by stream; sub-sampling for extreme chat rates |
 | Ingest origin spike on stream start | CDN pre-warm API; manifest served from Edge with low TTL |
-| Viewer count accuracy | Redis INCR/DECR on join/leave with TTL; HyperLogLog for unique counts; periodic reconciliation |
+| Viewer count accuracy | Redis INCR/DECR on join/leave with TTL; [HyperLogLog](../../Level-07-Big-Data-and-Specialized/06-Probabilistic-Data-Structures/README.md) for unique counts; periodic reconciliation |
 | Transcoder single point of failure | Active-standby transcoders per stream; if primary fails, secondary picks up from last segment |
 | VOD recording gap | Transcoder writes segments to S3 regardless of CDN state; VOD is built from S3 at end of stream |
 
 **Failure modes:**
 - Ingest edge failure → broadcaster disconnects, reconnects to next-closest PoP in < 5 s; viewer sees brief buffering.
 - Transcoder crash → standby takes over; 1–2 segment gap covered by player buffer.
-- CDN PoP failure → DNS Anycast reroutes viewers to next-nearest PoP; slight latency increase.
+- CDN PoP failure → [DNS](../../Level-00-Foundations/05-DNS/README.md) Anycast reroutes viewers to next-nearest PoP; slight latency increase.
 - Kafka outage → chat messages dropped (acceptable — chat is best-effort); video unaffected (separate pipeline).
 - S3 origin slow → CDN serves stale segments (up to 30 s live window); viewers experience slight delay but no outage.
 
@@ -425,13 +437,13 @@ Additional tactics:
 | VOD storage | S3 → repackage | Store raw transcoder output | S3 segments double as live + VOD; repackaging into a single MP4 improves seek performance for VOD |
 
 **Live vs. VOD contrast:**
-VOD (see [Design #9 if present]) stores the full video before any viewer arrives — cache warm-up is trivial, full CDN pre-positioning is possible, and latency doesn't matter. Live streaming has the opposite problem: content appears only seconds before viewers need it, cache miss on the first segment at each edge is unavoidable, and every second of latency is a user-experience degradation.
+VOD (see [Design #9, YouTube / Netflix Streaming](../09-YouTube-Netflix-Streaming/README.md)) stores the full video before any viewer arrives — cache warm-up is trivial, full CDN pre-positioning is possible, and latency doesn't matter. Live streaming has the opposite problem: content appears only seconds before viewers need it, cache miss on the first segment at each edge is unavoidable, and every second of latency is a user-experience degradation.
 
 ---
 
 ## 10. 🌐 How It's Actually Done
 
-**Twitch** uses RTMP for broadcaster ingest and a custom media pipeline they call **Video Ingestion** (published at AWS re:Invent). They transcode with FFmpeg on EC2 GPU instances, deliver via HLS to S3 origins, and use a multi-tier CDN (Twitch's own CDN nodes + third-party CDN). Chat runs on a custom Erlang/Elixir pubsub system (IRC-based protocol) capable of millions of concurrent connections. They open-sourced their **go-pion WebRTC** library for ultra-low latency experiments.
+**Twitch** uses RTMP for broadcaster ingest and its own ingest and transcoding pipeline (the same technology Amazon now sells as Amazon IVS). They transcode with their in-house TwitchTranscoder (which replaced FFmpeg) and deliver HLS through a multi-tier CDN (Twitch's own edge nodes plus third-party CDNs). Chat runs on a custom Go pubsub system (IRC-based protocol) capable of millions of concurrent connections.
 
 **YouTube Live** uses a proprietary ingest protocol (RTMP-compatible) feeding into their **Transcode Farm** (borg-managed), delivers via DASH and HLS from Google's own CDN (GGC — Google Global Cache nodes in ISP networks). YouTube Live recording is seamless: the same segments served live become the VOD archive.
 
@@ -439,7 +451,7 @@ VOD (see [Design #9 if present]) stores the full video before any viewer arrives
 
 **Mux** (the video infrastructure startup) documented their segment pipeline architecture: RTMP → SRT ingest → FFmpeg transcode → HLS packaging → S3 → CDN, with per-stream monitoring for segment delivery and viewer quality-of-experience (QoE) metrics.
 
-**Apple LL-HLS** (RFC draft 2019, finalised 2021) is now supported by major CDNs (Akamai, Cloudfront, Fastly) and enables 2–3 s latency at full CDN scale — closing the gap with WebRTC for many use cases.
+**Apple LL-HLS** (RFC draft 2019, finalised 2020) is now supported by major CDNs (Akamai, Cloudfront, Fastly) and enables 2–3 s latency at full CDN scale — closing the gap with WebRTC for many use cases.
 
 ---
 
@@ -453,3 +465,11 @@ Live streaming requires solving four simultaneous challenges that each demand di
 4. **Live chat at scale** (Kafka + stateful WebSocket gateways + sub-sampling) — pub/sub fan-out with graceful degradation.
 
 The central tension is **latency vs. scale**: WebRTC achieves < 1 s but cannot scale beyond ~100k viewers per stream economically; HLS scales to unlimited viewers but adds 15–30 s latency. LL-HLS is the pragmatic middle ground at 2–5 s latency with full CDN scale. Pick your trade-off based on the use case: sports betting needs sub-second; casual gaming streams are fine at 10 s.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [24 · Stock Exchange](../24-Stock-Exchange/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [26 · Unique ID Generator](../26-Unique-ID-Generator/README.md)
+
+<!-- nav:end -->

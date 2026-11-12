@@ -113,7 +113,7 @@ Vector databases are the newest members of the [specialized database](../08-Spec
 | Ops burden | Zero new systems — it's your existing DB | New cluster (or SaaS) to run |
 | Joins with business data | ✅ Native SQL, transactions | ❌ Sync/denormalize data in |
 | Metadata filtering | ✅ SQL `WHERE` | ✅ Built-in, heavily optimized |
-| Advanced features | Basic HNSW/IVF | Quantization, GPU indexes, multi-tenancy, hybrid search |
+| Advanced features | Basic HNSW/IVF | Quantization, GPU indexes, [multi-tenancy](../../Level-05-Architecture-Patterns/10-Multi-Tenancy/README.md), hybrid search |
 
 **Rule of thumb:** if you're under ~1–5M vectors and already run Postgres, **pgvector is enough** — don't add a database to your stack for a feature. Graduate when index build times, recall at scale, or QPS force you to.
 
@@ -259,7 +259,7 @@ sequenceDiagram
 
 ## 🚦 The LLM Gateway — Routing, Limits, Safety
 
-*Diagram: one request's path through the LLM gateway — the AI equivalent of an API gateway: safety checks, cache, router, fallback.*
+*Diagram: one request's path through the LLM gateway — the AI equivalent of an [API gateway](../../Level-05-Architecture-Patterns/05-API-Gateway/README.md): safety checks, cache, router, fallback.*
 
 ```mermaid
 flowchart LR
@@ -296,7 +296,7 @@ flowchart LR
 - **GitHub Copilot** — an extreme-latency RAG variant: the "retrieval" is context assembly from your open editor tabs and neighboring code, the prompt uses fill-in-the-middle, and ghost-text completions demand TTFT in the low hundreds of ms — which drives aggressive caching, small specialized models, and ruthless prompt budgets.
 - **Perplexity** — RAG *as* the product: query → web/index retrieval → rerank → synthesize an answer with inline citations. Its quality bar lives or dies on retrieval + reranking, showing why the funnel (not the LLM alone) is the system.
 - **OpenAI & Anthropic APIs** — token streaming over SSE as the default UX, usage metered and billed per token, and published rate limits in tokens-per-minute — the exact gateway patterns above, productized.
-- **Netflix & Spotify** — recommendation stacks increasingly reduce to *embedding retrieval*: two-tower models produce user and item vectors, and "candidate generation" is an ANN lookup (Spotify has long used HNSW-style ANN via its Annoy/Vespa lineage for podcast and music search). The recsys and vector-search worlds have converged.
+- **Netflix & Spotify** — recommendation stacks increasingly reduce to *embedding retrieval*: two-tower models produce user and item vectors, and "candidate generation" is an ANN lookup (Spotify built Annoy, a tree-based ANN library, and later Voyager, its HNSW-based successor, for music and podcast retrieval). The recsys and vector-search worlds have converged.
 
 ---
 
@@ -418,4 +418,10 @@ Requests are the wrong currency: one request may carry a 100k-token prompt occup
 
 ---
 
-**⬅️ Previous:** [08 — Specialized Databases](../08-Specialized-Databases/README.md) · **➡️ Next:** [Bonus — Real-World Architectures](../../Bonus-Real-World-Architectures/README.md) · **🏠 Level Index:** [Level 7 — Big Data & Specialized Systems](../README.md)
+<!-- nav:start -->
+
+⬅️ **Previous:** [Specialized Databases — Time-Series, Graph & NewSQL](../08-Specialized-Databases/README.md) · 🏠 [Level 7 — Big Data & Specialized Systems](../README.md) · ➡️ **Next:** [Bonus — Real-World System Designs](../../Bonus-Real-World-Architectures/README.md)
+
+🧩 **See it applied in:** [38 · LLM Chat Service (ChatGPT)](../../Bonus-Real-World-Architectures/38-LLM-Chat-Service/README.md)
+
+<!-- nav:end -->

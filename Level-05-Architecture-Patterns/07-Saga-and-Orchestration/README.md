@@ -54,7 +54,7 @@ A Saga decomposes a distributed transaction into a sequence of local transaction
 
 ### Key Properties
 
-- **ACI** (not ACID): Sagas provide Atomicity (all succeed or all compensate), Consistency (via compensations), and Isolation (imperfect — intermediate states are visible). No Durability beyond what each service provides.
+- **ACD** (not ACID): Sagas provide Atomicity (all succeed or all compensate), Consistency (via compensations), and Durability (each local transaction commits durably in its own service). They lack Isolation — intermediate states are visible.
 - **Eventual consistency:** Other services may briefly see a state where some steps are done but others aren't.
 - **Compensations must be idempotent:** You might run them multiple times.
 - **No rollback:** Compensations are new forward-moving transactions, not rollbacks.
@@ -177,14 +177,13 @@ stateDiagram-v2
 
 ```mermaid
 graph TD
-    Start([Start Workflow]) --> T1["Step 1: CreateOrder<br/>↩ CompensateOrder"]
+    Start([Start Workflow]) --> T1["Step 1: CreateOrder<br/>↩ CancelOrder"]
     T1 --> T2["Step 2: ChargeCustomer<br/>↩ RefundCustomer"]
     T2 --> T3["Step 3: ReserveInventory<br/>↩ ReleaseInventory"]
     T3 --> T4["Step 4: ScheduleShipment<br/>↩ CancelShipment"]
     T4 --> End([✅ Order Complete])
 
-    T2 -->|fails| C2["Compensate: RefundCustomer"]
-    C2 --> C1["Compensate: CancelOrder"]
+    T2 -->|fails| C1["Compensate: CancelOrder"]
     C1 --> EndFail([❌ Saga Compensated])
 
     T3 -->|fails| C3["Compensate: RefundCustomer"]
@@ -197,12 +196,11 @@ graph TD
     style End fill:#d4edda,color:#000
     style EndFail fill:#f8d7da,color:#000
     style C1 fill:#fff3cd,color:#000
-    style C2 fill:#fff3cd,color:#000
     style C3 fill:#fff3cd,color:#000
     style C4 fill:#fff3cd,color:#000
 ```
 
-*Caption: Each step in a Temporal workflow has a corresponding compensation. Temporal durably persists the workflow state — if the workflow server crashes mid-execution, it resumes from exactly where it left off.*
+*Caption: Each step in a Temporal workflow has a corresponding compensation, and a failure undoes only the steps that already completed, in reverse order (a failed charge needs no refund, just the order cancellation). Temporal durably persists the workflow state — if the workflow server crashes mid-execution, it resumes from exactly where it left off.*
 
 ---
 
@@ -244,7 +242,7 @@ graph TD
 
 ## 🏢 Real-World Examples
 
-**Uber — Trip Fulfillment:** When you request an Uber, a saga begins: find a driver, charge the estimated fare to your card (hold), route optimization, driver assigned, trip starts, fare calculated, payment settled, receipt emailed. If the driver cancels, the saga compensates: release the hold, re-enter the matching queue. Uber built Cadence (now open-sourced as Temporal) specifically to manage these long-running workflows.
+**Uber — Trip Fulfillment:** When you request an Uber, a saga begins: find a driver, charge the estimated fare to your card (hold), route optimization, driver assigned, trip starts, fare calculated, payment settled, receipt emailed. If the driver cancels, the saga compensates: release the hold, re-enter the matching queue. Uber built Cadence (open source; its creators later forked it into Temporal) specifically to manage these long-running workflows.
 
 **Travel Booking (Expedia, Booking.com):** When you book a flight + hotel package, a saga books each component separately. If the hotel booking fails (sold out), the saga cancels the flight. This is classic saga territory. Expedia coordinates with dozens of airline and hotel APIs — each has its own system, its own failure modes, and its own cancellation API.
 
@@ -256,7 +254,7 @@ graph TD
 
 | Pros | Cons |
 |------|------|
-| Works without distributed locks or 2PC | Complex to design correct compensation logic |
+| Works without [distributed locks](../../Level-04-Distributed-Systems/08-Distributed-Locking/README.md) or 2PC | Complex to design correct compensation logic |
 | Services remain loosely coupled | Intermediate states are visible (no isolation) |
 | Each service uses its own database technology | Harder to guarantee strict consistency |
 | Can span long time durations (hours, days) | Eventual consistency: other requests may see partial state |
@@ -292,7 +290,7 @@ graph TD
 
 **"Pivot transaction" blindspot:** The step you can't compensate is your pivot — typically once a physical action happens (item shipped, email sent, printer ran). Know where your pivot is and design around it: delay irreversible actions to as late as possible in the saga.
 
-**Ignoring the "lost message" problem:** In choreography-based sagas, if an event is lost, the saga stalls indefinitely. Use reliable messaging (Kafka with acknowledgments, transactional outbox pattern) and design timeouts that trigger compensation.
+**Ignoring the "lost message" problem:** In choreography-based sagas, if an event is lost, the saga stalls indefinitely. Use reliable messaging (Kafka with acknowledgments, [transactional outbox](../../Level-02-Data-Layer/10-Change-Data-Capture/README.md) pattern) and design timeouts that trigger compensation.
 
 **State explosion in choreography:** With 6 services and 3 possible outcomes per step, the number of event types and handler combinations grows exponentially. If your choreography saga is getting complex, switch to orchestration.
 
@@ -348,4 +346,10 @@ graph TD
 
 ---
 
-*← [Resilience Patterns](../06-Resilience-Patterns/README.md) · [Level 05 Overview](../README.md) · Next: [Serverless Architecture](../08-Serverless-Architecture/README.md) →*
+<!-- nav:start -->
+
+⬅️ **Previous:** [Resilience Patterns](../06-Resilience-Patterns/README.md) · 🏠 [Level 5 — Architecture Patterns](../README.md) · ➡️ **Next:** [Serverless Architecture — FaaS & Beyond](../08-Serverless-Architecture/README.md)
+
+🧩 **See it applied in:** [17 · Payment System](../../Bonus-Real-World-Architectures/17-Payment-System/README.md) · [31 · E-Commerce Platform (Amazon)](../../Bonus-Real-World-Architectures/31-E-Commerce-Platform/README.md) · [16 · Ticketmaster](../../Bonus-Real-World-Architectures/16-Ticketmaster/README.md)
+
+<!-- nav:end -->

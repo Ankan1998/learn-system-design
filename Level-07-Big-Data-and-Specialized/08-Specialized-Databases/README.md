@@ -11,8 +11,8 @@
 Three teams at the same company, one Monday morning:
 
 1. **The metrics team** stores server telemetry in PostgreSQL. The table hit 2 billion rows; inserts are fine but the "CPU last 24h" dashboard now takes 45 seconds, and storage costs grow 1 TB/month even though nobody ever *updates* a row.
-2. **The fraud team** wants "accounts within 4 hops of this stolen credit card." Their SQL query has four self-joins on a 500-million-row table. It ran for 11 minutes, then the analyst gave up.
-3. **The payments team** sharded MySQL by user ID (see [Sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md)). Now a transfer between two users on *different shards* needs a hand-rolled two-phase commit, and the compliance team wants strictly ordered, globally consistent transactions across three continents.
+2. **The fraud team** wants "accounts within 4 hops of this stolen credit card." Their SQL query has three self-joins on a 500-million-row table. It ran for 11 minutes, then the analyst gave up.
+3. **The payments team** sharded MySQL by user ID (see [Sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md)). Now a transfer between two users on *different shards* needs a hand-rolled [two-phase commit](../../Level-04-Distributed-Systems/04-Distributed-Transactions/README.md), and the compliance team wants strictly ordered, globally consistent transactions across three continents.
 
 None of these teams has a "big data" problem in the raw-volume sense. They have a **shape mismatch**: a general-purpose row-store B-tree engine being asked to behave like an append-only log, a pointer-chasing network, and a planet-spanning consensus system. A general-purpose database *can* limp through each case — with heroic tuning — but an engine built for that exact shape does it natively.
 
@@ -100,7 +100,7 @@ TimescaleDB, InfluxDB, and Prometheus all use descendants of these encodings (de
 
 **3. Downsampling, retention & continuous aggregates.** Nobody needs 10-second resolution from last year. TSDBs automate the rollup: keep raw data 7 days, 1-minute averages 90 days, 1-hour averages 2 years — then delete. **Continuous aggregates** (TimescaleDB) / **tasks** (InfluxDB) / **recording rules** (Prometheus) maintain these rollups incrementally as data arrives, so dashboards read tiny pre-aggregated tables instead of re-scanning raw points.
 
-**Use cases:** infrastructure metrics and observability, IoT sensor fleets (a wind farm emitting 100k readings/sec), finance tick data, energy smart meters.
+**Use cases:** infrastructure metrics and [observability](../../Level-06-Scale-and-Reliability/01-Observability/README.md), IoT sensor fleets (a wind farm emitting 100k readings/sec), finance tick data, energy smart meters.
 
 ### Part 2 — Graph Databases (Neo4j, Amazon Neptune)
 
@@ -114,9 +114,9 @@ TimescaleDB, InfluxDB, and Prometheus all use descendants of these encodings (de
 flowchart TB
     subgraph SQL["Relational: 4 hops = 3 self-joins"]
         direction TB
-        A1["Hop 1: 100 index probes<br/>on 500M-row table"] --> A2["Hop 2: 10,000 probes<br/>+ materialize 10k rows"]
-        A2 --> A3["Hop 3: 1,000,000 probes<br/>+ materialize 1M rows"]
-        A3 --> A4["Hop 4: 100,000,000 probes<br/>each O(log 500M)<br/>⏱ minutes, often OOM"]
+        A1["Hop 1: 1 index probe<br/>on 500M-row table → 100 rows"] --> A2["Hop 2: 100 probes<br/>+ materialize 10k rows"]
+        A2 --> A3["Hop 3: 10,000 probes<br/>+ materialize 1M rows"]
+        A3 --> A4["Hop 4: 1,000,000 probes<br/>each O(log 500M) → 100M rows<br/>⏱ minutes, often OOM"]
     end
     subgraph GDB["Graph DB: 4 hops = pointer chasing"]
         direction TB
@@ -176,7 +176,7 @@ sequenceDiagram
 
 By waiting a few milliseconds, Spanner guarantees that once a commit is acknowledged, *every* later transaction anywhere on the planet sees a later timestamp — linearizable, globally consistent SQL. Per [CAP](../../Level-04-Distributed-Systems/01-CAP-Theorem/README.md) it's a CP system: during a partition, a minority region refuses writes rather than serving inconsistency.
 
-**CockroachDB: Raft-replicated ranges.** Open-source Spanner-inspired design, minus the atomic clocks (it uses hybrid logical clocks with a max-offset bound, and retries reads that fall inside the uncertainty window). The table's sorted key space is cut into **ranges** (~512 MB); each range is its own **Raft group** replicated 3+ ways across nodes; a leaseholder replica serves reads. Add a node → ranges rebalance automatically; lose a node → Raft elects new leaders in seconds.
+**CockroachDB: Raft-replicated ranges.** Open-source Spanner-inspired design, minus the atomic clocks (it uses hybrid logical clocks with a max-offset bound, and retries reads that fall inside the uncertainty window). The table's sorted key space is cut into **ranges** (~512 MB); each range is its own **[Raft](../../Level-04-Distributed-Systems/03-Consensus-Paxos-Raft/README.md) group** replicated 3+ ways across nodes; a leaseholder replica serves reads. Add a node → ranges rebalance automatically; lose a node → Raft elects new leaders in seconds.
 
 *One logical SQL table, physically sharded into consensus groups:*
 
@@ -188,21 +188,27 @@ flowchart TB
     subgraph N1["Node 1"]
         R1a["R1 leader ⭐"]
         R2c["R2 follower"]
+        R3c["R3 follower"]
     end
     subgraph N2["Node 2"]
         R1b["R1 follower"]
+        R2b["R2 follower"]
         R3a["R3 leader ⭐"]
     end
     subgraph N3["Node 3"]
+        R1c["R1 follower"]
         R2a["R2 leader ⭐"]
         R3b["R3 follower"]
     end
     R1 -.->|"Raft ×3"| R1a
     R1 -.-> R1b
+    R1 -.-> R1c
     R2 -.->|"Raft ×3"| R2a
+    R2 -.-> R2b
     R2 -.-> R2c
     R3 -.->|"Raft ×3"| R3a
     R3 -.-> R3b
+    R3 -.-> R3c
 
     classDef tbl fill:#f3e8ff,stroke:#c084fc,color:#000
     classDef rng fill:#dbeafe,stroke:#93c5fd,color:#000
@@ -211,7 +217,7 @@ flowchart TB
     class T tbl
     class R1,R2,R3 rng
     class R1a,R2a,R3a ldr
-    class R1b,R2c,R3b fol
+    class R1b,R1c,R2b,R2c,R3b,R3c fol
 ```
 
 **TiDB** takes the same shape with a MySQL-compatible SQL layer over the Raft-replicated TiKV store, plus a columnar replica (TiFlash) so analytics and transactions share one system (HTAP). **Vitess** is philosophically different: not a new engine but **sharding middleware for stock MySQL**, born at YouTube (~2010) to survive viral growth. A `vtgate` proxy makes hundreds of MySQL shards look like one database, handling routing, resharding, and connection pooling — the productionized version of the manual sharding pain from [Sharding & Partitioning](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md). PlanetScale is its commercial cloud form.
@@ -397,4 +403,10 @@ In SQL, 5 hops = 4 self-joins. Each hop performs an index probe per candidate ro
 
 ---
 
-⬅️ **Previous:** [Geospatial Indexing](../07-Geospatial-Indexing/README.md) · ➡️ **Next:** [AI & LLM Infrastructure](../09-AI-and-LLM-Infrastructure/README.md) · 🏠 **Level 7 Index:** [Big Data & Specialized Systems](../README.md)
+<!-- nav:start -->
+
+⬅️ **Previous:** [Geospatial Indexing](../07-Geospatial-Indexing/README.md) · 🏠 [Level 7 — Big Data & Specialized Systems](../README.md) · ➡️ **Next:** [AI & LLM Infrastructure — Vector Search, RAG & Inference Serving](../09-AI-and-LLM-Infrastructure/README.md)
+
+🧩 **See it applied in:** [04 · Notification Service](../../Bonus-Real-World-Architectures/04-Notification-Service/README.md) · [06 · Twitter/X News Feed](../../Bonus-Real-World-Architectures/06-News-Feed-Twitter/README.md) · [34 · Distributed Logging & Monitoring](../../Bonus-Real-World-Architectures/34-Distributed-Logging-Monitoring/README.md) · [42 · Social Graph Store (Facebook TAO)](../../Bonus-Real-World-Architectures/42-Social-Graph-Store/README.md) · [46 · Distributed SQL Database (Spanner / CockroachDB)](../../Bonus-Real-World-Architectures/46-Distributed-SQL-Database/README.md)
+
+<!-- nav:end -->

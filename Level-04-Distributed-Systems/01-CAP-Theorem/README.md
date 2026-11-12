@@ -90,6 +90,8 @@ flowchart TD
     style I fill:#fef9c3,stroke:#ca8a04,color:#000
 ```
 
+*Caption: Without a partition every request gets the latest data; only when a partition occurs must the system choose between returning an error (CP) or possibly stale data (AP).*
+
 ### CP vs AP Systems in Practice
 
 ```mermaid
@@ -121,6 +123,8 @@ flowchart LR
     style A3 fill:#f0fdf4,stroke:#86efac,color:#000
     style A4 fill:#f0fdf4,stroke:#86efac,color:#000
 ```
+
+*Caption: Notice that CP systems rely on a primary or quorum to stay correct, while AP systems keep serving from any replica and reconcile differences later.*
 
 ---
 
@@ -171,6 +175,8 @@ flowchart TD
     style E fill:#eff6ff,stroke:#3b82f6,color:#000
 ```
 
+*Caption: PACELC asks two questions instead of one: what a system gives up during a partition, and what it gives up the rest of the time.*
+
 ### PACELC Classification
 
 | System | Partition | Else | Classification |
@@ -194,7 +200,7 @@ HBase uses HDFS and ZooKeeper as its coordination layer. During a network partit
 Cassandra was designed at Facebook for the inbox search feature — availability was paramount. During a partition, Cassandra continues accepting reads and writes on all reachable nodes, then reconciles when the partition heals using techniques like last-write-wins and read repair. You can *tune* toward consistency using quorum reads/writes (see [Consistency Models](../02-Consistency-Models/README.md)), but it defaults to AP.
 
 ### ZooKeeper (CP)
-ZooKeeper is a coordination service used for leader election and configuration management. It uses a majority quorum — if it can't reach a quorum of nodes, it **refuses to serve** reads or writes. This is exactly right for its use case: you'd rather have "ZooKeeper unavailable" than elect two leaders simultaneously.
+ZooKeeper is a coordination service used for [leader election](../05-Leader-Election/README.md) and configuration management. It uses a majority quorum — if it can't reach a quorum of nodes, it **refuses to serve** reads or writes. This is exactly right for its use case: you'd rather have "ZooKeeper unavailable" than elect two leaders simultaneously.
 
 ### DynamoDB (AP with options)
 Amazon DynamoDB defaults to eventually consistent reads for performance. It offers strongly consistent reads as an option — but that option incurs higher latency and uses twice the read capacity. Classic PACELC trade-off: you pay in latency to get consistency in normal operation.
@@ -255,7 +261,7 @@ Amazon DynamoDB defaults to eventually consistent reads for performance. It offe
 - **Use PACELC** when asked about latency vs consistency. It shows you know the theorem has been extended.
 - **Name specific systems:** "Cassandra is AP by default but tunable; ZooKeeper is CP and intentionally unavailable during partitions."
 - **Connect to the use case:** "For a payment system I'd choose CP. For a product catalog, AP is fine because showing a slightly stale price is acceptable."
-- **Common question:** "Design a distributed counter." Answer depends on CAP: an AP counter (Cassandra counter column) can lose increments during partitions; a CP counter (Redis with Redlock) won't but may be unavailable.
+- **Common question:** "Design a distributed counter." Answer depends on CAP: an AP counter (a Cassandra counter column or a [CRDT](../09-CRDTs-and-Conflict-Resolution/README.md) counter) stays writable on both sides of a partition, but readers may see stale totals until the replicas merge; a CP counter (a row in a consensus-backed store such as etcd, Spanner, or CockroachDB) is always exact but rejects increments on the minority side.
 
 ---
 
@@ -273,7 +279,7 @@ Amazon DynamoDB defaults to eventually consistent reads for performance. It offe
 ## 🧪 Test Yourself
 
 1. A customer support system shows ticket status. Is it better as CP or AP? Why?
-2. You're designing a distributed lock service. Which does it need to be: CP or AP? What happens if you choose wrong?
+2. You're designing a [distributed lock](../08-Distributed-Locking/README.md) service. Which does it need to be: CP or AP? What happens if you choose wrong?
 3. Where does DynamoDB fall in PACELC classification? What configuration options move it toward C?
 4. A colleague says "Let's use a CA database — best of both worlds." How do you respond?
 5. Cassandra with quorum reads (R + W > N) behaves more like CP. Why? What's the failure mode?
@@ -288,3 +294,13 @@ Amazon DynamoDB defaults to eventually consistent reads for performance. It offe
 - **DDIA Chapter 9:** *Designing Data-Intensive Applications* by Martin Kleppmann — "Consistency and Consensus" — best practical treatment
 - **"Please stop calling databases CP or AP" (2015):** Martin Kleppmann's blog post on why the classification is often misleading
 - **Amazon Dynamo paper (2007):** "Dynamo: Amazon's Highly Available Key-Value Store" — SOSP 2007 — the canonical AP system paper
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Level 4 — Distributed Systems (overview)](../README.md) · ➡️ **Next:** [Consistency Models](../02-Consistency-Models/README.md)
+
+🧩 **See it applied in:** [01 · URL Shortener](../../Bonus-Real-World-Architectures/01-URL-Shortener/README.md) · [11 · Uber Ride-Sharing](../../Bonus-Real-World-Architectures/11-Uber-Ride-Sharing/README.md) · [12 · Food Delivery (DoorDash / Swiggy)](../../Bonus-Real-World-Architectures/12-Food-Delivery/README.md) · [13 · Airbnb Booking](../../Bonus-Real-World-Architectures/13-Airbnb-Booking/README.md) · [27 · Distributed Key-Value Store](../../Bonus-Real-World-Architectures/27-Key-Value-Store/README.md)
+
+<!-- nav:end -->

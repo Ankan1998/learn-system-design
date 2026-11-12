@@ -29,8 +29,8 @@ From a systems perspective the interesting tension is this: it looks like a URL 
 
 ### Functional
 
-1. **Create paste** — POST text content, get back a short unique key (e.g., `abc123`).
-2. **Read paste** — GET `/abc123` returns the raw content or a rendered HTML page.
+1. **Create paste** — POST text content, get back a short unique key (e.g., `aB3kZ9xQ`).
+2. **Read paste** — GET `/aB3kZ9xQ` returns the raw content or a rendered HTML page.
 3. **Expiry (TTL)** — Pastes can have a user-specified TTL: 10 min, 1 hr, 1 day, 1 week, 1 month, or never.
 4. **Privacy modes** — `public` (listed/searchable), `unlisted` (key-only), `password-protected`.
 5. **Syntax hint** — user can tag a paste with a language (Python, JSON, SQL…) for highlighting.
@@ -41,9 +41,9 @@ From a systems perspective the interesting tension is this: it looks like a URL 
 | Property | Target |
 |---|---|
 | Availability | 99.9% (≤ 8.7 hr/yr downtime) |
-| Read latency | p99 < 200 ms (cache hit), p99 < 800 ms (cache miss, S3 fetch) |
+| Read latency | [p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) < 200 ms (cache hit), p99 < 800 ms (cache miss, S3 fetch) |
 | Write latency | p99 < 500 ms |
-| Durability | 11 nines (S3 SLA) |
+| Durability | 11 nines (S3 design target) |
 | Consistency | Eventual for reads is fine; write-then-read within same session should be consistent |
 | Max paste size | 10 MB |
 
@@ -93,7 +93,7 @@ Write bandwidth        = 35 writes/sec × 10 KB = 350 KB/s  (trivial)
 Read bandwidth         = 350 reads/sec × 10 KB = 3.5 MB/s  (manageable; CDN absorbs most)
 ```
 
-**Key takeaway:** storage volume is the dominant concern, not raw throughput. Object storage (S3) is the right answer.
+**Key takeaway:** storage volume is the dominant concern, not raw throughput. [Object storage](../../Level-02-Data-Layer/09-Object-Storage/README.md) (S3) is the right answer.
 
 ---
 
@@ -115,8 +115,8 @@ Authorization: Bearer <token>   (optional for anonymous)
 
 201 Created
 {
-  "key":        "aB3kZ9",
-  "url":        "https://paste.example.com/aB3kZ9",
+  "key":        "aB3kZ9xQ",
+  "url":        "https://paste.example.com/aB3kZ9xQ",
   "expires_at": "2026-07-01T03:01:00Z"
 }
 ```
@@ -129,7 +129,7 @@ X-Paste-Password: <password>    (only needed for protected pastes)
 
 200 OK
 {
-  "key":        "aB3kZ9",
+  "key":        "aB3kZ9xQ",
   "content":    "def hello():\n    print('world')",
   "language":   "python",
   "visibility": "unlisted",
@@ -175,7 +175,7 @@ This is the **central design insight** that separates Pastebin from URL shortene
 |---|---|---|
 | `key` | `CHAR(8)` | PK — the short unique identifier |
 | `owner_id` | `BIGINT` | FK to `users`, nullable for anonymous |
-| `s3_path` | `TEXT` | e.g., `pastes/aB3kZ9.txt` — pointer into S3 |
+| `s3_path` | `TEXT` | e.g., `pastes/aB3kZ9xQ.txt` — pointer into S3 |
 | `size_bytes` | `INT` | stored at write time |
 | `language` | `VARCHAR(32)` | syntax hint (`python`, `json`, …) |
 | `visibility` | `ENUM` | `public`, `unlisted`, `protected` |
@@ -201,7 +201,7 @@ Indexes: `(owner_id, created_at)` for user paste history; `(expires_at)` for the
 ```
 Bucket: pastebin-content
 Key layout: pastes/{short_key}.txt
-  e.g.:  pastes/aB3kZ9.txt
+  e.g.:  pastes/aB3kZ9xQ.txt
 
 Presigned URL TTL: 15 minutes (for CDN cache-miss origin fetches)
 ```
@@ -276,18 +276,20 @@ flowchart TD
     Cleanup -->|"Invalidate keys"| Redis
     Analytics --> DBR
 
-    style EdgeLayer fill:#f0fdf4,stroke:#86efac
-    style AppLayer fill:#fefce8,stroke:#fde047
-    style CacheLayer fill:#fdf4ff,stroke:#e879f9
-    style PersistenceLayer fill:#fff1f2,stroke:#fda4af
-    style BGLayer fill:#f0f9ff,stroke:#7dd3fc
+    style EdgeLayer fill:#f0fdf4,stroke:#86efac,color:#000
+    style AppLayer fill:#fefce8,stroke:#fde047,color:#000
+    style CacheLayer fill:#fdf4ff,stroke:#e879f9,color:#000
+    style PersistenceLayer fill:#fff1f2,stroke:#fda4af,color:#000
+    style BGLayer fill:#f0f9ff,stroke:#7dd3fc,color:#000
 ```
+
+*Caption: Notice the split storage — content blobs go to S3 while only metadata lives in PostgreSQL, and the CDN can fetch large or raw pastes from S3 directly.*
 
 ### Request-Flow Walk-through
 
 **Write path (create paste):**
 
-1. Browser POSTs to `https://paste.example.com/api/v1/pastes` — hits DNS, CDN (POST bypasses cache), then LB.
+1. Browser POSTs to `https://paste.example.com/api/v1/pastes` — hits [DNS](../../Level-00-Foundations/05-DNS/README.md), CDN (POST bypasses cache), then LB.
 2. API Service calls **KGS** to get a pre-generated unique 8-char key (same approach as URL shortener — see `../01-URL-Shortener/README.md`).
 3. API uploads the raw content to **S3** at path `pastes/{key}.txt`. S3 returns an ETag on success.
 4. API writes the metadata row to **PostgreSQL Primary** (key, owner, s3_path, size, ttl, visibility, etc.).
@@ -296,10 +298,10 @@ flowchart TD
 
 **Read path (fetch paste):**
 
-1. Browser GETs `https://paste.example.com/aB3kZ9` — CDN checks its edge cache.
-2. **Cache hit at CDN edge** → response served in < 20 ms (public/unlisted pastes only; protected pastes are never CDN-cached).
+1. Browser GETs `https://paste.example.com/aB3kZ9xQ` — CDN checks its edge cache.
+2. **Cache hit at CDN edge** → response served in < 20 ms (public pastes only; unlisted pastes are browser-cached only and protected pastes are never cached).
 3. **Cache miss at CDN** → request forwarded to LB → API Service.
-4. API checks **Redis** for `paste:aB3kZ9`.
+4. API checks **Redis** for `paste:aB3kZ9xQ`.
    - Redis hit → return metadata + content directly (for small pastes).
    - Redis miss → query **PostgreSQL Read Replica** for metadata → get `s3_path`.
 5. API fetches blob from **S3** (or returns a presigned URL for the client to fetch directly for large pastes).
@@ -328,27 +330,29 @@ sequenceDiagram
     participant DB as Pastes Table
 
     API->>KGS: Request key
-    KGS-->>API: Return "aB3kZ9" (from in-memory pool)
+    KGS-->>API: Return "aB3kZ9xQ" (from in-memory pool)
 
     Note over KGS,KDB: KGS refills pool async<br/>when pool size < 200
     KGS->>KDB: Mark batch as used (UPDATE keys SET used=true...)
 
-    API->>S3: PUT pastes/aB3kZ9.txt (blob)
+    API->>S3: PUT pastes/aB3kZ9xQ.txt (blob)
     S3-->>API: 200 OK (ETag)
-    API->>DB: INSERT INTO pastes (key='aB3kZ9', s3_path=..., ...)
+    API->>DB: INSERT INTO pastes (key='aB3kZ9xQ', s3_path=..., ...)
     DB-->>API: 201
     API-->>API: Cache in Redis
 ```
+
+*Caption: Notice that the key comes from KGS's in-memory pool with no database hit, and the blob is written to S3 before the metadata row is inserted.*
 
 Key space math:
 ```
 Characters: a-z A-Z 0-9 = 62 symbols
 Key length: 8 characters
 Keyspace:   62^8 = 218,340,105,584,896  (~218 trillion)
-At 1M/day: would take 218 billion days to exhaust — we're safe
+At 1M/day: would take 218 million days (~600,000 years) to exhaust — we're safe
 ```
 
-If you want shorter keys (6 chars = 56 billion), you still have 150,000 years of runway at 1M/day.
+If you want shorter keys (6 chars = 56 billion), you still have ~150 years of runway at 1M/day.
 
 ### TTL Expiry & Background Cleanup
 
@@ -395,14 +399,14 @@ The read path has to handle three paste privacy tiers very differently:
 | Visibility | CDN Cache? | Redis Cache? | Auth Required? |
 |---|---|---|---|
 | `public` | Yes (`public, max-age=3600`) | Yes | No |
-| `unlisted` | Yes (`private, max-age=3600`) | Yes | No — URL is the secret |
+| `unlisted` | No — browser only (`private, max-age=3600`) | Yes | No — URL is the secret |
 | `protected` | No (`no-store`) | No | Yes — password checked per-request |
 
 For **raw content** (`/raw/{key}`), the CDN can cache the S3 response directly using a **CDN-to-S3 origin** setup (CloudFront → S3 Origin). This bypasses the API server entirely on cache hit, reducing compute cost significantly at scale.
 
 For **rendered HTML** pages (with syntax highlighting), the API server generates the page and CDN caches the HTML output.
 
-**Cache invalidation on delete:** when a paste is deleted or expires, the cleanup worker must send a CDN invalidation (e.g., `CloudFront CreateInvalidation` for `/aB3kZ9` and `/raw/aB3kZ9`). CDN invalidations are eventually consistent (typically seconds), but that's acceptable — 410 at the origin is authoritative.
+**Cache invalidation on delete:** when a paste is deleted or expires, the cleanup worker must send a CDN invalidation (e.g., `CloudFront CreateInvalidation` for `/aB3kZ9xQ` and `/raw/aB3kZ9xQ`). CDN invalidations are eventually consistent (typically seconds), but that's acceptable — 410 at the origin is authoritative.
 
 ### Syntax Highlighting: Client-Side vs Server-Side
 
@@ -413,7 +417,7 @@ Option A — Client-side (highlight.js / Prism.js)
 
 Option B — Server-side (Pygments / tree-sitter)
   Pros:  Pre-rendered HTML; consistent across clients; works for bots/OG previews
-  Cons:  CPU cost per unique render; must cache rendered HTML; Pygments adds ~200ms
+  Cons:  CPU cost per unique render; must cache rendered HTML; large pastes take tens of milliseconds to render
 
 Hybrid (chosen approach):
   - API stores raw text in S3 (always)
@@ -433,14 +437,14 @@ At 35 writes/sec peak this is not a concern today. But at 10× scale (350 writes
 
 1. **Write batching** — batch inserts from multiple API instances using a small buffer (50 ms window). Reduces IOPS dramatically.
 2. **Read replicas** — all reads (metadata lookups) go to replicas; primary handles writes only.
-3. **Sharding by key prefix** — partition `pastes` table across multiple PostgreSQL instances by first character of key (62 shards, but typically 2–4 physical shards with virtual mapping). KGS must be shard-aware.
+3. **[Sharding](../../Level-02-Data-Layer/02-Sharding-and-Partitioning/README.md) by key prefix** — partition `pastes` table across multiple PostgreSQL instances by first character of key (62 shards, but typically 2–4 physical shards with virtual mapping). KGS must be shard-aware.
 4. **Replace with Cassandra/DynamoDB** — if relational features (joins, user history queries) can be sacrificed, a NoSQL wide-column store handles millions of writes/sec natively. Trade-off: no transactions, no foreign keys.
 
 ### Bottleneck: KGS as SPOF
 
 KGS is a singleton service. If it goes down, no new pastes can be created.
 
-- **Fix:** Run 2–3 KGS instances, each pre-loading a non-overlapping key range from the `keys` table. A distributed lock (Redis `SETNX`) prevents two instances from claiming the same batch.
+- **Fix:** Run 2–3 KGS instances, each pre-loading a non-overlapping key range from the `keys` table. A [distributed lock](../../Level-04-Distributed-Systems/08-Distributed-Locking/README.md) (Redis `SETNX`) prevents two instances from claiming the same batch.
 - **Fallback:** If KGS is unreachable, API falls back to random key generation with DB-level unique constraint (slower but correct).
 
 ### Failure Mode: S3 Upload Succeeds, DB Write Fails
@@ -475,21 +479,21 @@ A paste goes viral: 50,000 req/sec hit a Redis cold-start. All miss at once, flo
 | Metadata store | PostgreSQL | DynamoDB, Cassandra | Relational queries (user history, analytics); easy TTL-indexed cleanup; fits on one node for years |
 | CDN for raw content | CloudFront → S3 direct | API serves all content | API CPU scales with reads; CDN handles 99%+ of reads for popular pastes at the edge |
 | Expiry enforcement | Soft (read-time check) + async hard delete | Hard delete only at expiry time | Cron approach avoids distributed timer complexity; lazy check is O(1) |
-| Syntax highlighting | Hybrid client+server | Server-only | CPU cost; Pygments adds ~200 ms; client-side Prism is instant after initial JS load |
+| Syntax highlighting | Hybrid client+server | Server-only | CPU cost; server rendering takes tens of ms for large pastes; client-side Prism is instant after initial JS load |
 | Privacy for "unlisted" | Key secrecy (no auth required) | Token-based access | Simpler; matches user expectation (share the URL = share access) |
 
 ---
 
 ## 10. 🌐 How It's Actually Done
 
-**Pastebin (original):** Uses a PHP backend with MySQL for metadata and a separate blob store. Their engineering isn't publicly documented, but the architecture is well-understood through leaked schema references and community reconstruction.
+**Pastebin.com (the original, launched 2002):** its internals are not publicly documented, so treat any description of its stack as guesswork. What is visible from outside matches this design: short random keys, optional expiry, public / unlisted / private visibility, and raw-content URLs that suit CDN caching.
 
-**GitHub Gist:** Stores git repositories per gist (each gist is a git repo), enabling versioning and forking. Metadata in MySQL. Blob content in git object storage on distributed filesystem (likely HDFS or custom). CDN (Fastly) in front. Reference: [GitHub Engineering blog](https://github.blog/engineering/).
+**GitHub Gist:** Stores git repositories per gist (each gist is a git repo), enabling versioning and forking. Metadata in MySQL. Blob content lives in git repositories replicated across file servers by GitHub's Spokes (formerly DGit) system. CDN (Fastly) in front. Reference: [GitHub Engineering blog](https://github.blog/engineering/).
 
-**Cloudflare R2 / Backblaze B2 as S3 alternatives:** Many modern Pastebin clones (PrivateBin, hastebin) use S3-compatible object stores to avoid AWS egress fees. Same API, swappable.
+**Cloudflare R2 / Backblaze B2 as S3 alternatives:** Self-hosted clones such as PrivateBin and haste-server support S3-compatible object stores as a storage backend, which lets operators choose a provider without egress fees. Same API, swappable.
 
 **Key insight from real deployments:** the biggest operational pain is not key generation or storage — it's **abuse detection**. Spammers, malware distribution, and credential leaks are major operational problems. Production systems add:
-- Rate limiting per IP and per account (token bucket, Redis-backed)
+- [Rate limiting](../../Level-03-Communication/07-Rate-Limiting/README.md) per IP and per account (token bucket, Redis-backed)
 - Content scanning (regex + ML classifiers for credentials, malware URLs)
 - DMCA takedown handling
 - Honeypot paste detection
@@ -514,3 +518,11 @@ A paste goes viral: 50,000 req/sec hit a Redis cold-start. All miss at once, flo
 4. **KGS as SPOF** — the pre-generation trick that makes writes fast also creates a critical single point of failure that needs explicit HA design.
 
 If you can walk through the write path, the read path, the expiry flow, and the two-store consistency model fluently — with the numbers to back up your choices — you'll pass a senior system design interview on this problem.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [01 · URL Shortener](../01-URL-Shortener/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [03 · Rate Limiter](../03-Rate-Limiter/README.md)
+
+<!-- nav:end -->

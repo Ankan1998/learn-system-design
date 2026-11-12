@@ -295,7 +295,7 @@ Netflix built its own CDN called **Open Connect**. Instead of sending video traf
 ### When Understanding This Layer Matters
 
 - **Cross-region system design:** Choosing where to place databases, caches, and application servers requires knowing that cross-region latency is real (60–150ms) and cannot be engineered away.
-- **Network partition planning:** Designing systems that tolerate network failures (the "P" in CAP theorem) requires understanding that packets can be lost, delayed, or reordered.
+- **Network partition planning:** Designing systems that tolerate network failures (the "P" in [CAP theorem](../../Level-04-Distributed-Systems/01-CAP-Theorem/README.md)) requires understanding that packets can be lost, delayed, or reordered.
 - **CDN and peering strategy:** Deciding whether to use a CDN, which edge locations to use, or whether to negotiate ISP peering (like Netflix does) requires understanding the ISP tier hierarchy and IXPs.
 - **Capacity and cost planning:** Data transfer costs between cloud regions (e.g., AWS charges for cross-region traffic) make sense once you understand they reflect real physical infrastructure costs.
 - **Debugging latency issues:** If your service is slow for users in one country but fast in another, you need to understand routing, ISP paths, and submarine cable geography.
@@ -333,9 +333,9 @@ Traffic between AWS services in the same VPC (Virtual Private Cloud) travels thr
 
 - **BGP is the internet's routing protocol.** If asked "how does the internet know where to route packets?", explain that **BGP (Border Gateway Protocol)** is the protocol that ISPs and large networks use to advertise which IP address ranges they own and can reach. It is the "postal routing protocol" that every major network speaks.
 
-- **The internet is decentralized by design.** There is no single authority controlling it. ARPANET (the internet's predecessor) was designed to survive nuclear attacks by having no single point of failure. This is why the internet routes around damage — automatically.
+- **The internet is decentralized by design.** There is no single authority controlling it. ARPANET (the internet's predecessor) used packet switching, an idea that grew partly out of research into networks that could survive nuclear attacks by having no single point of failure. This is why the internet routes around damage — automatically.
 
-- **Know the difference between latency and bandwidth.** Latency is the delay (ms) for a packet to travel from A to B. Bandwidth is how much data can flow per second (Gbps). A fat pipe (high bandwidth) does not reduce latency. A submarine cable can carry 160Tbps but still takes ~70ms to cross the Atlantic.
+- **Know the difference between latency and bandwidth.** Latency is the delay (ms) for a packet to travel from A to B. Bandwidth is how much data can flow per second (Gbps). A fat pipe (high bandwidth) does not reduce latency. A modern submarine cable can carry 200+ Tbps, yet a packet still needs ~30–35ms to cross the Atlantic (about 70ms for the round trip).
 
 - **Mention IXPs when discussing CDNs.** Explaining that CDNs work partly by peering at IXPs (reducing hops) shows depth of understanding.
 
@@ -372,3 +372,11 @@ Traffic between AWS services in the same VPC (Virtual Private Cloud) travels thr
 - **"Computer Networks" by Andrew S. Tanenbaum** — The definitive textbook on computer networking. Chapters 1 (Introduction) and 5 (Network Layer) are most relevant to this topic. Dense but authoritative.
 - **Submarine Cable Map** ([submarinecablemap.com](https://www.submarinecablemap.com/)) — Interactive map of all active and planned submarine cables. Excellent for visualizing why cross-Atlantic latency differs from cross-Pacific.
 - **"BGP in 2023" reports by APNIC** — Annual reports on the state of BGP routing on the internet. Good for understanding how the routing table has grown and how routing security (RPKI) is evolving.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [The Client-Server Model](../02-Client-Server-Model/README.md) · 🏠 [Level 0 — Foundations](../README.md) · ➡️ **Next:** [Network Protocols: TCP, UDP, and IP](../04-Network-Protocols/README.md)
+
+<!-- nav:end -->

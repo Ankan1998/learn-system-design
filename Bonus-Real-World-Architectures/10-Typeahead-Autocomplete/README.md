@@ -38,10 +38,10 @@ Every time you type "new y" into Google and see "new york", "new york times", an
 ### Non-Functional
 | Concern | Target |
 |---|---|
-| P99 end-to-end latency | < 100 ms |
+| [P99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) end-to-end latency | < 100 ms |
 | Availability | 99.99 % (four nines) |
 | Freshness | Suggestions updated within 1 hour of trend shift |
-| Scale | Support 575 K suggestion QPS at peak (see §3) |
+| Scale | Support ~347 K suggestion QPS at peak (see §3) |
 | Storage | Hold ~100 million unique query strings |
 | Read:Write ratio | ~1000 : 1 (mostly reads, writes from aggregation pipeline) |
 
@@ -79,7 +79,8 @@ Trie nodes (internal + leaves)  : ~500 M (each shared prefix collapses nodes)
 
 Per trie node:
   - Character key               : 1 byte
-  - Pointer map (26 children)   : 26 × 8 bytes = 208 bytes (dense array)
+  - Pointer map (26 children)   : 26 × 8 bytes = 208 bytes (dense array = worst case;
+                                  the hash-map layout in §7.1 needs far less)
   - Top-10 suggestion list      : 10 × (20 chars + 8-byte score) = 280 bytes
   - Total per node              : ~500 bytes
 
@@ -148,7 +149,7 @@ This feeds the click-through signal into the ranking pipeline.
 
 ### Trie Node (in-memory, per shard)
 
-```
+```mermaid
 erDiagram
     TRIE_NODE {
         string   char_key        "single character"
@@ -167,6 +168,8 @@ erDiagram
     TRIE_NODE ||--o{ TOP_K_ENTRY : "stores"
     TRIE_NODE ||--o{ TRIE_NODE   : "children"
 ```
+
+*Caption: Each trie node carries its own pre-computed top-K list, so a lookup never has to scan the subtree beneath a prefix.*
 
 ### Query Log (append-only, Kafka → data warehouse)
 
@@ -273,6 +276,8 @@ flowchart TD
     class KA,SP,BQ,TU,S3S ingest
 ```
 
+*Caption: Reads fall through CDN, Redis, and trie shards in turn, while feedback flows separately through Kafka and Spark to rebuild shard snapshots offline.*
+
 **Request walk-through (hot path — numbered):**
 
 1. **Debounce** — user types "new y"; the client waits 200 ms of inactivity before firing a request (saves ~30 % of unnecessary requests).
@@ -303,23 +308,30 @@ flowchart TD
     NEWYOR(("o"))
     NEWYORK(("r"))
     NEWYORKK(("k★<br/>top-10: [new york,<br/>new york times,...]"))
+    NEWYORKSP(("' '"))
     NEWYT(("t"))
     NEWYTI(("i"))
     NEWYTIM(("m"))
     NEWYTIME(("e"))
-    NEWYTIMES(("s★<br/>top-10: [new york times,<br/>new year...]"))
+    NEWYTIMES(("s★<br/>top-10: [new york times]"))
+    NEWYE(("e"))
+    NEWYEA(("a"))
+    NEWYEAR(("r★<br/>top-10: [new year,<br/>new years eve,...]"))
 
     ROOT --> N --> NE --> NEW --> NEWSP --> NEWY --> NEWYOR --> NEWYORK --> NEWYORKK
-    NEWYORK --> NEWYT --> NEWYTI --> NEWYTIM --> NEWYTIME --> NEWYTIMES
+    NEWYORKK --> NEWYORKSP --> NEWYT --> NEWYTI --> NEWYTIM --> NEWYTIME --> NEWYTIMES
+    NEWY --> NEWYE --> NEWYEA --> NEWYEAR
 
     classDef leaf fill:#ede9fe,stroke:#8b5cf6,color:#000,font-weight:bold
     classDef node fill:#f1f5f9,stroke:#94a3b8,color:#000
     classDef root fill:#dcfce7,stroke:#22c55e,color:#000
 
-    class NEWYORKK,NEWYTIMES leaf
+    class NEWYORKK,NEWYTIMES,NEWYEAR leaf
     class ROOT root
-    class N,NE,NEW,NEWSP,NEWY,NEWYOR,NEWYORK,NEWYT,NEWYTI,NEWYTIM,NEWYTIME node
+    class N,NE,NEW,NEWSP,NEWY,NEWYOR,NEWYORK,NEWYORKSP,NEWYT,NEWYTI,NEWYTIM,NEWYTIME,NEWYE,NEWYEA node
 ```
+
+*Caption: "new york" and "new year" share the path n-e-w-space-y and then split, while "new york times" continues below the "k" of "new york". Starred nodes end a complete query and carry a pre-computed top-10 list.*
 
 **Key design choices:**
 
@@ -355,6 +367,8 @@ flowchart LR
     class SA,SB,SC,SD,SE shard
 ```
 
+*Caption: The router needs only the first character of the prefix to pick a shard, with a catch-all shard for digits and non-Latin scripts.*
+
 **Range-based sharding (first character) — pros:**
 - Deterministic routing with no lookup table — the router is a simple range map.
 - Shard boundaries are stable; a new shard can absorb a range without global reshuffling.
@@ -365,7 +379,7 @@ flowchart LR
 - **Cross-shard queries.** If the product supports "contains" search or mid-word matching, a single request may fan out to every shard.
 - **Rebalancing is manual.** Moving a prefix range means rebuilding two shards.
 
-**Alternative — consistent hashing on the full prefix string.** Distributes load more evenly but loses data locality (a single typing session may span many shards).
+**Alternative — [consistent hashing](../../Level-02-Data-Layer/08-Consistent-Hashing/README.md) on the full prefix string.** Distributes load more evenly but loses data locality (a single typing session may span many shards).
 
 ### 7.3 Trie Update Pipeline
 
@@ -427,7 +441,7 @@ Worst case uncached         :  80 + 20 = 100 ms  (exactly at budget)
 
 ### Bottlenecks
 
-1. **Hot prefix bursts** — a breaking news event causes 100× spike on one prefix (e.g. "earthquake"). The CDN and L1 cache absorb most of this, but the first shard request can still cause thundering-herd to Redis. Mitigate with a per-key Bloom filter + request coalescing (only one backend request in flight per prefix).
+1. **Hot prefix bursts** — a breaking news event causes 100× spike on one prefix (e.g. "earthquake"). The CDN and L1 cache absorb most of this, but the first shard request can still cause thundering-herd to Redis. Mitigate with a per-key [Bloom filter](../../Level-07-Big-Data-and-Specialized/06-Probabilistic-Data-Structures/README.md) + request coalescing (only one backend request in flight per prefix).
 2. **Shard reload latency** — during the daily full rebuild, loading a 5 GB shard takes 60–90 s. During this window, that shard serves slightly stale data. Mitigate by pre-warming the new instance before switching the pointer.
 3. **Serialisation cost** — converting the top-10 list to JSON for every uncached response costs ~0.5 ms. Pre-serialise the top-K list at write time so reads just copy bytes.
 
@@ -436,7 +450,7 @@ Worst case uncached         :  80 + 20 = 100 ms  (exactly at budget)
 | Failure | Impact | Mitigation |
 |---|---|---|
 | Single trie shard crash | Prefixes in that range return empty results | Each shard has a hot standby replica; failover < 5 s via health-check |
-| Redis cluster partition | L2 cache disabled; all traffic hits trie | Circuit breaker: fall back gracefully; trie alone can handle reduced load |
+| Redis cluster partition | L2 cache disabled; all traffic hits trie | [Circuit breaker](../../Level-05-Architecture-Patterns/06-Resilience-Patterns/README.md): fall back gracefully; trie alone can handle reduced load |
 | Ingestion pipeline lag | Suggestions go stale | Monitor Kafka consumer lag; alert at > 2 × normal; pipeline is non-critical to read path |
 | CDN PoP outage | Regional latency spike | Anycast routing; traffic shifts to next-nearest PoP automatically |
 
@@ -472,16 +486,16 @@ Counting queries in real time (e.g., with a streaming counter in Redis) gives fr
 - Uses a variant of the trie with pruning: low-count nodes below a threshold are dropped to keep memory tractable.
 - Applies a personalised ranking layer on top of global popularity; your recent searches and location influence what appears.
 - The system accounts for search seasonality — "christmas gifts" ranks higher in December even though its 30-day count is lower in July.
-- Google debounces on the server side too: requests within 40 ms of each other for the same session are coalesced.
+- Suggestions are fetched as you type, so the client debounces keystrokes and abandons stale in-flight requests; the servers never see most of what you type.
 
 **Bing Autosuggest API:**
-- Exposes the underlying infrastructure as a paid API, so third-party apps can use the same suggestion engine.
+- Exposed the underlying infrastructure as a paid API, so third-party apps could use the same suggestion engine (Microsoft retired the Bing Search APIs, including Autosuggest, in August 2025).
 - Adds a `SafeSearch` parameter to filter adult content from suggestions.
 
 **Elasticsearch Completion Suggester:**
 - A production-grade open-source implementation using an in-memory FST (Finite State Transducer) — a compressed form of a trie that can be 10× smaller in RAM.
 - Weights can be set per document at index time; re-ranking requires a re-index.
-- Used by LinkedIn, Airbnb, and Wikipedia for their search boxes.
+- Used by Wikipedia's search box (via its CirrusSearch extension), among many others.
 
 **Key industry lessons:**
 - **Latency wins over freshness.** Most companies accept hourly-stale suggestions rather than pay the write-amplification cost of real-time updates.
@@ -504,3 +518,11 @@ Counting queries in real time (e.g., with a streaming counter in Redis) gives fr
 | Failure isolation | Hot standby per shard + Redis circuit breaker | No single point of failure on the read path |
 
 **The core insight:** typeahead is a read-heavy, latency-sensitive system where you trade write complexity (expensive pre-computation of top-K at every node, batch aggregation pipelines, cache invalidation) for blazing-fast reads. Get the caching hierarchy right, pre-compute aggressively, and the trie itself becomes almost a formality at query time.
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [09 · YouTube / Netflix](../09-YouTube-Netflix-Streaming/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [11 · Uber Ride-Sharing](../11-Uber-Ride-Sharing/README.md)
+
+<!-- nav:end -->

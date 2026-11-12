@@ -38,7 +38,7 @@ Behind that button is a system that has to execute *arbitrary code written by st
 - **Latency:** p50 verdict < 5 s in normal operation; < 30 s during contest peaks.
 - **Throughput:** 500 submissions/s at contest start; 60/s average.
 - **Fairness:** one user cannot monopolize judging capacity; contest submissions outrank practice.
-- **At-least-once execution with idempotent results** — a worker crash must not lose a submission or double-count it.
+- **At-least-once execution with [idempotent](../../Level-04-Distributed-Systems/07-Idempotency-and-Exactly-Once/README.md) results** — a worker crash must not lose a submission or double-count it.
 - 99.9% availability; cost-efficient (sandboxes are short-lived and dense).
 
 ---
@@ -53,7 +53,7 @@ Behind that button is a system that has to execute *arbitrary code written by st
 - At 500/s × 3 CPU-s = **1,500 CPU-seconds per second → ~1,500 cores** busy during a contest peak; ~200 cores on average. The queue absorbs the burst so the fleet can be sized between the two, with autoscaling and a pre-warmed pool before scheduled contests.
 
 **Storage**
-- Source: 5M × ~5 KB = **25 GB/day** into object storage; metadata rows in the database.
+- Source: 5M × ~5 KB = **25 GB/day** into [object storage](../../Level-02-Data-Layer/09-Object-Storage/README.md); metadata rows in the database.
 - Test cases: 3,000 problems × ~50 files × ~1 MB = **150 GB**, immutable, cached on every worker's local disk.
 - Results: 5M × 10 tests × ~100 bytes = 5 GB/day of per-test records.
 
@@ -142,6 +142,8 @@ erDiagram
     TEST_CASE ||--o{ TEST_RESULT : "graded by"
 ```
 
+*Caption: Notice that each test case keeps its expected output separate from the input, and every submission produces one result row per test it ran.*
+
 **Storage choices:** submission and result metadata in a relational database (status transitions, queries by user and problem); source code and test files in **object storage** (immutable, cheap, cacheable); language images in a container registry, pinned by digest so a verdict is reproducible months later.
 
 ---
@@ -184,6 +186,8 @@ flowchart LR
     style DB fill:#dbeafe,color:#000
 ```
 
+*Caption: Submissions pass through a priority queue to leased workers; user code runs only inside sandboxes, while the checker compares outputs outside them.*
+
 **Walk-through:**
 1. The gateway authenticates the user, enforces a rate limit (say 1 submission per 10 s) and a 64 KB source limit, and forwards to the submission service.
 2. The source is written to object storage; a row is inserted with status `QUEUED`; a job is published to the **contest** or **practice** lane with the user's ID.
@@ -212,12 +216,12 @@ The sandbox is the product. Defense in layers, each stopping a different class o
 | **Timeouts** | CPU-time limit *and* a wall-clock limit (sleep loops burn no CPU) | Infinite loops, deliberate stalls |
 | **Non-root, unprivileged user** | Random UID, no capabilities | Privilege escalation inside the container |
 
-Tooling: **isolate** (the sandbox used by the International Olympiad in Informatics and the CMS contest system) and **nsjail** wrap these primitives with a single command line and are the workhorses of most judges. For stronger isolation at higher cost, **gVisor** runs a user-space kernel that intercepts syscalls (used by Google and Replit), and **Firecracker** microVMs (what AWS Lambda runs on) give hardware-level isolation with ~125 ms boot times.
+Tooling: **isolate** (the sandbox used by the International Olympiad in Informatics and the CMS contest system) and **nsjail** wrap these primitives with a single command line and are the workhorses of most judges. For stronger isolation at higher cost, **gVisor** runs a user-space kernel that intercepts syscalls (used by Google's App Engine and Cloud Run), and **Firecracker** microVMs (what AWS Lambda runs on) give hardware-level isolation with ~125 ms boot times.
 
 | Option | Isolation strength | Startup | Density | Typical use |
 |--------|--------------------|---------|---------|-------------|
 | Container + seccomp (isolate, nsjail) | Good — shares the host kernel | ~10 ms | Very high | Most judges |
-| gVisor | Strong — syscalls never reach the host kernel directly | ~50–100 ms | High | Multi-tenant code execution |
+| gVisor | Strong — syscalls never reach the host kernel directly | ~50–100 ms | High | [Multi-tenant](../../Level-05-Architecture-Patterns/10-Multi-Tenancy/README.md) code execution |
 | Firecracker microVM | Strongest — separate kernel | ~125 ms | Medium | Untrusted long-running workloads |
 
 At 5,500 sandbox starts per second, tens of milliseconds matter; most judges use isolate-style containers and keep a **pool of pre-created sandboxes** per language to hide startup entirely.
@@ -288,6 +292,8 @@ flowchart TD
     style K fill:#fef9c3,color:#000
 ```
 
+*Caption: Each test passes resource, exit-status, and output-size checks before the checker compares output; any failure ends the run with that verdict.*
+
 Checker types: **exact** (byte-for-byte after trailing-whitespace normalization), **token** (whitespace-insensitive), **float** with tolerance, and **special judge** — a problem-specific program that validates an answer when many are correct ("any valid path"). Special checkers are author-written code, so they run in a sandbox too, just a different one from the submission. **Interactive problems** wire the solution and a judge process together over pipes and score the conversation.
 
 Fail-fast (stop at the first failed test) gives fast feedback and saves compute; partial-scoring contests run every test and sum weights. The choice is per problem.
@@ -332,7 +338,7 @@ Status transitions (`QUEUED → COMPILING → RUNNING test 3/10 → DONE`) are p
 | Queue | Priority lanes + per-user cap | Single FIFO | Contests must not wait behind practice; one user must not starve others |
 | Checker location | Outside the submission sandbox | Inside, for simplicity | Expected outputs must never be readable by user code |
 | Result delivery | Pub/sub → SSE, polling fallback | Polling only | Sub-second updates during contests; polling at 500/s of anxious refreshers is wasteful |
-| Compute model | Long-lived workers pulling from a queue | One serverless function per submission | Sandbox pooling and test caching need warm, stateful workers |
+| Compute model | Long-lived workers pulling from a queue | One [serverless](../../Level-05-Architecture-Patterns/08-Serverless-Architecture/README.md) function per submission | Sandbox pooling and test caching need warm, stateful workers |
 
 ---
 
@@ -346,7 +352,7 @@ Status transitions (`QUEUED → COMPILING → RUNNING test 3/10 → DONE`) are p
 
 **LeetCode and HackerRank:** containerized judging fleets with per-language time multipliers and pre-warmed capacity ahead of weekly contests; both publish the resource limits per language rather than pretending all languages are equal.
 
-**Replit:** moved its code execution from gVisor toward Firecracker-style microVMs as workloads became long-running and multi-tenant — a good illustration of choosing isolation strength by threat model and runtime length.
+**Fly.io:** runs every customer app in its own Firecracker microVM, while short-lived judge runs get by with pooled namespace-and-seccomp sandboxes — a good illustration of choosing isolation strength by threat model and runtime length.
 
 **AWS Lambda / Firecracker:** the microVM technology that makes "run untrusted code for milliseconds with hardware isolation" economical was built for exactly this class of problem and is now open source.
 
@@ -368,4 +374,12 @@ The 30-second whiteboard pitch: an online judge is a job queue feeding a fleet o
 
 ---
 
-[← Back to all real-world architectures](../README.md) · Related: [Gaming Leaderboard](../35-Gaming-Leaderboard/README.md) · [Distributed Job Scheduler](../21-Distributed-Job-Scheduler/README.md) · [WebSockets & Real-Time](../../Level-03-Communication/06-WebSockets-and-Realtime/README.md)
+**Related:** [Gaming Leaderboard](../35-Gaming-Leaderboard/README.md) · [Distributed Job Scheduler](../21-Distributed-Job-Scheduler/README.md) · [WebSockets & Real-Time](../../Level-03-Communication/06-WebSockets-and-Realtime/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [40 · A/B Testing (Experimentation) Platform](../40-Experimentation-Platform/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [42 · Social Graph Store (Facebook TAO)](../42-Social-Graph-Store/README.md)
+
+<!-- nav:end -->

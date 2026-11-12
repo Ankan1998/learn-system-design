@@ -1,7 +1,8 @@
 site_name: The Complete System Design Curriculum
 site_description: >-
   From "What is a server?" to "Design a global, multi-region, exactly-once payment
-  system." 65 topics and 38 real-world architectures, with diagrams and analogies.
+  system." A free, structured system design curriculum: eight levels of concepts
+  plus dozens of real-world architectures, with diagrams and analogies.
 site_author: Ankan
 site_url: https://ankan1998.github.io/learn-system-design/
 
@@ -16,6 +17,7 @@ theme:
   name: material
   language: en
   icon:
+    logo: material/layers-triple
     repo: fontawesome/brands/github
   features:
     - navigation.tracking         # URL follows the scrolled heading
@@ -79,7 +81,7 @@ markdown_extensions:
   - pymdownx.superfences:
       custom_fences:
         # Emit ```mermaid blocks as plain divs holding the diagram source.
-        # stylesheets/mermaid-init.js renders them eagerly (see note below).
+        # javascripts/mermaid-init.js renders them eagerly (see note below).
         - name: mermaid
           class: mermaid-diagram
           format: !!python/name:pymdownx.superfences.fence_div_format
@@ -93,6 +95,8 @@ extra_css:
 
 # Rendered eagerly rather than via Material's built-in lazy (viewport-triggered)
 # Mermaid mount, so diagrams also appear in background tabs and when printing.
+# The script also shows the diagram source if the renderer cannot load, and
+# opens any diagram full-screen on click.
 extra_javascript:
   - path: javascripts/mermaid-init.js
     type: module

@@ -136,7 +136,7 @@ flowchart LR
 **Practical defaults:**
 - **Postgres:** Read Committed (prevents dirty reads but not non-repeatable reads or phantoms).
 - **MySQL InnoDB:** Repeatable Read (also prevents phantom reads via gap locks).
-- **Oracle, SQL Server:** Read Committed with MVCC.
+- **Oracle:** Read Committed with MVCC. **SQL Server:** Read Committed (lock-based unless `READ_COMMITTED_SNAPSHOT` is enabled).
 
 ---
 
@@ -178,7 +178,7 @@ sequenceDiagram
 **Serializable** isolation guarantees that the result of concurrent transactions is equivalent to some serial execution. Two implementations:
 
 - **Two-Phase Locking (2PL):** acquire all locks before releasing any. Prevents all anomalies but high contention.
-- **SSI — Serializable Snapshot Isolation (Postgres ≥9.1):** tracks "read-write dependencies" between transactions. No additional locking — only aborts transactions that would create a cycle (rare). Close to the performance of Snapshot Isolation with full Serializable guarantees.
+- **SSI — Serializable Snapshot Isolation (Postgres ≥9.1):** tracks "read-write dependencies" between transactions. No additional blocking — only aborts transactions that would create a cycle (rare). Close to the performance of Snapshot Isolation with full Serializable guarantees.
 
 ---
 
@@ -193,7 +193,7 @@ In highly distributed systems (like Cassandra or DynamoDB with default settings)
 | **I**solation | **E**ventually consistent |
 | **D**urability | |
 
-BASE systems prioritize availability and partition tolerance (→ CAP Theorem in [Level 04](../../Level-04-Distributed-Systems/01-CAP-Theorem/README.md)) over strict consistency. A Cassandra write with `W=1` is "basically available" and "eventually consistent" — all replicas will eventually agree, but you might read stale data immediately after a write.
+BASE systems prioritize availability and partition tolerance (→ CAP Theorem in [Level 4](../../Level-04-Distributed-Systems/01-CAP-Theorem/README.md)) over strict consistency. A Cassandra write with `W=1` is "basically available" and "eventually consistent" — all replicas will eventually agree, but you might read stale data immediately after a write.
 
 ---
 
@@ -210,11 +210,11 @@ BASE systems prioritize availability and partition tolerance (→ CAP Theorem in
 
 ## 🏢 Real-World Examples
 
-- **Stripe (Postgres, Serializable for money):** Stripe uses Postgres with Serializable isolation for financial transactions where double-charges or lost updates would be catastrophic.
+- **CockroachDB (Serializable by default):** every transaction runs at Serializable unless you opt out, on the argument that weaker levels cause subtle, money-losing anomalies. The price is that clients must be ready to retry transactions that fail with a serialization error.
 - **PostgreSQL MVCC:** Postgres is famous for readers never blocking writers. This is why high-read systems (web apps) run smoothly even under concurrent writes.
 - **MySQL InnoDB (most web apps):** Repeatable Read is the MySQL default. Django, Rails, Laravel all build on this. Gap locks prevent phantom reads but can cause deadlocks.
 - **DynamoDB / Cassandra (BASE):** No multi-item transactions by default; each write is eventually consistent. DynamoDB added ACID transactions in 2018 (`TransactWriteItems`) but they're more expensive.
-- **Google Spanner:** achieves Serializable isolation at global scale using TrueTime (atomic clocks) and the Paxos consensus algorithm — one of the most impressive engineering feats in database history.
+- **Google Spanner:** achieves Serializable isolation at global scale using TrueTime (atomic clocks) and the [Paxos](../../Level-04-Distributed-Systems/03-Consensus-Paxos-Raft/README.md) consensus algorithm — one of the most impressive engineering feats in database history.
 
 ---
 
@@ -256,7 +256,7 @@ BASE systems prioritize availability and partition tolerance (→ CAP Theorem in
 
 2. **SELECT … FOR UPDATE forgotten.** The most common ACID bug: `SELECT balance WHERE id=X` (no lock), `UPDATE balance WHERE id=X` (write lock too late). Another transaction modified the balance between the two statements. Always use `SELECT ... FOR UPDATE` when you plan to write based on what you read.
 
-3. **Long-running transactions.** A transaction open for 30 minutes in Postgres holds its MVCC snapshot. Every row version created after the snapshot start must be kept (can't be vacuumed). This causes "table bloat" and kills performance. Never leave transactions open across user interactions or network calls.
+3. **Long-running transactions.** A transaction open for 30 minutes in Postgres holds its MVCC snapshot. Every old row version made obsolete after the snapshot start must be kept (can't be vacuumed). This causes "table bloat" and kills performance. Never leave transactions open across user interactions or network calls.
 
 4. **Deadlocks.** Two transactions each hold a lock the other needs. Postgres and MySQL detect deadlocks and abort one transaction (the "victim"). Your application must retry on deadlock. Always acquire locks in a consistent order to reduce deadlock frequency.
 
@@ -301,4 +301,13 @@ BASE systems prioritize availability and partition tolerance (→ CAP Theorem in
 - [PostgreSQL — Transaction Isolation](https://www.postgresql.org/docs/current/transaction-iso.html)
 - [MySQL InnoDB — Transaction Model](https://dev.mysql.com/doc/refman/8.0/en/innodb-transaction-model.html)
 - [A Critique of ANSI SQL Isolation Levels](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/tr-95-51.pdf) (the seminal paper — includes write skew).
-- Previous: [04 — Database Internals](../04-Database-Internals/README.md) · Next: [06 — Connection Pooling](../06-Connection-Pooling/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [Database Internals](../04-Database-Internals/README.md) · 🏠 [Level 2 — The Data Layer](../README.md) · ➡️ **Next:** [Connection Pooling](../06-Connection-Pooling/README.md)
+
+🧩 **See it applied in:** [13 · Airbnb Booking](../../Bonus-Real-World-Architectures/13-Airbnb-Booking/README.md)
+
+<!-- nav:end -->

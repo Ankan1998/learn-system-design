@@ -50,7 +50,7 @@ TAO ("The Associations and Objects") replaced that with a **single graph-aware s
 - 1B reads/s globally; assume 96% served by follower caches and most of the rest by leaders → **~40M/s of cache misses** reach leaders and at most a few million/s reach MySQL. This ratio is the whole reason for a two-tier cache.
 
 **Writes**
-- 2M/s. Every association write is two rows (edge + inverse) plus a count update → **~6M row writes/s** spread across thousands of shards, ~2–3K row writes/s per shard.
+- 2M/s. Every association write is two rows (edge + inverse) plus a count update → **~6M row writes/s** spread across thousands of shards, ~600 row writes/s per shard across ~10,000 logical shards.
 
 **Data**
 - ~100 billion objects × ~1 KB = **100 TB**.
@@ -125,6 +125,8 @@ erDiagram
     ASSOC_TYPE_SCHEMA ||--o{ ASSOC : "types"
 ```
 
+*Caption: Notice that associations are keyed by (id1, atype, id2) and stored on id1's shard, with counts kept as separate rows and inverses defined by the type schema.*
+
 **Design decisions:**
 - **IDs embed the shard.** A 64-bit object ID carries its shard number, so any server can route a request for `id1` to the right shard with no lookup — and an object's association lists are stored on its own shard.
 - **Associations are indexed by `(id1, atype, time DESC)`.** That single index serves `assoc_range`, `assoc_time_range`, and `assoc_get` for one list.
@@ -176,6 +178,8 @@ flowchart TD
     style DBB fill:#e5e7eb,color:#000
 ```
 
+*Caption: All reads and writes for shard 42 funnel through one leader per region, and slave-region writes are forwarded to the master region's leader.*
+
 **Walk-through (read, cache miss):**
 1. A web server asks its local **follower** cache for `assoc_range(post_9, comment, 0, 10)`.
 2. Miss. The follower forwards to the **leader** responsible for shard 42 (the post's shard). Many followers for the same shard share that one leader, so if a thousand followers miss at once, the leader **coalesces** them into one database read — no thundering herd.
@@ -206,7 +210,7 @@ The price is a narrow API: no joins, no traversals. Facebook judged that a fast,
 
 The leader/follower split solves two problems at once:
 
-- **Read capacity:** followers are numerous and stateless with respect to correctness; add more to serve more reads. Each follower cluster is a full copy of the hot set for the shards it serves.
+- **Read capacity:** followers are numerous and [stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md) with respect to correctness; add more to serve more reads. Each follower cluster is a full copy of the hot set for the shards it serves.
 - **Coherence:** all followers for a shard funnel writes and misses through **one leader**, so there is exactly one place that knows the latest state of shard 42 and exactly one source of invalidations. Multiple followers can never disagree for long, and a miss storm becomes a single database read.
 
 Leaders are themselves sharded — a leader tier is a consistent-hashing ring where each leader owns a range of shards — so the coordination point scales with shards, not with total traffic.
@@ -233,14 +237,17 @@ sequenceDiagram
 
     W->>F: assoc_add alice likes post_9
     F->>L: forward write
-    L->>DB: INSERT edge, INSERT inverse via post shard leader, UPDATE count
+    L->>DB: INSERT forward edge and UPDATE count (one shard, one transaction)
     DB-->>L: committed
     L-->>F: refill: updated list and count for alice likes
     F-->>W: OK
+    L-)L: async: write inverse post_9 liked_by alice via the leader of post_9's shard
     L->>F2: invalidate alice likes and post_9 liked_by
     Note over F: Alice's next read is served fresh from F
     Note over F2: other users re-fetch on next read
 ```
+
+*Caption: The write commits on one shard and the writer's own cache is refilled immediately, while the inverse edge and the invalidations for everyone else follow asynchronously.*
 
 ### 7.4 Sharding, IDs, and the inverse-edge problem
 
@@ -292,7 +299,7 @@ What the design does *not* do well is "give me the full list of 40 million likes
 | Cache topology | Leaders per shard + many followers | Flat cache pool | Leaders give coherence and miss-coalescing; followers give capacity |
 | API | Fixed graph primitives | Query language / traversal engine | Every call maps to one cacheable, single-shard list |
 | Storage engine | Sharded MySQL | Native graph database | Operational maturity and existing sharding expertise; one-hop access needs no graph engine |
-| Inverse edges | Async with repair | Two-phase commit across shards | Single-shard synchronous writes on the hot path; brief asymmetry is harmless |
+| Inverse edges | Async with repair | [Two-phase commit](../../Level-04-Distributed-Systems/04-Distributed-Transactions/README.md) across shards | Single-shard synchronous writes on the hot path; brief asymmetry is harmless |
 | Cross-region | One master region per shard, async replication | Multi-master | Avoids write conflicts; writes are rare enough to forward |
 
 ---
@@ -328,4 +335,12 @@ The 30-second whiteboard pitch: the social graph is billions of tiny, cacheable,
 
 ---
 
-[← Back to all real-world architectures](../README.md) · Related: [News Feed (Twitter/X)](../06-News-Feed-Twitter/README.md) · [Instagram](../07-Instagram/README.md) · [Distributed Cache (Redis)](../18-Distributed-Cache/README.md)
+**Related:** [News Feed (Twitter/X)](../06-News-Feed-Twitter/README.md) · [Instagram](../07-Instagram/README.md) · [Distributed Cache (Redis)](../18-Distributed-Cache/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [41 · Online Code Judge (LeetCode / HackerRank)](../41-Online-Code-Judge/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [43 · Calendar & Scheduling System (Google Calendar)](../43-Calendar-and-Scheduling/README.md)
+
+<!-- nav:end -->

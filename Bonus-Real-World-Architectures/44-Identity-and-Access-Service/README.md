@@ -35,7 +35,7 @@ It has a property no other service has: it sits on the critical path of **every*
 
 ### Non-Functional
 - **99.99%+ availability** — degrade gracefully, never fail closed for token *verification*.
-- Login **p99 < 300 ms**; token refresh **p99 < 50 ms**; JWT verification at RPs: **zero calls to the IdP**.
+- Login **[p99](../../Level-00-Foundations/07-Latency-Throughput-Performance/README.md) < 300 ms**; token refresh **p99 < 50 ms**; JWT verification at RPs: **zero calls to the IdP**.
 - Peak **50K logins/s** and **150K refreshes/s**; revocation visible within **≤ 30 s** at gateways, instantly for sessions.
 - Passwords hashed with **argon2id**; signing keys in **HSM/KMS**, never exported; secrets never logged.
 - Withstand **credential stuffing** at millions of attempts/hour without locking out legitimate users.
@@ -53,7 +53,7 @@ It has a property no other service has: it sits on the critical path of **every*
 
 **Refresh and verification**
 - Active sessions ~300M; access tokens live 15 minutes → ~300M × 4/hour ≈ **330K refreshes/s** if evenly spread; assume ~150K/s realistic peak. Refresh = one KV lookup + one signature: cheap, and it must stay cheap.
-- **Verification** happens at RPs with a cached JWKS → effectively **zero** load on the IdP. JWKS fetches: cached for hours; a rotation causes one refetch per RP instance.
+- **Verification** happens at RPs with a cached JWKS → effectively **zero** load on the IdP. JWKS fetches: cached for about an hour (`max-age=3600`); a rotation causes one refetch per RP instance.
 
 **Storage**
 - Users: 500M × ~2 KB = **1 TB** (sharded relational).
@@ -161,6 +161,8 @@ erDiagram
     USER ||--o{ AUDIT_EVENT : "generates"
 ```
 
+*Caption: Notice that refresh tokens are stored only as hashes chained into families, signing keys hold just a KMS reference, and a per-user token version enables mass invalidation.*
+
 **Storage choices:** users and credentials in a **sharded relational DB** (by tenant, then user) — transactions on signup and credential changes matter; sessions and refresh tokens in a **replicated KV store with TTLs** (Redis/DynamoDB) because they're hot, short-lived, and looked up by key; signing keys in **KMS/HSM** with only public JWKs in the database; audit events append-only to a log and a warehouse. Per-tenant data-encryption keys protect credential secrets ([Data Privacy & Encryption](../../Level-06-Scale-and-Reliability/09-Data-Privacy-and-Encryption/README.md)).
 
 ---
@@ -206,6 +208,8 @@ flowchart LR
     style RP fill:#bbf7d0,color:#000
 ```
 
+*Caption: Logins pass the edge, hashing bulkhead, and risk engine, while relying parties verify tokens with cached JWKS and only receive revocations from the IdP.*
+
 **Walk-through — login and first API call:**
 1. The app redirects the user to `/authorize` with a PKCE challenge. The edge applies rate limits and bot checks before anything touches the auth API.
 2. The user submits a password. The auth API hands the hash comparison to the **isolated hashing pool**; meanwhile the **risk engine** scores the attempt (new device? impossible travel? credential seen in a breach?) and may demand MFA.
@@ -243,6 +247,8 @@ flowchart LR
     style S3 fill:#fde68a,color:#000
     style S4 fill:#bbf7d0,color:#000
 ```
+
+*Caption: The new key is published before it is used and the old key is kept until every token it signed has expired, so no relying party ever meets a key it cannot find.*
 
 RPs cache the JWKS with the advertised TTL and **refetch on an unknown `kid`** (rate-limited, so an attacker can't force refetch storms). Keys rotate on a schedule and immediately on suspicion of compromise.
 
@@ -357,8 +363,16 @@ The IdP is also a **client** of other IdPs: "Sign in with Google" (OIDC) and ent
 | Abuse | Edge rate limits, risk-based MFA, throttling instead of lockout |
 | Availability | Multi-region active-active tokens and sessions; degraded modes; no IdP call at verify time |
 
-The 30-second whiteboard pitch: an identity service is two systems with opposite personalities. The **token path** must be stateless and boring — short JWTs signed by keys that live in an HSM, verified anywhere with a cached public key, so nothing depends on the IdP being up. The **login path** must be paranoid and stateful — hashing in its own bulkhead, rate limits and risk scoring in front, MFA and passkeys behind, rotating refresh tokens that betray their own thieves, and revocation pushed to the edge within seconds. Get the split right, and the service that everything depends on becomes the one that never seems to be there.
+The 30-second whiteboard pitch: an identity service is two systems with opposite personalities. The **token path** must be [stateless](../../Level-01-Building-Blocks/07-Stateless-vs-Stateful/README.md) and boring — short JWTs signed by keys that live in an HSM, verified anywhere with a cached public key, so nothing depends on the IdP being up. The **login path** must be paranoid and stateful — hashing in its own bulkhead, rate limits and risk scoring in front, MFA and passkeys behind, rotating refresh tokens that betray their own thieves, and revocation pushed to the edge within seconds. Get the split right, and the service that everything depends on becomes the one that never seems to be there.
 
 ---
 
-[← Back to all real-world architectures](../README.md) · Related: [Distributed Rate Limiter](../03-Rate-Limiter/README.md) · [Webhook Delivery Service](../36-Webhook-Delivery-Service/README.md) · [Data Privacy, Encryption & Compliance](../../Level-06-Scale-and-Reliability/09-Data-Privacy-and-Encryption/README.md)
+**Related:** [Distributed Rate Limiter](../03-Rate-Limiter/README.md) · [Webhook Delivery Service](../36-Webhook-Delivery-Service/README.md) · [Data Privacy, Encryption & Compliance](../../Level-06-Scale-and-Reliability/09-Data-Privacy-and-Encryption/README.md)
+
+---
+
+<!-- nav:start -->
+
+⬅️ **Previous:** [43 · Calendar & Scheduling System (Google Calendar)](../43-Calendar-and-Scheduling/README.md) · 🏠 [All designs](../README.md) · ➡️ **Next:** [45 · Real-Time Fraud Detection System (Stripe Radar)](../45-Fraud-Detection-System/README.md)
+
+<!-- nav:end -->
